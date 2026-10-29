@@ -17,8 +17,9 @@ Every run first hands the channels what they held for it (`notify.flush`: an ema
 hour goes on the next run after it), even when nothing changed.
 
 A task that is not urgent sends its model step as an Azure batch when batches are set up
-(`brain/batch.py`, off by default): the run submits it, and a later run collects the answer and
-goes on to the review. A run that fails counts; `FAILURES_TO_STOP` in a row pause the task and say so. Both model
+(`brain/batch.py`, off by default), through `background` like every other model call: the run
+submits it, and a later run collects the answer and goes on to the review. A batch that failed,
+or could not be submitted, goes the ordinary way at once and is no failure of the task. A run that fails counts; `FAILURES_TO_STOP` in a row pause the task and say so. Both model
 steps go through `background.call` ("task", "task_review": the deployment per step from the
 settings), in one background trace row per run that names its task (`task_id`), each call
 marked with its step (`what`: "task", "task_review"). Only an account with the `tasks` switch on
@@ -34,7 +35,7 @@ from typing import Any, Dict, List, Optional
 
 from app import notify
 from app.blocks import tasks
-from app.brain import background, batch, lang, tools
+from app.brain import background, lang, tools
 from app.brain.ctx import TurnCtx
 from app.brain.model import _from_message
 from app.features import trace_store
@@ -158,6 +159,21 @@ def _review(spec: Dict[str, Any], found: Any, message: str, uid: str) -> str:
         priority=background.SCHEDULED, user_id=uid, max_tokens=500, temperature=0)) or NOTHING
 
 
+def _submitted(doc: Dict[str, Any], spec: Dict[str, Any], found: Any,
+               before: Dict[str, Any]) -> Optional[str]:
+    """The batch job its model step went as; None when it goes at once (urgent, batches off,
+    or the submit failed)."""
+    if spec.get("urgent") or not background.batching(background.SCHEDULED):
+        return None
+    try:
+        return background.call("task", _think_messages(spec, found, before),
+                               priority=background.SCHEDULED, as_batch=True,
+                               max_tokens=700, temperature=0.3)
+    except Exception as exc:  # noqa: BLE001 — Azure's boundary: the ordinary way now
+        logger.warning("[tasks] task %s: batch not submitted (%s); run at once", _id(doc), exc)
+        return None
+
+
 def _failed(doc: Dict[str, Any], before: Dict[str, Any], error: str) -> None:
     failures = int(before.get("failures") or 0) + 1
     tasks.save_state(_id(doc), {"failures": failures, "last_error": error[:300]})
@@ -182,22 +198,28 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
         # What a channel held inside its hour goes now, whatever the check finds.
         notify.flush(_id(doc))
         try:
+            message, found, seen, direct = None, "", None, False
             if before.get("batch_id"):
                 # A batch this task submitted: its answer, once Azure has it.
-                message = batch.collect(before["batch_id"])
-                if message is None:
-                    return None
-                found, seen = before.get("batch_found") or "", before.get("batch_fingerprint")
+                try:
+                    message = background.collect("task", before["batch_id"], user_id=uid)
+                except Exception as exc:  # noqa: BLE001 — Azure's boundary: the ordinary way now
+                    logger.warning("[tasks] task %s: batch %s failed (%s); run at once",
+                                   _id(doc), before["batch_id"], exc)
+                    direct = True
+                else:
+                    if message is None:
+                        return None
+                    found, seen = before.get("batch_found") or "", before.get("batch_fingerprint")
                 tasks.save_state(_id(doc), {"batch_id": None})
-            else:
+            if message is None:
                 found = _probe(spec, ctx)
                 seen = fingerprint(found)
                 if seen == before.get("fingerprint"):
                     tasks.save_state(_id(doc), {"failures": 0})
                     return None
-                if not spec.get("urgent") and batch.enabled(background.SCHEDULED):
-                    job = batch.submit("task", _think_messages(spec, found, before),
-                                       max_tokens=700, temperature=0.3)
+                job = None if direct else _submitted(doc, spec, found, before)
+                if job:
                     tasks.save_state(_id(doc), {"batch_id": job, "batch_fingerprint": seen,
                                                 "batch_found": _compact(found), "failures": 0})
                     return None

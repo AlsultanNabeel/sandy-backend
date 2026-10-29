@@ -12,7 +12,9 @@ Every call says how urgent it is (`priority`). There is no queue here: a call ru
 thread that makes it, so DIRECT (what the user waits on: a time read, a web summary, an
 image's answer) never waits behind BACKGROUND work (a summary, a title, tags, a category,
 the daily nudge), which runs on the shared pool, nor behind SCHEDULED (a task's steps), the
-only kind that may go as a batch (`may_batch`).
+only kind that may go as a batch (`may_batch`). A batch is submitted here too (`call` with
+``as_batch``, while `batching` says batches are on) and its answer read here (`collect`), so a
+limit at this one place covers it; `brain/batch.py` is only Azure's client for it.
 """
 
 from __future__ import annotations
@@ -35,6 +37,12 @@ def may_batch(priority: str) -> bool:
     return priority == SCHEDULED
 
 
+def batching(priority: str) -> bool:
+    """Whether a call of this priority may go as a batch now (`brain/batch.py`: off unless set up)."""
+    from app.brain import batch
+    return batch.enabled(priority)
+
+
 def model_for(what: str) -> Optional[str]:
     """The deployment for this kind of work; None for the chat's own."""
     raw = os.getenv("SANDY_BACKGROUND_MODELS", "").strip()
@@ -53,13 +61,20 @@ def call(what: str, messages: List[Dict[str, Any]], *, priority: str,
          user_id: Optional[str] = None,
          max_tokens: int = 500, temperature: float = 0.7,
          response_format: Optional[Dict[str, Any]] = None,
-         tools: Optional[List[Dict[str, Any]]] = None) -> Any:
+         tools: Optional[List[Dict[str, Any]]] = None, as_batch: bool = False) -> Any:
     """One model call for ``what``, its answer as chat completions gives it. Raises as the
-    client does (`ConfigError` with no model, `OpenAIError`); the caller says what then."""
+    client does (`ConfigError` with no model, `OpenAIError`); the caller says what then.
+    With ``as_batch`` it is submitted as a batch job instead (ValueError unless `batching`
+    allows its priority) and the job's id comes back; `collect` reads the answer."""
     from app.integrations.openai_client import chat_fn
 
     if priority not in PRIORITIES:
         raise ValueError(f"priority must be one of {PRIORITIES}, got {priority!r}")
+    if as_batch:
+        if not batching(priority):
+            raise ValueError(f"{what} may not go as a batch now")
+        from app.brain import batch
+        return batch.submit(what, messages, max_tokens=max_tokens, temperature=temperature)
 
     def ask():
         with trace_store.doing(what):
@@ -71,3 +86,18 @@ def call(what: str, messages: List[Dict[str, Any]], *, priority: str,
         return ask()
     with trace_store.background(user_id, what):
         return ask()
+
+
+def collect(what: str, job_id: str, *, user_id: Optional[str] = None) -> Optional[str]:
+    """A batch job's answer (`call` with ``as_batch``): its text once Azure has it, None while it
+    runs; raises when the job failed or expired. Its tokens are counted as ``what``."""
+    from app.brain import batch
+
+    def read():
+        with trace_store.doing(what):
+            return batch.collect(job_id)
+
+    if trace_store.current() is not None or not user_id:
+        return read()
+    with trace_store.background(user_id, what):
+        return read()

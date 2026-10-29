@@ -102,3 +102,36 @@ def test_no_model_call_is_made_outside_the_one_function():
              and re.search(r"chat_fn\(\)\s*\(|import chat_fn|chat\.completions\.create",
                            p.read_text(encoding="utf-8"))]
     assert not found, found
+
+
+def test_a_batch_goes_through_the_one_function_too():
+    """A batch job is submitted and collected through `background` alone (review of phase one):
+    `brain/batch.py` is Azure's client for it, called from nowhere else."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "cloud" / "app"
+    allowed = {"brain/background.py", "brain/batch.py"}
+    found = [str(p.relative_to(root)) for p in root.rglob("*.py")
+             if str(p.relative_to(root)) not in allowed
+             and re.search(r"batch\.(submit|collect|enabled)\(|from app\.brain import .*\bbatch\b",
+                           p.read_text(encoding="utf-8"))]
+    assert not found, found
+
+
+def test_a_batch_is_submitted_by_call_and_collected_into_the_trace(monkeypatch):
+    from app.brain import batch
+    from app.features import trace_store
+    monkeypatch.setenv("SANDY_BATCH_DEPLOYMENT", "sandy-batch")
+    sent = []
+    monkeypatch.setattr(batch, "submit", lambda what, messages, **kw: sent.append((what, kw)) or "b1")
+    monkeypatch.setattr(batch, "collect", lambda job: (
+        trace_store.note_model_call("azure_batch", "gpt-4o-mini", tokens_in=10, tokens_out=2) or "hi"))
+    assert background.call("task", [], priority=background.SCHEDULED, as_batch=True,
+                           max_tokens=7, temperature=0.3) == "b1"
+    assert sent == [("task", {"max_tokens": 7, "temperature": 0.3})]
+    with pytest.raises(ValueError):
+        background.call("title", [], priority=background.BACKGROUND, as_batch=True)
+    trace = trace_store.Trace("userA", "background")
+    with trace_store.using(trace):
+        assert background.collect("task", "b1") == "hi"
+    assert [c["what"] for c in trace.model_calls] == ["task"]

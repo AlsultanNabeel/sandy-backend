@@ -30,15 +30,18 @@ def world(brain_db, monkeypatch):  # noqa: F811
     from `answers`, and every delivery and model call kept."""
     monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["userA"]}')
     pages, answers, asked, sent = [[{"title": "P1", "url": "u1", "text": ""}]], [], [], []
+    batch_jobs = []
     monkeypatch.setattr("app.features.research.web_results", lambda q: pages[0])
 
     def call(what, messages, **kw):
+        if kw.get("as_batch"):
+            return batch_jobs.append(what) or "b1"
         asked.append(what)
         text = answers.pop(0) if answers else "NOTHING"
         return NS(choices=[NS(message=NS(content=text, tool_calls=None))])
     monkeypatch.setattr(background, "call", call)
     monkeypatch.setattr(notify, "CHANNELS", [lambda r: sent.append(r["body"])])
-    return NS(pages=pages, answers=answers, asked=asked, sent=sent)
+    return NS(pages=pages, answers=answers, asked=asked, sent=sent, batch_jobs=batch_jobs)
 
 
 def _task(spec):
@@ -137,36 +140,63 @@ def test_a_task_due_is_run_and_never_rings_the_robot(world, monkeypatch):
 # A task that is not urgent may go as a batch, at half the price, when batches are set up
 # (off by default): the run submits its model step and a later run collects the answer.
 def test_a_task_that_is_not_urgent_goes_as_a_batch_when_batches_are_on(world, monkeypatch):
-    from app.brain import batch
-    jobs, answers = [], [None, "New: P1"]
+    answers = [None, "New: P1"]
     monkeypatch.setenv("SANDY_BATCH_DEPLOYMENT", "sandy-batch")
-    monkeypatch.setattr(batch, "submit", lambda what, messages, **kw: jobs.append(what) or "b1")
-    monkeypatch.setattr(batch, "collect", lambda job: answers.pop(0))
+    monkeypatch.setattr(background, "collect", lambda what, job, **kw: answers.pop(0))
     doc = _task(_spec())
     world.answers.append("New: P1")          # the review, made at once
     _run(doc)                                # submitted
     _run(doc)                                # still running
-    assert jobs == ["task"] and world.sent == [] and world.asked == []
+    assert world.batch_jobs == ["task"] and world.sent == [] and world.asked == []
     _run(doc)                                # done: reviewed and sent
     assert world.asked == ["task_review"] and world.sent == ["New: P1"]
 
 
 def test_batches_are_off_unless_set_up(world, monkeypatch):
-    from app.brain import batch
     monkeypatch.delenv("SANDY_BATCH_DEPLOYMENT", raising=False)
-    monkeypatch.setattr(batch, "submit", lambda *a, **k: (_ for _ in ()).throw(AssertionError("batched")))
     world.answers += ["New: P1", "New: P1"]
     _run(_task(_spec()))
-    assert world.sent == ["New: P1"]
+    assert world.sent == ["New: P1"] and world.batch_jobs == []
 
 
 def test_an_urgent_task_is_never_batched(world, monkeypatch):
-    from app.brain import batch
     monkeypatch.setenv("SANDY_BATCH_DEPLOYMENT", "sandy-batch")
-    monkeypatch.setattr(batch, "submit", lambda *a, **k: (_ for _ in ()).throw(AssertionError("batched")))
     world.answers += ["New: P1", "New: P1"]
     _run(_task({**_spec(), "urgent": True}))
-    assert world.sent == ["New: P1"]
+    assert world.sent == ["New: P1"] and world.batch_jobs == []
+
+
+# A batch that failed goes the ordinary way (review of phase one): it used to count as the
+# task's failure on every run, collecting the dead job again, until three of them stopped it.
+@pytest.mark.parametrize("language, said", [("en", "New: P1"), ("ar", "جديد: P1")])
+def test_a_failed_batch_goes_the_ordinary_way(world, monkeypatch, language, said):
+    monkeypatch.setenv("SANDY_BATCH_DEPLOYMENT", "sandy-batch")
+    monkeypatch.setattr(background, "collect", lambda what, job, **kw: (_ for _ in ()).throw(
+        RuntimeError("batch b1 failed")))
+    doc = _task(_spec(language))
+    _run(doc)                                # submitted
+    world.answers += [said, said]
+    _run(doc)                                # the job failed: checked and thought at once
+    assert world.batch_jobs == ["task"] and world.asked == ["task", "task_review"]
+    assert world.sent == [said]
+    with active_user_profile_context(A):
+        saw = tasks.state(doc["id"])
+        assert not saw.get("batch_id") and saw["failures"] == 0
+        assert schedules.get(doc["id"])["status"] == "pending"
+
+
+def test_a_batch_that_cannot_be_submitted_goes_the_ordinary_way(world, monkeypatch):
+    monkeypatch.setenv("SANDY_BATCH_DEPLOYMENT", "sandy-batch")
+    real = background.call
+
+    def call(what, messages, **kw):
+        if kw.get("as_batch"):
+            raise RuntimeError("no batch quota")
+        return real(what, messages, **kw)
+    monkeypatch.setattr(background, "call", call)
+    world.answers += ["New: P1", "New: P1"]
+    _run(_task(_spec()))
+    assert world.asked == ["task", "task_review"] and world.sent == ["New: P1"]
 
 
 # The fingerprint is of what the data says, not of when it was read (review of session A): a

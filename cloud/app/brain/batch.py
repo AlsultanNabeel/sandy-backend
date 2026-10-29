@@ -6,7 +6,10 @@ that is not urgent submits its model step here and collects the answer on a late
 (`task_runner`); Azure answers within its window (`WINDOW`), usually much sooner.
 
 `submit` uploads one request as a JSONL file and starts the job; `collect` is None while it
-runs, the answer's text once it is done, and raises when the job failed or expired.
+runs, the answer's text once it is done (its tokens into the current trace, priced at the
+model's ordinary rate though a batch costs about half), and raises when the job failed or
+expired. Both are called by `background` alone (`call` with ``as_batch``, `collect`), the one
+place a limit on model calls goes.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from app.brain import background
+from app.features import trace_store
 
 logger = logging.getLogger(__name__)
 
@@ -69,4 +73,8 @@ def collect(job_id: str) -> Optional[str]:
         return None
     first = client.files.content(job.output_file_id).text.strip().splitlines()[0]
     body = json.loads(first)["response"]["body"]
+    usage = body.get("usage") or {}
+    trace_store.note_model_call("azure_batch", str(body.get("model") or deployment()),
+                                tokens_in=int(usage.get("prompt_tokens") or 0),
+                                tokens_out=int(usage.get("completion_tokens") or 0))
     return (body["choices"][0]["message"].get("content") or "").strip()
