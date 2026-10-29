@@ -1665,7 +1665,9 @@ one call of that tool carries the values; a word of text is found inside the cal
 `scripts/eval_results/<when>.json`, the first saved becomes `baseline.json`, and every later
 saved run says what fell and rose against it. More than five percent of the cases moved
 (`ALLOWED_SHARE`; two cases until 29 Oct), between repeats or against the baseline, fails the
-run. `--temperature` runs the brain at another `model.TEMPERATURE`. Imported (by `tests/test_eval_report.py`) it reads no
+run, as do a language under ninety percent (`PASS_SHARE`) and English more than `LANGUAGE_GAP`
+points behind Arabic (`_verdict`); nothing else does: a case that fell on its own, or got no
+answer, is printed as a warning. `--temperature` runs the brain at another `model.TEMPERATURE`. Imported (by `tests/test_eval_report.py`) it reads no
 command line and no `.env`. It costs model calls, so it runs by hand before a model or
 prompt change, never in CI. First run on `gpt-4.1` (4 Oct 2026): 31/34;
 the misses were «خلص الحليب» and «لازم أخلص التقرير» answered without adding, and

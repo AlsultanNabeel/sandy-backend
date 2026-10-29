@@ -19,8 +19,10 @@ model could not answer (a rate limit, an outage) waits and runs again, and is le
 score and the comparison when it still gets no answer: an error is not an outcome. `--save`
 writes the result to `eval_results/<when>.json`; the first one saved becomes
 `eval_results/baseline.json`, and every later run is compared with it: what fell, what
-rose. More than `ALLOWED_SHARE` (five percent) of the cases moved, or repeats disagreeing on
-that many, fails the run. `--temperature` runs the brain at another temperature
+rose. The run fails only on the plan's conditions (`_verdict`): a language under ninety
+percent, more than `ALLOWED_SHARE` (five percent) of the cases moved between repeats or
+against the baseline, or English more than `LANGUAGE_GAP` points behind Arabic; a case that
+fell on its own, or got no answer, is a warning. `--temperature` runs the brain at another temperature
 (`model.TEMPERATURE`), to measure what it does to the tool calls.
 """
 from __future__ import annotations
@@ -303,6 +305,22 @@ def _stable(moved: int, total: int) -> bool:
     return moved <= ALLOWED_SHARE * total
 
 
+# Each language must pass at least this share of its cases (the plan's general condition 3).
+PASS_SHARE = 0.9
+
+
+def _verdict(scores: Dict[str, Tuple[int, int]], moved: int, total: int, failed: List[str],
+             unanswered: Optional[List[str]] = None) -> Tuple[bool, List[str]]:
+    """(the run passes, its warnings). It fails only on the plan's conditions: a language under
+    `PASS_SHARE`, more than `ALLOWED_SHARE` of the cases moved, or English more than
+    `LANGUAGE_GAP` points behind Arabic. A case that fell, or got no answer, is a warning."""
+    ok = _stable(moved, total) and _language_gap_ok(scores)
+    ok &= all(p >= PASS_SHARE * t for p, t in scores.values() if t)
+    warnings = [f"fell: {name}" for name in failed]
+    warnings += [f"no answer from the model (left out): {name}" for name in sorted(set(unanswered or []))]
+    return ok, warnings
+
+
 def _language_gap_ok(scores: Dict[str, Tuple[int, int]]) -> bool:
     pct = {k: 100 * p / t for k, (p, t) in scores.items() if t}
     return "ar" not in pct or "en" not in pct or pct["en"] >= pct["ar"] - LANGUAGE_GAP
@@ -364,8 +382,6 @@ def main() -> int:
     messages = repeat * sum(len(c["steps"]) for c in cases)
     print(f"\n{passed}/{len(scored)} passed ({100 * passed // max(len(scored), 1)}%), "
           f"average {seconds / max(messages, 1):.1f}s a message")
-    if unanswered:
-        print(f"no answer from the model (left out): {sorted(set(unanswered))}")
     print(f"cost: ${spent['usd']:.4f} ({spent['tokens_in']} tokens in, {spent['tokens_out']} out)")
     langs = {c["name"]: c.get("lang", "ar") for c in cases}
     scores = _by_language(outcome, langs)
@@ -374,12 +390,14 @@ def main() -> int:
     gap_ok = _language_gap_ok(scores)
     if not gap_ok:
         print(f"English trails Arabic by more than {LANGUAGE_GAP} points")
-    ok = passed == len(scored) and not unanswered and gap_ok
     split = _disagreeing(runs)
     if repeat > 1:
         print(f"repeats disagreed on {len(split)} case(s), "
               f"{100 * len(split) / max(len(cases), 1):.1f}% of {len(cases)}: {split or '—'}")
-        ok &= _stable(len(split), len(cases))
+    ok, warnings = _verdict(scores, len(split), len(cases),
+                            sorted(n for n, good in scored.items() if not good), unanswered)
+    for warning in warnings:
+        print(f"warning — {warning}")
     if ARGS.save:
         result = {"when": datetime.now().strftime("%Y-%m-%dT%H:%M"), "model": model,
                   "repeat": repeat, "temperature": brain_model.TEMPERATURE, "passed": passed,

@@ -157,3 +157,21 @@ def test_two_runs_are_stable_while_at_most_five_percent_of_the_cases_moved():
 def test_a_run_may_set_the_models_temperature():
     assert E._args(["--temperature", "0.2"]).temperature == 0.2
     assert E._args([]).temperature is None
+
+
+def test_a_run_fails_only_on_the_plans_conditions():
+    # Each language ninety percent or more, at most five percent of the cases moved, English
+    # at most five points behind Arabic; a case that fell on its own is a warning.
+    ok, warnings = E._verdict({"ar": (41, 41), "en": (41, 42)}, moved=1, total=83,
+                              failed=["apply a scene · en"])
+    assert ok is True and any("apply a scene · en" in w for w in warnings)
+    assert E._verdict({"ar": (36, 41), "en": (39, 42)}, 0, 83, [])[0] is False   # ar 87.8%
+    assert E._verdict({"ar": (41, 41), "en": (37, 42)}, 0, 83, [])[0] is False   # en 88%
+    assert E._verdict({"ar": (41, 41), "en": (39, 42)}, 0, 83, [])[0] is False   # 7 points apart
+    assert E._verdict({"ar": (41, 41), "en": (41, 42)}, 5, 83, [])[0] is False   # 6% moved
+    assert E._verdict({"ar": (40, 41), "en": (40, 42)}, 4, 83, [])[0] is True
+
+
+def test_cases_with_no_answer_are_a_warning_not_a_failure():
+    ok, warnings = E._verdict({"ar": (40, 40), "en": (41, 41)}, 0, 83, [], unanswered=["x"])
+    assert ok is True and any("x" in w for w in warnings)
