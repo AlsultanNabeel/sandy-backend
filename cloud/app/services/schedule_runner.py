@@ -21,6 +21,8 @@ ever. What firing means per kind:
                    MAX_TIMER_TRIES.
   daily_nudge,
   summary_nudge    push text only; "failed" when no device took it.
+  task             work Sandy does on her own (`brain/task_runner.py`): its run's failures are
+                   its own, and it never rings; the row moves to its next time.
   message_to_future_self  not here: delivered into the next chat reply (`brain/future.py`).
 
 A row copied in by scripts/migrate_to_blocks.py that is more than LOOKBACK_MIN
@@ -46,7 +48,7 @@ from app.utils.user_profiles import active_user_profile_context
 
 logger = logging.getLogger(__name__)
 
-RUNNABLE = ("reminder", "scene", "daily_nudge", "summary_nudge")
+RUNNABLE = ("task", "reminder", "scene", "daily_nudge", "summary_nudge")
 # The phone's own reminder category and keys (NotificationManager.reminderCategory & co.).
 REMINDER_CATEGORY = "SANDY_REMINDER"
 # A reminder this late is not pushed: the phone already rang it, or it is stale news.

@@ -213,3 +213,19 @@ def test_an_account_without_the_switch_flushes_nothing(world, monkeypatch):
     monkeypatch.setenv("SANDY_FLAGS", "{}")
     _run(_task(_spec()))
     assert flushed == []
+
+
+# The minute runner finds a due task through its own due query (review of phase one): its kind
+# was missing from `RUNNABLE`, so no task ever ran outside a direct call.
+@pytest.mark.parametrize("language, said", [("en", "New: P1"), ("ar", "جديد: P1")])
+def test_a_due_task_is_found_by_the_runners_own_scan_and_run(world, brain_db, language, said):  # noqa: F811
+    from app.services import schedule_runner
+    doc = _task(_spec(language))
+    world.answers += [said, said]
+    later = datetime.now(timezone.utc) + timedelta(minutes=2)
+    assert schedule_runner.users_with_due(brain_db, later) == [OWNER]
+    with active_user_profile_context(A):
+        assert schedule_runner.run_due(OWNER, later)["fired"] == 1
+        row = schedules.get(doc["id"])
+    assert world.sent == [said] and row["status"] == "pending"
+    assert row["fire_at"].replace(tzinfo=timezone.utc) > later
