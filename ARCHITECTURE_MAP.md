@@ -1865,7 +1865,9 @@ nobody re-reads becomes a way of believing things that stopped being true.
    measured with the eval, well before then, and to Azure's `/v1/responses` with it:
    `gpt-6-luna` refuses reasoning with tools on `/v1/chat/completions`. Its price in
    `pricing.py` is from an outside page (`pricing.UNCONFIRMED`), to check on the first bill;
-   a cost counted from it is a warning in the log, once a process.
+   a cost counted from it is a warning in the log, once a process. The live voice model
+   `gemini-3.8-live` is priced the same way (its audio rates from an outside page), to check
+   on the first Google bill; before 29 Oct every voice turn was counted as free.
 
 10. **A streamed reply in the wrong language shows, then is swapped.** The model's words
    stream as they come; the language check (§2.3 3c) runs after, and the final event

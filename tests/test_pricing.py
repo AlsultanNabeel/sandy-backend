@@ -47,3 +47,9 @@ def test_a_cost_from_an_unconfirmed_price_is_a_warning_once(caplog, monkeypatch)
             pricing.cost(name, tokens_in=10, tokens_out=10)
     said = [r.getMessage() for r in caplog.records if "unconfirmed" in r.getMessage()]
     assert len(said) == 1 and "gpt-6-luna" in said[0] and "azurespeed.com" in said[0]
+
+
+def test_the_live_voice_model_is_priced_and_marked_unconfirmed():
+    # Every voice turn of 29 Oct 2026 cost nothing: the live model had no price.
+    assert pricing.cost("gemini-3.8-live", tokens_in=1_000_000, tokens_out=0) == 3.00
+    assert "gemini-3.8-live" in pricing.UNCONFIRMED

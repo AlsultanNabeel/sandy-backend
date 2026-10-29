@@ -30,12 +30,16 @@ PRICES: Dict[str, Dict[str, float]] = {
     "gpt-6-luna": {"in": 0.10, "cached": 0.01, "out": 0.50},
     "gemini-2.5-flash-native-audio": {"in": 3.00, "cached": 0.75, "out": 12.00},
     "gemini-3.1-flash-live": {"in": 3.00, "cached": 0.75, "out": 12.00},
+    # Its audio rates, read from an outside page, not Google's (see UNCONFIRMED); the cached
+    # rate is taken to be a quarter, as for the live models before it.
+    "gemini-3.8-live": {"in": 3.00, "cached": 0.75, "out": 12.00},
 }
 
 # Prices taken from an outside source, not the provider's own: each must be checked against
-# the first official Azure invoice that bills it, then taken off this list.
+# the first official invoice that bills it (Azure's, Google's), then taken off this list.
 UNCONFIRMED: Dict[str, str] = {
     "gpt-6-luna": "azurespeed.com/AzureAiModelPricing/Models/openai-gpt-6-luna, 29 Oct 2026",
+    "gemini-3.8-live": "productbuilder.net/models/gemini-3-8-live (audio rates), 29 Oct 2026",
 }
 
 _unpriced_seen: set = set()
@@ -66,7 +70,7 @@ def cost(model: str, *, tokens_in: int, tokens_out: int, tokens_cached: int = 0)
     if listed in UNCONFIRMED and listed not in _unconfirmed_seen:
         _unconfirmed_seen.add(listed)
         logger.warning("[pricing] %s is priced from an unconfirmed source (%s); check it "
-                       "against the first Azure bill", listed, UNCONFIRMED[listed])
+                       "against the first bill", listed, UNCONFIRMED[listed])
     price = PRICES[listed]
     cached = min(max(tokens_cached, 0), max(tokens_in, 0))
     return ((tokens_in - cached) * price["in"] + cached * price["cached"]
