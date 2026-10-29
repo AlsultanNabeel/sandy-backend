@@ -154,9 +154,10 @@ def undo(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     names = list(dict.fromkeys(decrypt_field(c.get("label") or "") for c in picked))
     if not done:
         return refused("nothing put back", reply=lang.say("undo_failed"))
+    # Taking back an add removes it, and says so («شلت «جبنة»»); anything else was put back.
+    phrase = "undo_removed" if all(c.get("op") == "created" for c in picked) else "undo_done"
     return {"ok": True, "undone": done, "items": names,
-            "reply": lang.say("undo_done",
-                              names=lang.say("sep").join(f"«{n}»" for n in names[:3] if n))}
+            "reply": lang.say(phrase, names=lang.say("sep").join(f"«{n}»" for n in names[:3] if n))}
 
 
 def log_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:

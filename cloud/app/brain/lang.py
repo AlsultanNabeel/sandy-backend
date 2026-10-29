@@ -181,6 +181,7 @@ PHRASES = {
     "undo_failed": {"ar": "ما قدرت أرجّعه: شكله تغيّر من بعدها.",
                     "en": "I couldn't put it back: it seems to have changed since."},
     "undo_done": {"ar": "رجّعته زي ما كان ✅ {names}", "en": "Put back as it was ✅ {names}"},
+    "undo_removed": {"ar": "شلت {names} ✅", "en": "Removed {names} ✅"},
     # Devices, scenes and the world (`tools_world`).
     "device_on": {"ar": "شغّلت {label} ✨", "en": "Turned on {label} ✨"},
     "device_off": {"ar": "طفّيت {label}", "en": "Turned off {label}"},

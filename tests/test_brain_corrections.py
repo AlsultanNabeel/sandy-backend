@@ -100,3 +100,29 @@ def test_items_are_untouched_by_a_log_correction(tenant):
     entries.add("expense", "غدا", {"amount": 50})
     _run("log_update", match_text="غدا", amount=45)
     assert items.get(iid)["text"] == "غدا"
+
+
+# Taking back an add says what went (review of phase one): «شلت «جبنة»», not «put back as it
+# was», which told him the cheese was still there.
+@pytest.mark.parametrize("language, added, said", [("ar", "جبنة", "شلت «جبنة» ✅"),
+                                                   ("en", "cheese", "Removed «cheese» ✅")])
+def test_undoing_an_add_says_it_was_removed(tenant, language, added, said):
+    from app.blocks import changes
+    from app.brain import lang
+    with changes.recording("t1"), lang.using(language):
+        items.add("shopping", added)
+    with lang.using(language):
+        out = _run("undo")
+    assert out["ok"] and out["reply"] == said
+    assert items.list_items("shopping") == []
+
+
+def test_undoing_an_edit_still_says_it_was_put_back(tenant):
+    from app.blocks import changes
+    from app.brain import lang
+    iid = items.add("shopping", "حليب")
+    with changes.recording("t1"):
+        items.update(iid, text="حليب لوز")
+    with lang.using("ar"):
+        out = _run("undo")
+    assert out["ok"] and out["reply"].startswith("رجّعته زي ما كان")
