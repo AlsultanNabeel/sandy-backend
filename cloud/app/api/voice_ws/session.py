@@ -1581,7 +1581,8 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                     result = await loop.run_in_executor(
                         tools_pool, _dispatch_tool, fc.name,
                         dict(fc.args or {}), get_voice_identity(), _turn_id["id"], _trace["t"],
-                        _spoken_in("".join(_user_buf))
+                        _spoken_in("".join(_user_buf)),
+                        "robot" if get_voice_channel() == _ROBOT_CHANNEL else "app"
                     )
                     if result.get("ok"):
                         _turn_worked.append(fc.name)

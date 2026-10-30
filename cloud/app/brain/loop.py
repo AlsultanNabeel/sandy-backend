@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from app import notify
 from app.blocks import _base as blocks_base
-from app.blocks import changes
+from app.blocks import changes, events
 from app.utils.ltm_crypto import decrypt_field
 from app.brain import (confirm, context, future, honesty, lang, language_guard, model, responses,
                        stm, stops, tools)
@@ -249,7 +249,7 @@ def run_turn(message: str, user_id: str, chat_id: str, *,
                               thread_id=str(conversation_id or chat_id))
     state = None
     with turn_scope(), trace_store.using(trace), lang.using(lang.of(message)), \
-            lang.naming():
+            lang.naming(), events.using_source("voice" if source == "voice" else "chat"):
         try:
             state = _run_turn(message, user_id, chat_id, pending_state=pending_state,
                               source=source, image_state=image_state,

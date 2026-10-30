@@ -139,10 +139,13 @@ def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str,
     return _ask_next(held, chat_id, {"handled": True, "reply": "\n".join(results)}, waiting)
 
 
-def dispatch(name: str, args: Dict[str, Any], chat_id: str, turn: str = "") -> Dict[str, Any]:
+def dispatch(name: str, args: Dict[str, Any], chat_id: str, turn: str = "",
+             source: str = "voice") -> Dict[str, Any]:
     """Run one voice tool call for ``chat_id`` (the caller sets the tenant context). What it
-    writes is kept under ``turn`` (the call's turn, so «تراجعي» takes back all of it)."""
-    with changes.recording(turn or new_id()):
+    writes is kept under ``turn`` (the call's turn, so «تراجعي» takes back all of it), and is
+    the doing of ``source`` (the app's call, «voice», or the robot's, «robot»)."""
+    from app.blocks import events
+    with changes.recording(turn or new_id()), events.using_source(source):
         return _dispatch(name, args, chat_id, turn)
 
 

@@ -48,6 +48,23 @@ def create_app(*, mongo_db=None):
         _cors_origins = []
     CORS(app, resources={r"/api/*": {"origins": _cors_origins}})
 
+    # What a request changes in his data is the app's doing (`blocks/events.py`); a chat
+    # turn inside it says its own (`loop.run_turn`).
+    from flask import g
+
+    from app.blocks import events
+
+    @app.before_request
+    def _source_is_the_app():
+        g.event_source = events.using_source("app")
+        g.event_source.__enter__()
+
+    @app.teardown_request
+    def _source_done(_exc):
+        held = g.pop("event_source", None)
+        if held is not None:
+            held.__exit__(None, None, None)
+
     # Typed errors (app.errors.SandyError) become {"error": <code>} with their status.
     from app.errors import SandyError
 
