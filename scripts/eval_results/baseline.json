@@ -1,11 +1,11 @@
 {
- "when": "2026-10-30T09:26",
+ "when": "2026-10-30T11:39",
  "model": "sandy-chat",
  "api": "chat",
  "repeat": 1,
  "temperature": 0.5,
- "passed": 96,
- "total": 98,
+ "passed": 100,
+ "total": 103,
  "cases": {
   "shopping add": true,
   "shopping implied": true,
@@ -22,7 +22,7 @@
   "bulk delete asks then goes": true,
   "no put it back": true,
   "delete what is not there": true,
-  "an edit that changes nothing": true,
+  "an edit that changes nothing": false,
   "reminder relative": true,
   "reminder clock": true,
   "reminder repeats": true,
@@ -54,6 +54,8 @@
   "task: shop stock": true,
   "task: home budget": true,
   "task: run by talk": true,
+  "clear the done ones": true,
+  "what did I buy": true,
   "task: tell me at once": true,
   "task: never pays": true,
   "task: morning tells what was found": true,
@@ -102,28 +104,28 @@
   "task: freelancer projects · en": true,
   "task: shop stock · en": true,
   "task: home budget · en": true,
+  "task: run by talk · en": true,
+  "clear the done ones · en": true,
+  "what did I buy · en": true,
   "task: tell me at once · en": true,
   "task: never pays · en": true,
-  "task: morning tells what was found · en": true,
-  "task: run by talk · en": null
+  "task: morning tells what was found · en": true
  },
- "unanswered": [
-  "task: run by talk · en"
- ],
+ "unanswered": [],
  "by_language": {
   "ar": {
-   "passed": 48,
-   "total": 49
+   "passed": 49,
+   "total": 51
   },
   "en": {
-   "passed": 48,
-   "total": 49
+   "passed": 51,
+   "total": 52
   }
  },
  "disagreed": [],
- "seconds": 423.6,
- "tokens_in": 1376388,
- "tokens_out": 6442,
+ "seconds": 256.0,
+ "tokens_in": 1538776,
+ "tokens_out": 7105,
  "tokens_reasoning": 0,
- "usd": 0.14466899999999996
+ "usd": 0.1599882
 }
