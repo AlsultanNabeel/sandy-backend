@@ -79,10 +79,10 @@ def _in_transaction(handle, fn: Callable[[Any], Any]) -> Any:
 
 
 def write(op: str, name: str, doc_id: str, handle, apply: Callable[[Any], Any], *,
-          created: Optional[Dict[str, Any]] = None, text: str = "") -> Any:
+          created: Optional[Dict[str, Any]] = None, text: str = "", journal: bool = True) -> Any:
     """The one way a block row changes: ``apply(session)`` and its event in one transaction,
-    then the turn's journal and the undo log (`noted`). ``created`` is the new row of an
-    add. What ``apply`` returns comes back."""
+    then the turn's journal and the undo log (`noted`; not for an undo's own writes,
+    ``journal=False``). ``created`` is the new row of an add. What ``apply`` returns comes back."""
     from app.blocks import events
 
     def run(session):
@@ -99,7 +99,7 @@ def write(op: str, name: str, doc_id: str, handle, apply: Callable[[Any], Any], 
         return out, before
 
     out, before = _in_transaction(handle, run)
-    if op == "created" or before is not None:
+    if journal and (op == "created" or before is not None):
         noted(op, name, doc_id, before=before, text=text)
     return out
 
@@ -159,12 +159,18 @@ def undo(effects: List[Dict[str, Any]], mongo_db=None) -> int:
         if before and e.get("coll") == SCHEDULES:
             # No phone holds a reminder put back until it says so (`schedules.arm`).
             before = {**before, "armed": [], "armed_once": []}
+        # Through the one write, so the log has what undo did; not into the undo log again.
+        row_id, name = e["id"], e["coll"]
         if e.get("op") == "created":
-            done += handle.delete_one({"_id": e["id"]}).deleted_count
+            done += write("deleted", name, row_id, handle, journal=False,
+                          apply=lambda s, h=handle, i=row_id: h.delete_one({"_id": i}, session=s).deleted_count)
         elif e.get("op") == "updated" and before:
-            done += handle.replace_one({"_id": e["id"]}, before).matched_count
-        elif e.get("op") == "deleted" and before and handle.find_one({"_id": e["id"]}, {"_id": 1}) is None:
-            handle.insert_one(before)
+            done += write("updated", name, row_id, handle, journal=False,
+                          apply=lambda s, h=handle, i=row_id, b=before:
+                          h.replace_one({"_id": i}, b, session=s).matched_count)
+        elif e.get("op") == "deleted" and before and handle.find_one({"_id": row_id}, {"_id": 1}) is None:
+            write("created", name, row_id, handle, created=before, journal=False,
+                  apply=lambda s, h=handle, b=before: h.insert_one(b, session=s))
             done += 1
     if facts:
         fact_changed()

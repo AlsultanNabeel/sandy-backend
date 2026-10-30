@@ -76,3 +76,53 @@ def test_it_lives_ninety_days(tenant):
     ttl = [i for i in tenant[events.EVENTS].index_information().values()
            if i.get("expireAfterSeconds") == 0]
     assert ttl and ttl[0]["key"] == [("expire_at", 1)]
+
+
+# Undo goes through the one write too (owner, 30 Oct): what it puts back or takes away is in
+# the log, in the order it happened.
+def test_an_undo_is_logged(tenant):
+    from app.blocks import changes
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+    with changes.recording("t1"):
+        iid = items.add("shopping", "رمان")
+    with changes.recording("t2"):
+        assert tools.execute("undo", {}, TurnCtx(user_id="userA", turn_id="t2"))["ok"]
+    assert [(e["op"], e["row"]) for e in events.since(0)] == [("added", iid), ("removed", iid)]
+    bid = items.add("shopping", "بطيخ")
+    with changes.recording("t3"):
+        items.delete(bid)
+    with changes.recording("t4"):
+        tools.execute("undo", {}, TurnCtx(user_id="userA", turn_id="t4"))
+    assert [e["op"] for e in events.since(0)][-1] == "added"
+    assert [r["text"] for r in items.list_items("shopping")] == ["بطيخ"]
+
+
+def test_every_write_of_his_data_goes_through_the_one_function():
+    """A change to an item, an entry or a schedule is made only inside `_base.write` (its
+    write carries the transaction's session); the rest that touches those rows is named here
+    with why it is no change of his."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "cloud" / "app"
+    writes = re.compile(r"\.(insert_one|insert_many|update_one|update_many|delete_one|delete_many|"
+                        r"replace_one|find_one_and_update|find_one_and_delete)\(")
+    bookkeeping = {
+        "blocks/_base.py",               # the one function, and the journal's own reads
+        "services/schedule_runner.py",   # a row claimed, fired, moved to its next time
+        "brain/future.py",               # a message to himself marked delivered
+        "features/scene_store.py",       # a scene's own revert timers, and the scenes
+        "features/account_delete.py",    # his data erased with him
+    }
+    for name in ("blocks/items.py", "blocks/entries.py", "blocks/schedules.py"):
+        text = (root / name).read_text(encoding="utf-8")
+        body = text.split("def arm(")[0] if name == "blocks/schedules.py" else text
+        bare = [ln.strip() for ln in body.splitlines()
+                if writes.search(ln) and "session=s" not in ln and "lambda s:" not in ln]
+        assert not bare, (name, bare)
+    blocks = re.compile(r"_base\.(ENTRIES|ITEMS|SCHEDULES)|sandy_(entries|items|schedules)")
+    others = [str(p.relative_to(root)) for p in root.rglob("*.py")
+              if str(p.relative_to(root)) not in bookkeeping
+              and not str(p.relative_to(root)).startswith("blocks/")
+              and blocks.search(p.read_text(encoding="utf-8")) and writes.search(p.read_text(encoding="utf-8"))]
+    assert not [o for o in others if o not in ("utils/tenant_version.py",)], others
