@@ -118,6 +118,23 @@ final class ScheduledTasksTests: XCTestCase {
         XCTAssertEqual(c.delivery, TaskDelivery(mode: TaskDelivery.daily, at: "21:00"))
     }
 
+    /// How often, said as the chat says it, in both languages.
+    func testHowOftenIsSaidAsPeopleSayIt() {
+        let ar: [(Int, String)] = [(1, "كل دقيقة"), (2, "كل دقيقتين"), (60, "كل ساعة"), (120, "كل ساعتين"),
+                                   (1440, "كل يوم"), (2880, "كل يومين")]
+        for (m, said) in ar { XCTAssertEqual(TaskFormat.every(m, in: .ar), said) }
+        XCTAssertTrue(TaskFormat.every(180, in: .ar).hasSuffix("ساعات"))
+        XCTAssertTrue(TaskFormat.every(720, in: .ar).hasSuffix("ساعة"))
+        let en: [(Int, String)] = [(1, "Every minute"), (2, "Every two minutes"), (60, "Every hour"),
+                                   (120, "Every two hours"), (180, "Every three hours"), (720, "Every 12 hours"),
+                                   (1440, "Every day")]
+        for (m, said) in en { XCTAssertEqual(TaskFormat.every(m, in: .en), said) }
+        XCTAssertEqual(TaskFormat.how(TaskDelivery(mode: TaskDelivery.every, hours: 2), in: .ar),
+                       "بالكتير مرة كل ساعتين")
+        XCTAssertEqual(TaskFormat.how(TaskDelivery(mode: TaskDelivery.every, hours: 2), in: .en),
+                       "At most once every two hours")
+    }
+
     /// Its emails' language changes from here too, sent only when it differs.
     func testItsLanguageIsSentOnlyWhenChanged() {
         var task = gold()

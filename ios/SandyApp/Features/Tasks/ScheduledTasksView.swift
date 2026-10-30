@@ -229,23 +229,44 @@ enum TaskFormat {
 
     /// «فوراً كل ما يتغيّر», «ملخص مرة باليوم الساعة ٢١:٠٠», «بالكتير مرة كل ٣ ساعة».
     @MainActor
-    static func how(_ way: TaskDelivery, _ lang: LanguageManager) -> String {
+    static func how(_ way: TaskDelivery, _ lang: LanguageManager) -> String { how(way, in: lang.lang) }
+
+    static func how(_ way: TaskDelivery, in lang: AppLang) -> String {
         switch way.mode {
-        case TaskDelivery.instant: return lang.s("tasks.howInstant")
-        case TaskDelivery.daily: return String(format: lang.s("tasks.howDailyAt"), way.at ?? "")
+        case TaskDelivery.instant: return translate(lang, "tasks.howInstant")
+        case TaskDelivery.daily: return String(format: translate(lang, "tasks.howDailyAt"), way.at ?? "")
         default:
             let n = way.hours ?? 1
-            return n == 1 ? lang.s("tasks.howHourly")
-                : String(format: lang.s("tasks.howEveryHours"), n.formatted(.number.locale(AppLocale.current)))
+            return n == 1 ? translate(lang, "tasks.howHourly")
+                : String(format: translate(lang, "tasks.howEverySpan"), span(n, "hour", in: lang))
         }
     }
 
     @MainActor
-    static func every(_ minutes: Int, _ lang: LanguageManager) -> String {
-        let locale = AppLocale.current
-        if minutes > 0 && minutes % 60 == 0 {
-            return String(format: lang.s("tasks.everyHours"), (minutes / 60).formatted(.number.locale(locale)))
+    static func every(_ minutes: Int, _ lang: LanguageManager) -> String { every(minutes, in: lang.lang) }
+
+    /// «كل دقيقة», «كل ساعتين», «كل ٣ ساعات», «كل يوم»; «every minute», «every two hours», as
+    /// Sandy says it in the chat.
+    static func every(_ minutes: Int, in lang: AppLang) -> String {
+        let m = max(minutes, 1)
+        let (n, unit) = m % 1440 == 0 ? (m / 1440, "day") : m % 60 == 0 ? (m / 60, "hour") : (m, "minute")
+        return String(format: translate(lang, "tasks.every"), span(n, unit, in: lang))
+    }
+
+    /// One, two, three to ten, eleven on, as each language counts them; English spells two to ten.
+    static func span(_ n: Int, _ unit: String, in lang: AppLang) -> String {
+        let size = n == 1 ? "One" : n == 2 ? "Two" : n <= 10 ? "Few" : "Many"
+        let key = "tasks.\(unit)\(size)"
+        guard size == "Few" || size == "Many" else { return translate(lang, key) }
+        let number: String
+        if lang == .en && n <= 10 {
+            let words = NumberFormatter()
+            words.locale = Locale(identifier: "en")
+            words.numberStyle = .spellOut
+            number = words.string(from: NSNumber(value: n)) ?? "\(n)"
+        } else {
+            number = n.formatted(.number.locale(AppLocale.locale(for: lang)))
         }
-        return String(format: lang.s("tasks.everyMinutes"), max(minutes, 1).formatted(.number.locale(locale)))
+        return String(format: translate(lang, key), number)
     }
 }
