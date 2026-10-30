@@ -1,11 +1,11 @@
 {
- "when": "2026-10-30T01:20",
+ "when": "2026-10-30T09:26",
  "model": "sandy-chat",
  "api": "chat",
  "repeat": 1,
  "temperature": 0.5,
- "passed": 95,
- "total": 99,
+ "passed": 96,
+ "total": 98,
  "cases": {
   "shopping add": true,
   "shopping implied": true,
@@ -16,7 +16,7 @@
   "task repeats": true,
   "habit days": true,
   "delete at once": true,
-  "empty a list asks first": true,
+  "empty a list asks first": false,
   "delete one item": true,
   "delete is never an edit": true,
   "bulk delete asks then goes": true,
@@ -53,7 +53,7 @@
   "task: freelancer projects": true,
   "task: shop stock": true,
   "task: home budget": true,
-  "task: run by talk": false,
+  "task: run by talk": true,
   "task: tell me at once": true,
   "task: never pays": true,
   "task: morning tells what was found": true,
@@ -99,29 +99,31 @@
   "two at once · en": true,
   "remembers the thread · en": true,
   "task: student deadlines · en": true,
-  "task: freelancer projects · en": false,
-  "task: shop stock · en": false,
+  "task: freelancer projects · en": true,
+  "task: shop stock · en": true,
   "task: home budget · en": true,
-  "task: run by talk · en": true,
   "task: tell me at once · en": true,
   "task: never pays · en": true,
-  "task: morning tells what was found · en": true
+  "task: morning tells what was found · en": true,
+  "task: run by talk · en": null
  },
- "unanswered": [],
+ "unanswered": [
+  "task: run by talk · en"
+ ],
  "by_language": {
   "ar": {
    "passed": 48,
    "total": 49
   },
   "en": {
-   "passed": 47,
-   "total": 50
+   "passed": 48,
+   "total": 49
   }
  },
  "disagreed": [],
- "seconds": 216.0,
- "tokens_in": 1421853,
- "tokens_out": 6909,
+ "seconds": 423.6,
+ "tokens_in": 1376388,
+ "tokens_out": 6442,
  "tokens_reasoning": 0,
- "usd": 0.14862975000000003
+ "usd": 0.14466899999999996
 }
