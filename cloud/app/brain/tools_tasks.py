@@ -86,9 +86,11 @@ TASK_SCHEMAS: List[Dict[str, Any]] = [
                         "description": "الفحص الجديد مع instructions الجديدة"},
          "check_args": {"type": "object", "description": "مدخلات check_tool الجديد، ثابتة"},
          **_HOW}, "required": []}},
-    {"name": "task_cancel", "description": ("احذفي مهمة نهائياً، بس إذا قال احذف أو الغي («الغي مهمة مستقل»، "
-                                            "«delete the task»). «وقّفيها»، «pause it» مش حذف: هاد "
-                                            "task_update مع pause."),
+    {"name": "task_cancel", "description": ("احذفي مهمة من اللي بتشتغلي فيها لحالك (بتطلع بـ task_list) نهائياً، "
+                                            "بس إذا قال احذف أو الغي («الغي مهمة مستقل»). عنصر بقائمة مهامه "
+                                            "(«احذفي مهمة الجيم») هو list_delete، مش هون. «وقّفيها»، «pause it» "
+                                            "مش حذف: هاد task_update مع pause. (Only a task you run on your "
+                                            "own; a to-do item is list_delete.)"),
      "parameters": {"type": "object", "properties": {
          "id": _S, "match_text": {**_S, "description": "اسم المهمة كما سمّاها"}}, "required": []}},
 ]
@@ -323,7 +325,8 @@ def _one(args: Dict[str, Any]) -> Dict[str, Any]:
     if picked["status"] == "ambiguous":
         return refused("more than one task matches; ask which", matches=[
             {"id": r["id"], "title": r.get("text", "")} for r in picked["matches"]])
-    return refused("no task by that name", reply=lang.say("task_not_found"))
+    return refused("no task you run on your own by that name; a to-do item on his lists is "
+                   "list_update or list_delete", reply=lang.say("task_not_found"))
 
 
 def task_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
