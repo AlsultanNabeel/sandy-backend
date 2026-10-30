@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAIError
@@ -115,6 +116,34 @@ def _in_scope(spec: Dict[str, Any]):
         wanted = f"project:{args['project']}"
     kind = str(args.get("kind") or "")
     return lambda e: (not wanted or e.get("list") == wanted) and (not kind or e.get("kind") == kind)
+
+
+# Once a day a check on the log is checked against a full read: a change with no event is an
+# error in the trace (the log is the truth only while every write goes through it).
+AUDIT_EVERY = timedelta(days=1)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _audit(spec: Dict[str, Any], before: Dict[str, Any], found: Any, task_id: str) -> Dict[str, Any]:
+    """Once a day: the rows that changed since the last full read and have no event in the log.
+    What to keep for the next audit."""
+    keep = {"audit_at": _now(), "audit_seen": found, "audit_cursor": events.last_seq()}
+    at = before.get("audit_at")
+    if at is None:
+        return keep
+    if _now() - (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) < AUDIT_EVERY:
+        return {}
+    diff = task_diff.compute(before.get("audit_seen"), found)
+    logged = {e["row"] for e in events.since(before.get("audit_cursor") or 0) if _in_scope(spec)(e)}
+    missed = sorted({str(r.get("id")) for r in [*diff["added"], *diff["removed"],
+                                                *(c["after"] for c in diff["changed"])]} - logged)
+    if missed:
+        logger.error("[tasks] task %s: changes with no event in the log: %s", task_id, missed)
+        trace_store.note_error(f"changes with no event in the log: {', '.join(missed)}")
+    return keep
 
 
 def _probe(spec: Dict[str, Any], ctx: TurnCtx) -> Any:
@@ -268,9 +297,14 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                 if before.get("last_seen") is None or (logged and cursor is None):
                     # Its first run, or its first on the log: where it starts, nothing told.
                     tasks.save_state(_id(doc), {"fingerprint": seen, "last_seen": found, "failures": 0,
-                                                **({"cursor": events.last_seq()} if logged else {})})
+                                                **({"cursor": events.last_seq(), "audit_at": _now(),
+                                                    "audit_seen": found, "audit_cursor": events.last_seq()}
+                                                   if logged else {})})
                     return None
                 if logged:
+                    audit = _audit(spec, before, found, _id(doc))
+                    if audit:
+                        tasks.save_state(_id(doc), audit)
                     log = events.since(cursor)
                     cursor = log[-1]["seq"] if log else cursor
                     diff = task_diff.from_events([e for e in log if _in_scope(spec)(e)])

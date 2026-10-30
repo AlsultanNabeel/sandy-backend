@@ -95,6 +95,8 @@ class Trace:
                  turn_id: Optional[str] = None, task_id: Optional[str] = None):
         self.id = turn_id or new_id()
         self.task_id = str(task_id) if task_id else None
+        # Something found wrong outside a turn (`note_error`), kept on its row.
+        self.error: Optional[str] = None
         self.user_id = str(user_id or "")
         self.source = source if source in SOURCES else "chat"
         self.thread_id = str(thread_id or "")
@@ -249,15 +251,22 @@ def doing(what: str) -> Iterator[None]:
         _doing.reset(token)
 
 
+def note_error(error: str) -> None:
+    """Something found wrong outside a turn, on the current background row."""
+    trace = _current.get()
+    if trace is not None:
+        trace.error = str(error)[:2000]
+
+
 @contextmanager
 def background(user_id: str, what: str, task_id: Optional[str] = None) -> Iterator[Trace]:
     """Model calls made for a user outside a turn (a summary, a title, a task's run, which
-    names its task): a row of numbers, written only when a model call was made."""
+    names its task): a row of numbers, written when a model call was made or an error noted."""
     trace = Trace(user_id, "background", task_id=task_id)
     with using(trace):
         yield trace
-    if trace.model_calls:
-        trace.finish(routed_by=what)
+    if trace.model_calls or trace.error:
+        trace.finish(routed_by=what, error=trace.error)
 
 
 # ── the owner's reads, across users ──────────────────────────────────────────

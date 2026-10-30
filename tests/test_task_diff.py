@@ -243,3 +243,44 @@ def test_a_task_that_read_snapshots_moves_to_the_log_quietly(world):
         items.add("shopping", "رمان")
     _run(doc)
     assert [b for _, b in world.sent] == ["انضاف «رمان» لـ«قائمة التسوق»"]
+
+
+# ── once a day, a full read checks the log (owner, 30 Oct): a change with no event behind it
+# is an error in the trace ──
+
+def _traces(brain_db):  # noqa: F811
+    from app.features import trace_store
+    return list(brain_db[trace_store.COLLECTION].find({"error": {"$ne": None}}))
+
+
+def test_a_change_the_log_missed_is_an_error_in_the_trace(world, brain_db, monkeypatch):  # noqa: F811
+    clock = [datetime.now(timezone.utc)]
+    monkeypatch.setattr(task_runner, "_now", lambda: clock[0])
+    doc = _task("التسوق")
+    _run(doc)
+    with active_user_profile_context(A):
+        iid = items.add("shopping", "رمان")                     # logged: no error
+        brain_db["sandy_items"].insert_one({"_id": "sneaked", "user_id": "userA", "list": "shopping",
+                                            "text": "تسلّل", "done": False, "created_at": clock[0]})
+    _run(doc)
+    assert _traces(brain_db) == []                            # not a day yet
+    clock[0] += timedelta(days=1, minutes=1)
+    _run(doc)
+    [row] = _traces(brain_db)
+    assert "sneaked" in row["error"] and iid not in row["error"] and row["task_id"] == doc["id"]
+    clock[0] += timedelta(days=1, minutes=1)
+    _run(doc)
+    assert len(_traces(brain_db)) == 1                        # checked from then on, once
+
+
+def test_a_day_with_every_change_logged_is_no_error(world, brain_db, monkeypatch):  # noqa: F811
+    clock = [datetime.now(timezone.utc)]
+    monkeypatch.setattr(task_runner, "_now", lambda: clock[0])
+    doc = _task("التسوق")
+    _run(doc)
+    with active_user_profile_context(A):
+        iid = items.add("shopping", "رمان")
+        items.update(iid, done=True)
+    clock[0] += timedelta(days=1, minutes=1)
+    _run(doc)
+    assert _traces(brain_db) == []
