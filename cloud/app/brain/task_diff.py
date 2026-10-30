@@ -114,6 +114,19 @@ def _name(row: Dict[str, Any]) -> str:
     return str(row.get("text") or row.get("title") or row.get("name") or row.get("device") or "").strip()
 
 
+def list_name(raw: str) -> str:
+    """A list as he sees it, in his language: «قائمة التسوق», «Shopping list»; a project list
+    by its own name; a list the kinds do not know as it is."""
+    from app.blocks import kinds
+    name = str(raw or "")
+    kind = kinds.get_kind(kinds.LIST, name)
+    if kind is None:
+        return name
+    if kind.name.endswith(":"):
+        return name.partition(":")[2] or name
+    return lang.say("list_name", label=kind.ar if lang.current() == lang.AR else kind.en)
+
+
 def template(diff: Dict[str, Any]) -> Optional[str]:
     """A simple list's change in his language, with no model: rows of a list added, removed,
     ticked or renamed. None for anything else (the model explains it)."""
@@ -124,8 +137,8 @@ def template(diff: Dict[str, Any]) -> Optional[str]:
         return None
     if any(not set(c["fields"]) <= _TOLD_FIELDS for c in diff["changed"]):
         return None
-    lines = [lang.say("list_added", text=r["text"], list=r["list"]) for r in diff["added"]]
-    lines += [lang.say("list_removed", text=r["text"], list=r["list"]) for r in diff["removed"]]
+    lines = [lang.say("list_added", text=r["text"], list=list_name(r["list"])) for r in diff["added"]]
+    lines += [lang.say("list_removed", text=r["text"], list=list_name(r["list"])) for r in diff["removed"]]
     for c in diff["changed"]:
         if "text" in c["fields"]:
             lines.append(lang.say("list_renamed", before=c["before"]["text"], after=c["after"]["text"]))

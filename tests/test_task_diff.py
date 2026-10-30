@@ -68,7 +68,7 @@ def test_what_happened_on_his_list_is_what_is_told_by_both_tasks(world):
         bid = items.add("shopping", "بطيخ")
     _run(first), _run(second)
     bodies = [b for _, b in world.sent]
-    assert bodies == ["انضاف «رمان» لـ«shopping»"] * 2 + ["انضاف «بطيخ» لـ«shopping»"] * 2
+    assert bodies == ["انضاف «رمان» لـ«قائمة التسوق»"] * 2 + ["انضاف «بطيخ» لـ«قائمة التسوق»"] * 2
     assert not any("ليمون" in b or "برتقال" in b for b in bodies)
     assert world.asked == []                        # a simple list is told with no model
     with active_user_profile_context(A):
@@ -134,8 +134,8 @@ def test_a_message_naming_what_did_not_change_is_not_sent(message, ok):
     assert task_diff.faithful(message, d, before, now) is ok
 
 
-@pytest.mark.parametrize("language, said", [("ar", "انضاف «رمان» لـ«shopping»"),
-                                            ("en", "«رمان» was added to «shopping»")])
+@pytest.mark.parametrize("language, said", [("ar", "انضاف «رمان» لـ«قائمة التسوق»"),
+                                            ("en", "«رمان» was added to «Shopping list»")])
 def test_a_simple_list_is_told_by_a_template_in_his_language(language, said):
     from app.brain import lang
     d = task_diff.compute({"rows": []}, {"rows": [{"id": "3", "list": "shopping", "text": "رمان", "done": False}]})
@@ -166,7 +166,7 @@ def test_a_task_starts_on_its_yes_with_the_state_now_and_no_email(world, languag
     with active_user_profile_context(A):
         items.add("shopping", "رمان")
     _run(row)
-    told = "انضاف «رمان» لـ«shopping»" if language == "ar" else "«رمان» was added to «shopping»"
+    told = "انضاف «رمان» لـ«قائمة التسوق»" if language == "ar" else "«رمان» was added to «Shopping list»"
     assert [b for _, b in world.sent] == [told]
 
 
@@ -197,3 +197,16 @@ def test_pausing_by_talk_is_never_the_delete_tool():
     update = next(s for s in tools_tasks.TASK_SCHEMAS if s["name"] == "task_update")
     assert "وقّفيها" in update["description"] and "وقّفيها" in cancel["description"]
     assert "task_update" in cancel["description"]
+
+
+# The list by the name he sees, in his language (owner, 30 Oct): never «shopping».
+@pytest.mark.parametrize("language, raw, shown", [
+    ("ar", "shopping", "قائمة التسوق"), ("en", "shopping", "Shopping list"),
+    ("ar", "tasks", "قائمة المهام"), ("en", "tasks", "Tasks list"),
+    ("ar", "project:Inventory", "Inventory"), ("en", "project:المخزون", "المخزون"),
+    ("ar", "my own list", "my own list"),
+])
+def test_a_list_is_named_as_he_sees_it(language, raw, shown):
+    from app.brain import lang
+    with lang.using(language):
+        assert task_diff.list_name(raw) == shown
