@@ -22,13 +22,15 @@ struct ScheduledTask: Decodable, Identifiable, Hashable {
     var unseen: Int
     /// How its results are emailed; nil from a server before it was asked.
     var delivery: TaskDelivery?
+    /// What its results and emails are in («ar», «en»): the language it was asked in.
+    var lang: String?
 
     var paused: Bool { status == "paused" }
     var nextDate: Date? { serverDate(nextAt) }
     var way: TaskDelivery { delivery ?? .hourly }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, instructions, status, failures, unseen, delivery
+        case id, title, instructions, status, failures, unseen, delivery, lang
         case everyMinutes = "every_minutes", nextAt = "next_at"
         case lastError = "last_error", lastResult = "last_result"
     }
@@ -58,11 +60,12 @@ struct TaskChange: Encodable, Equatable {
     var delivery: TaskDelivery?
     var instructions: String?
     var check: TaskCheck?
+    var lang: String?
 
-    var isEmpty: Bool { everyMinutes == nil && delivery == nil && instructions == nil }
+    var isEmpty: Bool { everyMinutes == nil && delivery == nil && instructions == nil && lang == nil }
 
     enum CodingKeys: String, CodingKey {
-        case delivery, instructions, check
+        case delivery, instructions, check, lang
         case everyMinutes = "every_minutes"
     }
 }

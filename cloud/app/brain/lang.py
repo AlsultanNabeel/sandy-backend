@@ -371,6 +371,10 @@ PHRASES = {
     "task_edit_confirm_reads_only": {
         "ar": "أخلّي «{title}» {every}: «{instructions}»، والتبليغ {how}، لأنه المهمة ما بتدفع ولا بتحوّل ولا بتبعت باسمك ولا بتنشر ولا بتحذف",
         "en": "make «{title}» {every}: «{instructions}», telling you {how}, since a task never pays, transfers, sends in your name, posts or deletes"},
+    "task_language": {"ar": "صارت نتائج «{title}» وإيميلاتها {language}", "en": "«{title}» now tells you {language}"},
+    "language_ar": {"ar": "بالعربي", "en": "in Arabic"},
+    "language_en": {"ar": "بالإنجليزي", "en": "in English"},
+    "task_bad_lang": {"ar": "اللغة لازم تكون عربي أو إنجليزي.", "en": "The language has to be Arabic or English."},
     "task_bad_every": {"ar": "كل قديش؟ لازم دقيقة أو أكتر.", "en": "How often? It has to be a minute or more."},
     "task_bad_delivery": {"ar": "طريقة التبليغ مش مفهومة: الملخص اليومي بدّه ساعة، والكل كذا ساعة بين ساعة وأسبوع.",
                           "en": "I can't read that way of telling you: a daily summary needs its hour, and every few hours is one hour to a week."},

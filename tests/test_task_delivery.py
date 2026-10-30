@@ -260,3 +260,41 @@ def test_the_way_of_telling_never_reaches_the_message(brain_db, monkeypatch, lan
     seen = task_runner._think_messages(row["payload"], {"added": [{"title": "P2", "url": "u2"}]}, {})
     shown = " ".join(m["content"] for m in seen).replace("ً", "").lower()
     assert way_word not in shown and "never say how or when" in shown
+
+
+# A task's emails are in the language it was asked in, whatever the account's or the phone's
+# (owner, 30 Oct): «راقبي…» in Arabic, «monitor…» in English; changed by talk or the screen.
+@pytest.mark.parametrize("task_lang, saved, word, other", [
+    ("ar", "en", "ساندي", "Sandy"), ("en", "ar", "Sandy", "ساندي"),
+])
+def test_a_tasks_emails_are_in_the_language_it_was_asked_in(post, task_lang, saved, word, other):
+    post.db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": saved}})
+    tid = _task({"mode": "instant"})
+    with active_user_profile_context(A):
+        tasks.edit(tid, language=task_lang)
+        notify.deliver(tid, "Gold", "x", task_lang)
+    email = post.sent[-1]
+    assert email.subject.startswith(word) and other not in email.subject
+    assert other not in email.body
+
+
+@pytest.mark.parametrize("language, words, saved", [("en", "monitor the gold price every hour", "en"),
+                                                    ("ar", "راقبي سعر الدهب كل ساعة", "ar")])
+def test_a_task_keeps_the_language_it_was_asked_in(brain_db, monkeypatch, language, words, saved):  # noqa: F811
+    monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["userA"]}')
+    brain_db["sandy_users"].insert_one({"_id": "userA", "language": "ar" if saved == "en" else "en"})
+    assert _run("task_create", language, confirmed=True, **{**MOSTAQL, "instructions": words})["ok"]
+    with active_user_profile_context(A):
+        assert tasks.running()[0]["payload"]["lang"] == saved
+
+
+@pytest.mark.parametrize("language", ["ar", "en"])
+def test_its_language_is_changed_by_talk(brain_db, monkeypatch, language):  # noqa: F811
+    monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["userA"]}')
+    _run("task_create", "ar", confirmed=True, **MOSTAQL)
+    with active_user_profile_context(A), lang.using(language):
+        out = tools.execute("task_update", {"match_text": "Mostaql", "language": "en"},
+                            TurnCtx(user_id="userA"))
+    assert out["ok"] and ("بالإنجليزي" if language == "ar" else "in English") in out["reply"]
+    with active_user_profile_context(A):
+        assert tasks.running()[0]["payload"]["lang"] == "en"

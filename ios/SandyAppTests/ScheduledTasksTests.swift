@@ -118,6 +118,16 @@ final class ScheduledTasksTests: XCTestCase {
         XCTAssertEqual(c.delivery, TaskDelivery(mode: TaskDelivery.daily, at: "21:00"))
     }
 
+    /// Its emails' language changes from here too, sent only when it differs.
+    func testItsLanguageIsSentOnlyWhenChanged() {
+        var task = gold()
+        task.lang = "ar"
+        XCTAssertNil(TaskEditSheet.change(from: task, words: "check gold", minutes: 60, way: .hourly,
+                                          language: "ar").lang)
+        XCTAssertEqual(TaskEditSheet.change(from: task, words: "check gold", minutes: 60, way: .hourly,
+                                            language: "en").lang, "en")
+    }
+
     /// A change is previewed (the question by talk), then saved with the check the preview
     /// brought, and the screen shows the task as the server keeps it.
     func testAChangeIsPreviewedThenSavedWithItsCheck() async throws {

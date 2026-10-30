@@ -2,14 +2,15 @@
 
   GET    /api/scheduled-tasks                 {tasks: [{id, title, instructions, every_minutes,
                                                status (running | paused), next_at, failures,
-                                               last_error, last_result, unseen, delivery}]}
+                                               last_error, last_result, unseen, delivery,
+                                               lang: what its results and emails are in}]}
   GET    /api/scheduled-tasks/<id>/results    {results: [{id, title, body, at, seen}]}, newest first
   POST   /api/scheduled-tasks/<id>/seen       all of it seen («صباح الخير» no longer tells it)
   POST   /api/scheduled-tasks/<id>/preview    {every_minutes?, delivery?, instructions?, title?}:
                                                {summary, check?}: the question a change waits on,
                                                the same as by talk; new words bring their check
                                                (one model call, `tools_tasks.derive_check`); saves nothing
-  PATCH  /api/scheduled-tasks/<id>            the same, plus the preview's `check`: saved
+  PATCH  /api/scheduled-tasks/<id>            the same and `lang`, plus the preview's `check`: saved
                                                (`tasks.edit`), {task}
   POST   /api/scheduled-tasks/<id>/pause | /resume
   DELETE /api/scheduled-tasks/<id>            the task, what it saw and its results
@@ -80,7 +81,8 @@ def _shown(row: Dict[str, Any], unseen: Dict[str, int]) -> Dict[str, Any]:
             "status": "paused" if row.get("status") == "paused" else "running",
             "next_at": _iso(row.get("fire_at")), "failures": int(saw.get("failures") or 0),
             "last_error": saw.get("last_error") or "", "last_result": saw.get("last_result") or "",
-            "unseen": unseen.get(row["id"], 0), "delivery": tasks.how(row)}
+            "unseen": unseen.get(row["id"], 0), "delivery": tasks.how(row),
+            "lang": (row.get("payload") or {}).get("lang") or lang.AR}
 
 
 class _Bad(Exception):
@@ -109,6 +111,10 @@ def _change(row: Dict[str, Any], body: Dict[str, Any], uid: str, *, derive: bool
             out["delivery"] = tasks.clean_delivery(way.get("mode"), way.get("hours"), way.get("at"))
         except ValueError:
             raise _Bad("bad_delivery") from None
+    if "lang" in body:
+        if body["lang"] not in (lang.AR, lang.EN):
+            raise _Bad("bad_lang")
+        out["language"] = body["lang"]
     if "title" in body and str(body["title"] or "").strip():
         out["title"] = str(body["title"]).strip()[:120]
     if "instructions" in body:

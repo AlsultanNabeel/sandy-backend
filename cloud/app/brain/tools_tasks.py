@@ -85,6 +85,8 @@ TASK_SCHEMAS: List[Dict[str, Any]] = [
          "check_tool": {"type": "string", "enum": list(READ_TOOLS),
                         "description": "الفحص الجديد مع instructions الجديدة"},
          "check_args": {"type": "object", "description": "مدخلات check_tool الجديد، ثابتة"},
+         "language": {"type": "string", "enum": [lang.AR, lang.EN],
+                      "description": "لغة إيميلاتها ونتائجها، بس إذا طلب يغيّرها («خلّي إيميلاتها بالإنجليزي»)"},
          **_HOW}, "required": []}},
     {"name": "task_cancel", "description": ("احذفي مهمة من اللي بتشتغلي فيها لحالك (بتطلع بـ task_list) نهائياً، "
                                             "بس إذا قال احذف أو الغي («الغي مهمة مستقل»). عنصر بقائمة مهامه "
@@ -366,6 +368,10 @@ def task_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if every:
         tasks.set_every(row["id"], every)
         said.append(lang.say("task_every", title=row.get("text", ""), every=_every(every)))
+    if args.get("language") in (lang.AR, lang.EN):
+        tasks.edit(row["id"], language=args["language"])
+        said.append(lang.say("task_language", title=row.get("text", ""),
+                             language=lang.say(f"language_{args['language']}")))
     if args.get("notify_how"):
         try:
             delivery = _delivery(args)
@@ -374,7 +380,7 @@ def task_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         tasks.set_delivery(row["id"], delivery)
         said.append(lang.say("task_delivery", title=row.get("text", ""), how=_how(delivery)))
     if not said:
-        return refused("say pause, resume, every_minutes, notify_how or instructions",
+        return refused("say pause, resume, every_minutes, notify_how, language or instructions",
                        reply=lang.say("nothing_changed"))
     return {"ok": True, "changed": 1, "reply": "\n".join(said)}
 

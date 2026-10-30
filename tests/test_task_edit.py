@@ -253,3 +253,11 @@ def test_a_task_is_deleted_only_when_he_asks_to_delete(on, language, message, de
         assert (tasks.get(on) is None) is deletes
     if not deletes:
         assert "task_update" in out["error"]
+
+
+@pytest.mark.parametrize("language", ["ar", "en"])
+def test_its_language_is_changed_from_the_screen(c, on, model, language):
+    r = c.patch(f"/api/scheduled-tasks/{on}", json={"lang": "ar"}, headers=_h(language=language))
+    assert r.status_code == 200 and r.get_json()["task"]["lang"] == "ar"
+    bad = c.patch(f"/api/scheduled-tasks/{on}", json={"lang": "fr"}, headers=_h(language=language))
+    assert bad.status_code == 400 and bad.get_json()["error"] == "bad_lang"

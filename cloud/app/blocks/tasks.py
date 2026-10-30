@@ -125,7 +125,7 @@ def set_every(task_id: str, every_minutes: int) -> bool:
 
 def edit(task_id: str, *, title: Optional[str] = None, instructions: Optional[str] = None,
          probe: Optional[Mapping[str, Any]] = None, every: Optional[int] = None,
-         delivery: Optional[Mapping[str, Any]] = None) -> bool:
+         delivery: Optional[Mapping[str, Any]] = None, language: Optional[str] = None) -> bool:
     """One change of a task, whatever asks for it (talk, a call, the Tasks screen): what is not
     given stays. New words or a new check forget what it saw, so the next run starts afresh.
     The caller has checked the values (`probe` reads, `delivery` is clean)."""
@@ -141,6 +141,8 @@ def edit(task_id: str, *, title: Optional[str] = None, instructions: Optional[st
             [probe["tool"], *[t for t in payload.get("tools") or [] if t in ALLOWED]]))
     if delivery is not None:
         payload["delivery"] = dict(delivery)
+    if language is not None:
+        payload["lang"] = language
     changed = schedules.update(task_id, text=title or None, payload=payload,
                                recurrence=_rule(every) if every else None)
     if instructions is not None or probe is not None:

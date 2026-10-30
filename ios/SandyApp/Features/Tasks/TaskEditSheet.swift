@@ -16,6 +16,7 @@ struct TaskEditSheet: View {
     @State private var mode = TaskDelivery.every
     @State private var hours = 1
     @State private var at = Calendar.current.date(bySettingHour: 21, minute: 0, second: 0, of: Date()) ?? Date()
+    @State private var language = "ar"
     @State private var preview: TaskPreview?
     @State private var asking = false
     @State private var busy = false
@@ -37,6 +38,13 @@ struct TaskEditSheet: View {
                     Picker(lang.s("tasks.often"), selection: $inHours) {
                         Text(lang.s("tasks.oftenMinutes")).tag(false)
                         Text(lang.s("tasks.oftenHours")).tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                }
+                Section(lang.s("tasks.language")) {
+                    Picker(lang.s("tasks.language"), selection: $language) {
+                        Text("العربية").tag("ar")
+                        Text("English").tag("en")
                     }
                     .pickerStyle(.segmented)
                 }
@@ -80,7 +88,7 @@ struct TaskEditSheet: View {
     /// What differs from the task as it is: only that is sent.
     var change: TaskChange {
         TaskEditSheet.change(from: task, words: words, minutes: inHours ? often * 60 : often,
-                             way: way)
+                             way: way, language: language)
     }
 
     private var way: TaskDelivery {
@@ -91,8 +99,10 @@ struct TaskEditSheet: View {
         }
     }
 
-    static func change(from task: ScheduledTask, words: String, minutes: Int, way: TaskDelivery) -> TaskChange {
+    static func change(from task: ScheduledTask, words: String, minutes: Int, way: TaskDelivery,
+                       language: String? = nil) -> TaskChange {
         var c = TaskChange()
+        if let language, language != (task.lang ?? "ar") { c.lang = language }
         let said = words.trimmingCharacters(in: .whitespacesAndNewlines)
         if said != task.instructions { c.instructions = said }
         if minutes != task.everyMinutes { c.everyMinutes = minutes }
@@ -108,6 +118,7 @@ struct TaskEditSheet: View {
 
     private func fill() {
         words = task.instructions
+        language = task.lang ?? "ar"
         inHours = task.everyMinutes % 60 == 0
         often = inHours ? max(task.everyMinutes / 60, 1) : max(task.everyMinutes, 1)
         mode = task.way.mode

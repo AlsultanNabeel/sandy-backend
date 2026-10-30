@@ -345,7 +345,11 @@ def _sent_this_hour(coll, now: datetime) -> int:
 
 
 def _email(coll, address: str, uid: str, rows: List[Dict[str, Any]]) -> None:
-    with lang.using(lang.for_user(uid)):
+    """In the language its task was asked in (each result keeps it); a gathered email of tasks
+    in two languages is in his own."""
+    langs = {r.get("lang") for r in rows}
+    language = langs.pop() if len(langs) == 1 and None not in langs else lang.for_user(uid)
+    with lang.using(language):
         subject, body, page = _compose(rows)
     _post(address, subject, body, page)
     coll.update_many({"_id": {"$in": [r["_id"] for r in rows]}},

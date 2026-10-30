@@ -50,9 +50,9 @@ def _task(profile=A, title="Gold"):
                          first_at=datetime.now(timezone.utc) + timedelta(minutes=5))
 
 
-def _result(task_id, body, profile=A):
+def _result(task_id, body, profile=A, language="en"):
     with active_user_profile_context(profile):
-        return notify.deliver(task_id, "Gold", body, "en")
+        return notify.deliver(task_id, "Gold", body, language)
 
 
 ROUTES = [("GET", "/api/scheduled-tasks"), ("GET", "/api/scheduled-tasks/x/results"), ("POST", "/api/scheduled-tasks/x/seen"),
@@ -263,7 +263,7 @@ def test_the_email_carries_open_and_stop_buttons(c, outbox, brain_db, monkeypatc
     monkeypatch.setattr(mail, "_post", lambda to, subject, body, html="": sent.append(NS(body=body, html=html)))
     monkeypatch.setattr(notify, "CHANNELS", [mail.send])
     tid = _task()
-    _result(tid, "Gold is up 2%")
+    _result(tid, "Gold is up 2%", language=language)
     email = sent[-1]
     assert open_word in email.html and stop_word in email.html
     assert "/api/notify/task/open?t=" in email.body and "/api/notify/task/stop?t=" in email.body

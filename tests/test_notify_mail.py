@@ -40,9 +40,12 @@ def _confirmed(post, uid="userA", address="a@example.com"):
     return address
 
 
-def _deliver(task="t1", body="new", profile=A):
+def _deliver(task="t1", body="new", profile=A, language=None):
+    """A result in its task's language: here the account's own, as a task asked in it is."""
+    from app.brain import lang
     with active_user_profile_context(profile):
-        return notify.deliver(task, "Mostaql", body, "en")
+        return notify.deliver(task, "Mostaql", body,
+                              language or lang.for_user(profile.get("chat_id") or ""))
 
 
 def test_nothing_is_emailed_before_the_address_is_confirmed(post):
@@ -106,13 +109,13 @@ def test_each_task_has_its_own_hour(post):
 
 
 @pytest.mark.parametrize("language,word", [("ar", "ساندي"), ("en", "Sandy")])
-def test_the_email_is_in_the_users_saved_language(post, language, word):
+def test_the_link_is_in_his_language_and_a_result_in_its_tasks(post, language, word):
     post.db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": language}})
     mail.ask_to_confirm("userA", "a@example.com")
     link = post.sent[-1]
     assert word in link.subject + link.body
     mail.confirm(link.body.split("t=")[1].split()[0])
-    _deliver(body="the result")
+    _deliver(body="the result", language=language)
     email = post.sent[-1]
     assert word in email.subject + email.body and "the result" in email.body
     other = "Sandy" if language == "ar" else "ساندي"
