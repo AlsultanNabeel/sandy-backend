@@ -43,8 +43,8 @@ struct TaskEditSheet: View {
                 }
                 Section(lang.s("tasks.language")) {
                     Picker(lang.s("tasks.language"), selection: $language) {
-                        Text("العربية").tag("ar")
-                        Text("English").tag("en")
+                        Text(lang.s("tasks.langAr")).tag("ar")
+                        Text(lang.s("tasks.langEn")).tag("en")
                     }
                     .pickerStyle(.segmented)
                 }
