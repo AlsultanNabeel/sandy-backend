@@ -122,6 +122,12 @@ extension APIClient {
         return rows
     }
 
+    /// «فضّي اللي تمّ»: the list's done items hidden now, kept with their dates; how many.
+    func hideDoneItems(_ list: String) async throws -> Int {
+        let r: HiddenDone = try await fetch("/api/items/hide-done", method: "POST", body: ListName(list: list))
+        return r.hidden
+    }
+
     /// The project lists Sandy made from chat («project:<name>»), by name.
     func projectLists() async throws -> [String] {
         let r: ListNames = try await fetch("/api/items/lists")
@@ -258,3 +264,6 @@ extension APIClient {
                        body: Armed(token: token, ids: ids, once: once), bearer: bearer)
     }
 }
+
+private struct ListName: Encodable { let list: String }
+private struct HiddenDone: Decodable { let hidden: Int }

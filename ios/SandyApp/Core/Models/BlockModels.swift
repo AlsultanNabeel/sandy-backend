@@ -132,6 +132,13 @@ struct ListItem: Codable, Identifiable, Hashable {
     var due: String?
     var priority: String?
     var data: [String: JSONValue]?
+    /// When it was done (ISO); a done item stays in its list with it.
+    var doneAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, list, text, done, due, priority, data
+        case doneAt = "done_at"
+    }
 
     /// Tasks: daily | weekly | monthly, or nil for once.
     var repeatRule: String? {

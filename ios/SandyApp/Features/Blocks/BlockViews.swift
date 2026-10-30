@@ -84,6 +84,11 @@ struct ItemsView: View {
             }
 
             if !showDone { addBar }
+            if showDone && !store.items.isEmpty && !store.isHabits {
+                Button(lang.s("blocks.clearDone")) { Task { await closed.hideDone(api: state.api) } }
+                    .font(Theme.Typography.callout)
+                    .padding(Theme.Spacing.sm)
+            }
         }
         .navigationTitle(title)
         .sheet(item: $editing) { item in
@@ -129,6 +134,11 @@ struct ItemsView: View {
                     .font(Theme.Typography.body)
                     .foregroundColor(checked ? Theme.Colors.secondaryText : Theme.Colors.primaryText)
                     .strikethrough(item.done)
+                if item.done, let at = BlockDate.text(item.doneAt) {
+                    Label(String(format: lang.s("blocks.doneOn"), at), systemImage: "checkmark")
+                        .font(Theme.Typography.caption)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                }
                 if let due = BlockDate.text(item.due) {
                     Label(due, systemImage: item.repeatRule == nil ? "clock" : "repeat")
                         .font(Theme.Typography.caption)

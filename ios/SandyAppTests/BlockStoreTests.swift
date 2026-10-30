@@ -31,6 +31,31 @@ final class BlockStoreTests: XCTestCase {
 
     private static let milk = #"{"id":"t1","list":"tasks","text":"حليب","done":false}"#
 
+    /// A done item stays with when it was done (owner, 30 Oct): the done half shows it.
+    func testADoneItemKeepsWhenItWasDone() async throws {
+        serve(#"{"id":"s1","list":"shopping","text":"رمان","done":true,"done_at":"2026-10-30T09:00:00+00:00"}"#)
+        let store = ItemsStore(list: "shopping", done: true)
+        await store.load(api: api)
+        XCTAssertEqual(store.items.first?.doneAt, "2026-10-30T09:00:00+00:00")
+        XCTAssertNotNil(BlockDate.text(store.items.first?.doneAt))
+    }
+
+    /// «فضّي اللي تمّ»: gone from the done half at once, asked of the server, back if it refused.
+    func testClearingTheDoneOnesHidesThemAndPutsThemBackOnARefusal() async throws {
+        serve(#"{"id":"s1","list":"shopping","text":"رمان","done":true}"#)
+        let store = ItemsStore(list: "shopping", done: true)
+        await store.load(api: api)
+        StubNetwork.install(json: #"{"ok": true, "hidden": 1}"#)
+        await store.hideDone(api: api)
+        XCTAssertTrue(store.items.isEmpty)
+        XCTAssertEqual(StubNetwork.requests.last?.url?.path, "/api/items/hide-done")
+        serve(#"{"id":"s1","list":"shopping","text":"رمان","done":true}"#)
+        await store.load(api: api)
+        StubNetwork.install(status: 500, json: #"{"error": "x"}"#)
+        await store.hideDone(api: api)
+        XCTAssertEqual(store.items.map(\.text), ["رمان"], "a refused clear was shown as done")
+    }
+
     /// L2: a change made while a reload was on its way was wiped by the older rows.
     func testAChangeMadeDuringAReloadIsKept() async throws {
         serve("", delay: 0.4)

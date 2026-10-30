@@ -282,6 +282,21 @@ final class ItemsStore: LoadableStore {
                                                  priority: priority, data: data) })
     }
 
+    /// «فضّي اللي تمّ»: the done ones go from this half at once; put back when the server did
+    /// not take it. They stay kept with their dates («what did I buy this month?»).
+    func hideDone(api: APIClient) async {
+        guard done else { return }
+        let before = items
+        items = []
+        clearNotice()
+        do {
+            _ = try await api.hideDoneItems(list)
+        } catch {
+            items = before
+            notify("blocks.errorSave")
+        }
+    }
+
     /// The item's data with the draft's repeat (tasks) or days and time (habits), the rest kept.
     private static func data(_ draft: ItemDraft, isHabits: Bool,
                              keeping old: [String: JSONValue]?) -> [String: JSONValue]? {
