@@ -32,7 +32,7 @@ _KEYS = ("id", "url", "device", "name", "title")
 # The top-level words compared as text.
 _TEXTS = ("reply", "text", "summary", "answer", "body")
 # A list's change the template tells: rows of a list, added, removed, ticked or renamed.
-_TOLD_FIELDS = {"done", "text"}
+_TOLD_FIELDS = {"done", "done_at", "text"}
 
 
 def _key(row: Dict[str, Any]) -> str:
@@ -106,6 +106,25 @@ def compute(before: Any, now: Any) -> Dict[str, Any]:
     return out
 
 
+def from_events(log: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """The difference the log says, in the order it happened: rows by their id, each with its
+    words and its list (`events.label`), so the template and the guard read it as any other."""
+    out: Dict[str, Any] = {"added": [], "removed": [], "changed": [], "numbers": [],
+                           "paragraphs_added": [], "paragraphs_removed": []}
+    for e in log:
+        base = {"id": e["row"], "text": e.get("label"),
+                **{k: e[k] for k in ("list", "kind") if e.get(k)}}
+        if e["op"] == "added":
+            out["added"].append({**base, **(e.get("after") or {})})
+        elif e["op"] == "removed":
+            out["removed"].append({**base, **(e.get("before") or {})})
+        else:
+            before, after = e.get("before") or {}, e.get("after") or {}
+            out["changed"].append({"before": {**base, "text": before.get("text", base["text"]), **before},
+                                   "after": {**base, **after}, "fields": sorted(after)})
+    return out
+
+
 def empty(diff: Dict[str, Any]) -> bool:
     return not any(diff.values())
 
@@ -133,7 +152,7 @@ def template(diff: Dict[str, Any]) -> Optional[str]:
     if diff["numbers"] or diff["paragraphs_added"] or diff["paragraphs_removed"]:
         return None
     rows = [*diff["added"], *diff["removed"], *(c["after"] for c in diff["changed"])]
-    if not rows or not all("list" in r and r.get("text") for r in rows):
+    if not rows or not all(r.get("list") and r.get("text") for r in rows):
         return None
     if any(not set(c["fields"]) <= _TOLD_FIELDS for c in diff["changed"]):
         return None

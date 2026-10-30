@@ -2,7 +2,8 @@
 log entry or a schedule, written in the same transaction as the change itself (`_base.write`),
 so both are kept or neither is.
 
-An event is `{seq, at, coll, op, row, kind, list, before, after, source, expire_at}`:
+An event is `{seq, at, coll, op, row, kind, list, label, before, after, source, expire_at}`
+(`label` the row's words now, or as it was when removed, so a tick is told by name):
   op       added, removed, done, reopened, edited
   before   what the row was (whole for a removal, the changed fields for an edit)
   after    what it is now (whole for an addition, the changed fields for an edit)
@@ -111,6 +112,7 @@ def add(name: str, op: str, row_id: str, before: Optional[Mapping[str, Any]],
     seq = _next_seq(session)
     coll.insert_one({"_id": _base.new_id(), "seq": seq, "at": at, "coll": name, "op": what,
                      "row": str(row_id), "kind": whole.get("kind"), "list": whole.get("list"),
+                     "label": whole.get("text"),
                      "before": old or None, "after": new or None, "source": current_source(),
                      "expire_at": at + timedelta(days=KEEP_DAYS)}, session=session)
     return seq

@@ -35,7 +35,7 @@ from openai import OpenAIError
 from pymongo.errors import PyMongoError
 
 from app import notify
-from app.blocks import tasks
+from app.blocks import events, tasks
 from app.brain import background, lang, task_diff, tools
 from app.brain.ctx import TurnCtx
 from app.brain.model import _from_message
@@ -99,6 +99,22 @@ def fingerprint(found: Any, tool: str = "") -> str:
                         for r in found.get("results") or [] if isinstance(r, dict)})
     text = json.dumps(_stable(found), sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# A check on his own data reads what happened from the log (`blocks/events`), from where it
+# stopped (`cursor`); its rows come from there, never from two reads. Only its numbers (a
+# month's spending) come from the read. A search, a page or a price is read and compared.
+_FROM_LOG = ("recall", "summarize")
+
+
+def _in_scope(spec: Dict[str, Any]):
+    """Whether an event is of what the task's check reads: its list, its kind, or all of it."""
+    args = (spec.get("probe") or {}).get("args") or {}
+    wanted = str(args.get("list") or "")
+    if wanted == "project" and args.get("project"):
+        wanted = f"project:{args['project']}"
+    kind = str(args.get("kind") or "")
+    return lambda e: (not wanted or e.get("list") == wanted) and (not kind or e.get("kind") == kind)
 
 
 def _probe(spec: Dict[str, Any], ctx: TurnCtx) -> Any:
@@ -230,6 +246,7 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
             trace_store.background(uid, "task", task_id=_id(doc)):
         try:
             message, found, seen, diff, direct = None, None, None, None, False
+            cursor = before.get("cursor")
             if before.get("batch_id"):
                 # A batch this task submitted: its answer, once Azure has it.
                 try:
@@ -242,26 +259,34 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                     if message is None:
                         return None
                     found, seen = before.get("batch_found"), before.get("batch_fingerprint")
-                    diff = before.get("batch_diff") or {}
+                    diff, cursor = before.get("batch_diff") or {}, before.get("batch_cursor", cursor)
                 tasks.save_state(_id(doc), {"batch_id": None})
             if message is None:
                 found = _kept(_probe(spec, ctx))
                 seen = fingerprint(found, tool)
-                if before.get("last_seen") is None:
-                    # Its first run: where it starts, nothing told.
-                    tasks.save_state(_id(doc), {"fingerprint": seen, "last_seen": found, "failures": 0})
+                logged = tool in _FROM_LOG
+                if before.get("last_seen") is None or (logged and cursor is None):
+                    # Its first run, or its first on the log: where it starts, nothing told.
+                    tasks.save_state(_id(doc), {"fingerprint": seen, "last_seen": found, "failures": 0,
+                                                **({"cursor": events.last_seq()} if logged else {})})
                     return None
-                if seen == before.get("fingerprint"):
+                if logged:
+                    log = events.since(cursor)
+                    cursor = log[-1]["seq"] if log else cursor
+                    diff = task_diff.from_events([e for e in log if _in_scope(spec)(e)])
+                    diff["numbers"] = task_diff.compute(before["last_seen"], found)["numbers"]
+                elif seen == before.get("fingerprint"):
                     tasks.save_state(_id(doc), {"failures": 0})
                     return None
-                diff = task_diff.compute(before["last_seen"], found)
+                else:
+                    diff = task_diff.compute(before["last_seen"], found)
                 message = NOTHING if task_diff.empty(diff) else task_diff.template(diff)
                 if message is None:
                     job = None if direct else _submitted(doc, spec, diff, before)
                     if job:
                         tasks.save_state(_id(doc), {"batch_id": job, "batch_fingerprint": seen,
                                                     "batch_found": found, "batch_diff": diff,
-                                                    "failures": 0})
+                                                    "batch_cursor": cursor, "failures": 0})
                         return None
                     message = _think(doc, spec, diff, before, ctx, uid)
                     if (message or NOTHING).strip() != NOTHING:
@@ -276,8 +301,10 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
             # It names what did not change: never sent.
             logger.warning("[tasks] task %s: a message naming what did not change was held back", _id(doc))
             message = NOTHING
-        # What it saw now is where the next run compares from, whatever was told.
-        state = {"fingerprint": seen, "last_seen": found, "failures": 0}
+        # What it saw now, and where it stopped in the log, is where the next run starts,
+        # whatever was told.
+        state = {"fingerprint": seen, "last_seen": found, "failures": 0,
+                 **({"cursor": cursor} if cursor is not None else {})}
         if message.strip() == NOTHING:
             tasks.save_state(_id(doc), state)
             return None

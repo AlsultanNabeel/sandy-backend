@@ -210,3 +210,36 @@ def test_a_list_is_named_as_he_sees_it(language, raw, shown):
     from app.brain import lang
     with lang.using(language):
         assert task_diff.list_name(raw) == shown
+
+
+# ── a task on his own data reads the log from where it stopped (owner, 30 Oct) ──
+
+def test_a_list_task_reads_the_log_not_two_reads(world, monkeypatch):
+    doc = _task("التسوق")
+    _run(doc)                                      # where it starts: its pointer
+    reads = []
+    real = task_runner._probe
+    monkeypatch.setattr(task_runner, "_probe", lambda spec, ctx: reads.append(1) or real(spec, ctx))
+    with active_user_profile_context(A):
+        iid = items.add("shopping", "رمان")
+        items.update(iid, done=True)
+        items.add("tasks", "مش من القائمة")         # another list: not this task's
+    _run(doc)
+    assert [b for _, b in world.sent] == ["انضاف «رمان» لـ«قائمة التسوق»\n«رمان» صار تم"]
+    _run(doc)                                      # nothing since: nothing told
+    assert len(world.sent) == 1
+    with active_user_profile_context(A):
+        from app.blocks import events
+        assert tasks.state(doc["id"])["cursor"] == events.last_seq()
+
+
+def test_a_task_that_read_snapshots_moves_to_the_log_quietly(world):
+    doc = _task("التسوق")
+    with active_user_profile_context(A):
+        tasks.save_state(doc["id"], {"last_seen": {"rows": []}, "fingerprint": "old"})
+    _run(doc)                                      # its first run on the log: a pointer, no flood
+    assert world.sent == []
+    with active_user_profile_context(A):
+        items.add("shopping", "رمان")
+    _run(doc)
+    assert [b for _, b in world.sent] == ["انضاف «رمان» لـ«قائمة التسوق»"]
