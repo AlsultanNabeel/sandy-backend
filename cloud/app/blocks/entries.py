@@ -60,8 +60,8 @@ def add(kind: str, text: str, data: Optional[Mapping[str, Any]] = None, *,
         "embedding": embedding,
         "migrated_from": _base.migrated_ref(migrated_from),
     }
-    coll.insert_one(doc)
-    _base.noted("created", _base.ENTRIES, doc["_id"], text=doc["text"])
+    _base.write("created", _base.ENTRIES, doc["_id"], coll,
+                lambda s: coll.insert_one(doc, session=s), created=doc, text=doc["text"])
     return doc["_id"]
 
 
@@ -92,8 +92,8 @@ def update(entry_id: str, *, text: Optional[str] = None,
     if at is not None:
         changes["at"] = at
     if changes:
-        _base.noted("updated", _base.ENTRIES, entry_id, coll)
-        coll.update_one({"_id": entry_id}, {"$set": changes})
+        _base.write("updated", _base.ENTRIES, entry_id, coll,
+                    lambda s: coll.update_one({"_id": entry_id}, {"$set": changes}, session=s))
         if current["kind"] == "fact":
             _base.fact_changed()
     return True
@@ -104,8 +104,8 @@ def delete(entry_id: str, mongo_db=None) -> bool:
     if coll is None or not entry_id:
         return False
     current = coll.find_one({"_id": entry_id}, {"kind": 1})
-    _base.noted("deleted", _base.ENTRIES, entry_id, coll)
-    gone = coll.delete_one({"_id": entry_id}).deleted_count > 0
+    gone = _base.write("deleted", _base.ENTRIES, entry_id, coll,
+                       lambda s: coll.delete_one({"_id": entry_id}, session=s).deleted_count > 0)
     if gone and (current or {}).get("kind") == "fact":
         _base.fact_changed()
     return gone

@@ -50,8 +50,8 @@ def add(list_name: str, text: str, data: Optional[Mapping[str, Any]] = None, *,
         "done_at": (done_at or _base.now()) if done else None,
         "migrated_from": _base.migrated_ref(migrated_from),
     }
-    coll.insert_one(doc)
-    _base.noted("created", _base.ITEMS, doc["_id"], text=doc["text"])
+    _base.write("created", _base.ITEMS, doc["_id"], coll,
+                lambda s: coll.insert_one(doc, session=s), created=doc, text=doc["text"])
     return doc["_id"]
 
 
@@ -123,8 +123,8 @@ def update(item_id: str, *, text: Optional[str] = None, done: Optional[bool] = N
     elif data is not None:
         changes["data"] = validate(LIST, target, data)
     if changes:
-        _base.noted("updated", _base.ITEMS, item_id, coll)
-        coll.update_one({"_id": item_id}, {"$set": changes})
+        _base.write("updated", _base.ITEMS, item_id, coll,
+                    lambda s: coll.update_one({"_id": item_id}, {"$set": changes}, session=s))
     return True
 
 
@@ -132,8 +132,8 @@ def delete(item_id: str, mongo_db=None) -> bool:
     coll = _base.coll(_base.ITEMS, mongo_db)
     if coll is None or not item_id:
         return False
-    _base.noted("deleted", _base.ITEMS, item_id, coll)
-    return coll.delete_one({"_id": item_id}).deleted_count > 0
+    return _base.write("deleted", _base.ITEMS, item_id, coll,
+                       lambda s: coll.delete_one({"_id": item_id}, session=s).deleted_count > 0)
 
 
 def touched_between(start: datetime, end: datetime, *, limit: int = 200,

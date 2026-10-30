@@ -86,8 +86,8 @@ def add(kind: str, text: str, fire_at: datetime, payload: Optional[Mapping[str, 
     }
     if doc["recurrence"]:
         doc["series_start"] = series_start(fire_at)
-    coll.insert_one(doc)
-    _base.noted("created", _base.SCHEDULES, doc["_id"], text=doc["text"])
+    _base.write("created", _base.SCHEDULES, doc["_id"], coll,
+                lambda s: coll.insert_one(doc, session=s), created=doc, text=doc["text"])
     _phone_told(kind)
     return doc["_id"]
 
@@ -132,10 +132,10 @@ def update(schedule_id: str, *, text: Optional[str] = None,
         else:
             unset["series_start"] = ""
     if changes or unset:
-        _base.noted("updated", _base.SCHEDULES, schedule_id, coll)
-        coll.update_one({"_id": schedule_id},
-                        {**({"$set": changes} if changes else {}),
-                         **({"$unset": unset} if unset else {})})
+        _base.write("updated", _base.SCHEDULES, schedule_id, coll,
+                    lambda s: coll.update_one({"_id": schedule_id},
+                                              {**({"$set": changes} if changes else {}),
+                                               **({"$unset": unset} if unset else {})}, session=s))
         _phone_told(current["kind"])
     return True
 
@@ -181,8 +181,8 @@ def delete(schedule_id: str, mongo_db=None) -> bool:
     row = coll.find_one({"_id": schedule_id}, {"kind": 1})
     if row is None:
         return False
-    _base.noted("deleted", _base.SCHEDULES, schedule_id, coll)
-    gone = coll.delete_one({"_id": schedule_id}).deleted_count > 0
+    gone = _base.write("deleted", _base.SCHEDULES, schedule_id, coll,
+                       lambda s: coll.delete_one({"_id": schedule_id}, session=s).deleted_count > 0)
     if gone:
         _phone_told(row["kind"])
     return gone

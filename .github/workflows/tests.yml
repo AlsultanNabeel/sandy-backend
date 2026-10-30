@@ -33,7 +33,24 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: A real MongoDB replica set for the transaction tests
+        # A change and its event are one transaction (`blocks/_base.write`); the in-memory
+        # stand-in has none, so those tests need the real engine, as a single-node replica set.
+        run: |
+          docker run -d --name mongo -p 27017:27017 mongo:7.0 --replSet rs0 --bind_ip_all
+          for i in $(seq 1 30); do
+            docker exec mongo mongosh --quiet --eval "db.adminCommand('ping')" && break
+            sleep 1
+          done
+          docker exec mongo mongosh --quiet --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
+          for i in $(seq 1 30); do
+            docker exec mongo mongosh --quiet --eval "rs.isMaster().ismaster" | grep -q true && break
+            sleep 1
+          done
+
       - name: Run tests with coverage
+        env:
+          SANDY_TEST_MONGO_URI: mongodb://localhost:27017/?replicaSet=rs0&directConnection=true
         # `--cov-fail-under` is the point of measuring it. Without a floor the
         # coverage number was decoration: it could fall for twenty commits and
         # nothing would say so. 55 is set just under the current 57 — close

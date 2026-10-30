@@ -111,9 +111,10 @@ def db():
 
 def _snapshot(d):
     # The cache stamps move on purpose: migrated facts must refresh the voice prompt; the
-    # changes store is made (empty) with the blocks' indexes.
+    # changes store and the event log are made (empty: a copied row is no change he made)
+    # with the blocks' indexes.
     return {n: sorted(map(repr, d[n].find())) for n in d.list_collection_names()
-            if n not in _TARGETS and n not in ("sandy_cache_stamps", "sandy_changes")}
+            if n not in _TARGETS and n not in ("sandy_cache_stamps", "sandy_changes", "sandy_events")}
 
 
 def _count(d):

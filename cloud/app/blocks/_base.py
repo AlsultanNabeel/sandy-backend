@@ -7,7 +7,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from app.db import get_db
 from app.utils.tenant_db import scoped
@@ -41,22 +41,80 @@ def journal() -> Iterator[List[Dict[str, Any]]]:
         _journal.reset(token)
 
 
-def noted(op: str, name: str, doc_id: str, handle=None, text: str = "") -> None:
-    """Note a write. For "updated" / "deleted" pass the handle: the row as it is now is
-    kept (without its vector) to put back. A created row's `text` names it in an undo.
-    It goes to the turn's journal when one is open, and to `changes` (a delete always, so
-    every delete can be put back for seven days)."""
+# ── the one way a row changes ────────────────────────────────────────────────
+# A write and its event (`events`) go in one transaction: both are kept or neither is.
+
+_session: ContextVar[Any] = ContextVar("blocks_session", default=None)
+
+
+def _client(handle) -> Any:
+    raw = getattr(handle, "_raw", handle)
+    return raw.database.client
+
+
+def _mock(client: Any) -> bool:
+    """The tests' in-memory stand-in (mongomock), which has no transactions."""
+    return type(client).__module__.startswith("mongomock")
+
+
+def _in_transaction(handle, fn: Callable[[Any], Any]) -> Any:
+    """``fn(session)`` in one transaction (inside one already open, in that one). Production's
+    database is a replica set and always has them; only the tests' stand-in runs it bare."""
+    open_now = _session.get()
+    if open_now is not None:
+        return fn(open_now)
+    client = _client(handle)
+    if _mock(client):
+        return fn(None)
+
+    def body(session):
+        token = _session.set(session)
+        try:
+            return fn(session)
+        finally:
+            _session.reset(token)
+
+    with client.start_session() as session:
+        return session.with_transaction(body)
+
+
+def write(op: str, name: str, doc_id: str, handle, apply: Callable[[Any], Any], *,
+          created: Optional[Dict[str, Any]] = None, text: str = "") -> Any:
+    """The one way a block row changes: ``apply(session)`` and its event in one transaction,
+    then the turn's journal and the undo log (`noted`). ``created`` is the new row of an
+    add. What ``apply`` returns comes back."""
+    from app.blocks import events
+
+    def run(session):
+        before = None
+        if op != "created":
+            before = handle.find_one({"_id": doc_id}, {"embedding": 0, "user_id": 0}, session=session)
+        out = apply(session)
+        after = created if op == "created" else (
+            handle.find_one({"_id": doc_id}, {"embedding": 0, "user_id": 0}, session=session)
+            if op == "updated" else None)
+        # A row copied in from the old stores (`migrated_from`) is no change he made.
+        if (op == "created" or before is not None) and not (created or {}).get("migrated_from"):
+            events.add(name, op, doc_id, before, after, session=session)
+        return out, before
+
+    out, before = _in_transaction(handle, run)
+    if op == "created" or before is not None:
+        noted(op, name, doc_id, before=before, text=text)
+    return out
+
+
+def noted(op: str, name: str, doc_id: str, before: Optional[Dict[str, Any]] = None,
+          text: str = "") -> None:
+    """Note a write, with the row as it was (``before``, without its vector) to put back. A
+    created row's `text` names it in an undo. It goes to the turn's journal when one is
+    open, and to `changes` (a delete always, so every delete can be put back for seven days)."""
     from app.blocks import changes
 
     entries = _journal.get()
     keeping = op == "deleted" or changes.current_turn() is not None
     if (entries is None and not keeping) or not doc_id:
         return
-    before = None
-    if op != "created" and handle is not None:
-        before = handle.find_one({"_id": doc_id}, {"embedding": 0, "user_id": 0})
-        if before is None:
-            return
     label = text or str((before or {}).get("text") or "")
     if entries is not None:
         entries.append({"op": op, "coll": name, "id": doc_id, "before": before, "text": label})

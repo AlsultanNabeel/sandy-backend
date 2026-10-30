@@ -74,6 +74,8 @@ _BY_USER: List[str] = [
     "sandy_task_results",
     # What was deleted or changed in the blocks, kept seven days for undo.
     "sandy_changes",
+    # The log of what happened to his data, and his count in it (`blocks/events.py`).
+    "sandy_events", "sandy_event_seq",
     # Chat attachments and the images Sandy drew (bytes inline).
     "sandy_attachments",
     # Notes sent from Profile › Support.
