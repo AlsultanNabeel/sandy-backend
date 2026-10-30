@@ -25,6 +25,8 @@ def _rows(db, n, *, list_name="tasks", done=False, start=None):
     db["sandy_items"].insert_many([
         {"_id": f"{list_name}-{done}-{i:04d}", "user_id": "userA", "list": list_name,
          "text": f"{list_name} {i}", "done": done, "data": {},
+         # A done one was done this week: a list shows it (`items._visible`).
+         "done_at": datetime.now(timezone.utc) - timedelta(minutes=n - i) if done else None,
          "created_at": start + timedelta(minutes=i)} for i in range(n)])
 
 

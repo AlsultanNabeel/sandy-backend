@@ -148,7 +148,8 @@ def _fresh_db() -> None:
 def _setup(steps: List[Dict[str, Any]]) -> None:
     for s in steps:
         if "item" in s:
-            items.add(s["item"]["list"], s["item"]["text"], s["item"].get("data"))
+            items.add(s["item"]["list"], s["item"]["text"], s["item"].get("data"),
+                      done=bool(s["item"].get("done")))
         elif "entry" in s:
             entries.add(s["entry"]["kind"], s["entry"]["text"], s["entry"].get("data"))
         elif "task" in s:

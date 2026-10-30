@@ -112,6 +112,8 @@ def from_events(log: List[Dict[str, Any]]) -> Dict[str, Any]:
     out: Dict[str, Any] = {"added": [], "removed": [], "changed": [], "numbers": [],
                            "paragraphs_added": [], "paragraphs_removed": []}
     for e in log:
+        if e["op"] == "hidden":
+            continue                      # a done item cleared from view is no news
         base = {"id": e["row"], "text": e.get("label"),
                 **{k: e[k] for k in ("list", "kind") if e.get(k)}}
         if e["op"] == "added":

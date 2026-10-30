@@ -274,7 +274,13 @@ def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             rows += [_entry_row(e) for e in entries.list_entries(
                 k, since=since, until=until, limit=_base.MAX_LIMIT if k == "expense" else SUMMARY_ROWS)]
     if not kind:
-        found = items.list_items(list_name, limit=SUMMARY_ROWS)
+        if list_name and (since or until):
+            # «شو اشتريت هالشهر؟»: what was done in the period, hidden or not.
+            found = items.list_items(list_name, done=True, done_after=since, done_before=until,
+                                     limit=SUMMARY_ROWS)
+        else:
+            # The list as he sees it; a task's check reads it whole.
+            found = items.list_items(list_name, limit=SUMMARY_ROWS, visible=not ctx.whole)
         rows += [_item_row(i) for i in sorted(found, key=lambda i: bool(i.get("done")))]
     if not list_name and (kind is None or kind in USER_SCHEDULES):
         rows += [_schedule_row(s) for s in schedules.list_schedules(
@@ -510,6 +516,14 @@ def _check_in(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def list_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     name = _list_name(args) or None
+    if args.get("hide_done"):
+        # «فضّي اللي تمّ»: hidden from the list, kept with their date; nothing deleted.
+        if not name:
+            return refused("hide_done needs the list")
+        from app.brain.task_diff import list_name as shown_name
+        n = items.hide_done(name)
+        return {"ok": True, "changed": n,
+                "reply": lang.say("list_hid_done", n=n, list=shown_name(name))}
     # Open items only, unless the ask is to reopen a done one.
     pool = items.match_pool(name, done=None if args.get("done") is False else False)
     picked = _held_rows(ctx, items.get) or _named(args, pool, items.get)

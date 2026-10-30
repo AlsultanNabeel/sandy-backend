@@ -4,7 +4,7 @@ so both are kept or neither is.
 
 An event is `{seq, at, coll, op, row, kind, list, label, before, after, source, expire_at}`
 (`label` the row's words now, or as it was when removed, so a tick is told by name):
-  op       added, removed, done, reopened, edited
+  op       added, removed, done, reopened, edited, hidden (a done item cleared from view)
   before   what the row was (whole for a removal, the changed fields for an edit)
   after    what it is now (whole for an addition, the changed fields for an edit)
   source   who changed it: chat, voice (the app's call), robot, app, system (`using_source`)
@@ -76,6 +76,8 @@ def _what(op: str, before: Dict[str, Any], after: Dict[str, Any]) -> str:
         return "added"
     if op == "deleted":
         return "removed"
+    if after.get("hidden_at") and not before.get("hidden_at"):
+        return "hidden"
     if "done" in after and bool(before.get("done")) != bool(after.get("done")):
         return "done" if after.get("done") else "reopened"
     return "edited"

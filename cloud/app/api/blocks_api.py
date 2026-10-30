@@ -378,12 +378,23 @@ def register_blocks_api(app, mongo_db=None):
         rows = items.list_items(request.args.get("list") or None, done=done,
                                 text=request.args.get("q", "")[:MAX_TEXT_CHARS],
                                 order=order, limit=limit, paged=True,
-                                after=_cursor(request.args.get("cursor")))
+                                after=_cursor(request.args.get("cursor")),
+                                visible=request.args.get("all") != "1")
         out: Dict[str, Any] = {"items": [_shown(r, "data") for r in rows]}
         if len(rows) == min(limit, _base.MAX_LIMIT):
             last = rows[-1]
             out["next"] = f"{_iso_utc(last.get('created_at'))}|{last['id']}"
         return jsonify(out), 200
+
+    @app.route("/api/items/hide-done", methods=["POST"])
+    @require_tenant
+    @_answers_invalid
+    def api_items_hide_done(claims):
+        """{list}: «فضّي اللي تمّ», its done items hidden now and kept with their dates."""
+        name = str(_body().get("list") or "")
+        if not name:
+            raise _Invalid("list_required")
+        return jsonify({"ok": True, "hidden": items.hide_done(name)}), 200
 
     @app.route("/api/items/lists", methods=["GET"])
     @require_tenant

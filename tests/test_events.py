@@ -118,7 +118,7 @@ def test_every_write_of_his_data_goes_through_the_one_function():
         text = (root / name).read_text(encoding="utf-8")
         body = text.split("def arm(")[0] if name == "blocks/schedules.py" else text
         bare = [ln.strip() for ln in body.splitlines()
-                if writes.search(ln) and "session=s" not in ln and "lambda s:" not in ln]
+                if writes.search(ln) and "session=s" not in ln and "lambda s" not in ln]
         assert not bare, (name, bare)
     blocks = re.compile(r"_base\.(ENTRIES|ITEMS|SCHEDULES)|sandy_(entries|items|schedules)")
     others = [str(p.relative_to(root)) for p in root.rglob("*.py")

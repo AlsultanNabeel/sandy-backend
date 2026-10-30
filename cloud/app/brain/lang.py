@@ -412,6 +412,8 @@ PHRASES = {
     "span_many_day": {"ar": "{n} يوم", "en": "{n} days"},
     "every_span": {"ar": "كل {span}", "en": "every {span}"},
     # A list's change, told with no model (`task_diff.template`).
+    "list_hid_done": {"ar": "فضّيت اللي تمّ من «{list}» ({n})، وبيضلّوا محفوظين بتاريخهم ✅",
+                      "en": "Cleared the done ones from «{list}» ({n}); they're kept with their dates ✅"},
     "list_name": {"ar": "قائمة {label}", "en": "{label} list"},
     "list_added": {"ar": "انضاف «{text}» لـ«{list}»", "en": "«{text}» was added to «{list}»"},
     "list_removed": {"ar": "انشال «{text}» من «{list}»", "en": "«{text}» was removed from «{list}»"},

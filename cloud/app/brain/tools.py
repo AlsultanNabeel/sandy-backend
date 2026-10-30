@@ -94,7 +94,10 @@ def _schemas() -> List[Dict[str, Any]]:
                              "move_to": {**_list_enum(), "description": "انقليه لهالقائمة"}, "move_to_project": _S,
                              "done": {"type": "boolean"}, "text": _S, "due": _S,
                              "no_due": {"type": "boolean", "description": "شيلي الموعد عن العنصر"},
-                             "qty": {"type": "number", "description": "الكمية اللي ضايلة (لو اشترى جزء بس)"}}, [])},
+                             "qty": {"type": "number", "description": "الكمية اللي ضايلة (لو اشترى جزء بس)"},
+                             "hide_done": {"type": "boolean", "description": (
+                                 "«فضّي اللي تمّ»، «clear the done ones»: خبّي اللي تمّ من القائمة "
+                                 "(بيضلّوا محفوظين بتاريخهم، مش حذف)، مع list")}}, [])},
         {"name": "list_delete", "description": "احذفي عنصر أو كم عنصر من قائمة («شيلي الحليب»)؛ خدي الـ id من «وضعه هلأ».",
          "parameters": _obj({**gone, "list": _list_enum(), "project": _S}, [])},
         {"name": "log_update",

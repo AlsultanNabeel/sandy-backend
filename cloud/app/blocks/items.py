@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from app.blocks import _base
@@ -111,6 +111,8 @@ def update(item_id: str, *, text: Optional[str] = None, done: Optional[bool] = N
     if done is not None:
         changes["done"] = bool(done)
         changes["done_at"] = _base.now() if done else None
+        if not done:
+            changes["hidden_at"] = None           # open again: shown again
     if due is not _UNSET and "due" not in changes:
         changes["due"] = due
     if priority is not None:
@@ -126,6 +128,21 @@ def update(item_id: str, *, text: Optional[str] = None, done: Optional[bool] = N
         _base.write("updated", _base.ITEMS, item_id, coll,
                     lambda s: coll.update_one({"_id": item_id}, {"$set": changes}, session=s))
     return True
+
+
+def hide_done(list_name: str, mongo_db=None) -> int:
+    """«فضّي اللي تمّ»: the list's done items hidden now, kept with when they were done (what
+    he bought this month still reads them). How many were hidden."""
+    coll = _base.coll(_base.ITEMS, mongo_db)
+    if coll is None or not list_name:
+        return 0
+    rows = list(coll.find({"list": list_name, "done": True, "hidden_at": None}, {"_id": 1}))
+    at = _base.now()
+    for row in rows:
+        _base.write("updated", _base.ITEMS, row["_id"], coll,
+                    lambda s, i=row["_id"]: coll.update_one({"_id": i}, {"$set": {"hidden_at": at}},
+                                                            session=s))
+    return len(rows)
 
 
 def delete(item_id: str, mongo_db=None) -> bool:
@@ -149,11 +166,24 @@ def touched_between(start: datetime, end: datetime, *, limit: int = 200,
     return [_base.out(d) for d in cursor]
 
 
+# A done item stays in its list, shown this long after it was done (then only by its date).
+SHOWN_DONE_DAYS = 7
+
+
+def _visible(now: datetime) -> Dict[str, Any]:
+    """What a list shows: the open items, and the done ones of the last week not hidden. A read
+    filter, so hiding by age writes nothing (no event, no email)."""
+    return {"$or": [{"done": False},
+                    {"done": True, "hidden_at": None,
+                     "done_at": {"$gte": now - timedelta(days=SHOWN_DONE_DAYS)}}]}
+
+
 def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
                due_after: Optional[datetime] = None, due_before: Optional[datetime] = None,
                text: str = "", order: str = "created", limit: int = 200,
                after: Optional[Tuple[datetime, str]] = None, paged: bool = False,
-               mongo_db=None) -> List[Dict[str, Any]]:
+               visible: bool = False, done_after: Optional[datetime] = None,
+               done_before: Optional[datetime] = None, mongo_db=None) -> List[Dict[str, Any]]:
     """Oldest first, the order a list is read in; ``order="newest"`` or ``"due"`` (soonest
     first) instead; every filter optional. ``after`` is the last row of the page before,
     as ``(created_at, id)``, for the created orders: the next page starts past it. A paged
@@ -170,8 +200,13 @@ def list_items(list_name: Optional[str] = None, *, done: Optional[bool] = None,
     rng = _base.range_filter(due_after, due_before)
     if rng:
         query["due"] = rng
+    done_rng = _base.range_filter(done_after, done_before)
+    if done_rng:
+        query["done_at"] = done_rng
     if text:
         query.update(_base.text_filter(text))
+    if visible:
+        query = {"$and": [query, _visible(_base.now())]}
     key, way = {"newest": ("created_at", -1), "due": ("due", 1)}.get(order, ("created_at", 1))
     if after is not None and key == "created_at":
         at, last_id = after

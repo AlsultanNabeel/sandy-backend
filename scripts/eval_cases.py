@@ -196,6 +196,16 @@ CASES += [
         {"say": "شو المهام الشغّالة؟", "tools": ["task_list"]},
         {"say": "وقّفيها", "tools": ["task_update"], "task": {"paused": True}},
         {"say": "رجّعيها وخلّيها كل ساعتين", "tools": ["task_update"], "task": {"paused": False, "every": 120}}]},
+    # Done items stay with their date (owner, 30 Oct): «فضّي اللي تمّ» hides them, nothing deleted.
+    {"name": "clear the done ones", "setup": [
+        {"item": {"list": "shopping", "text": "رمان", "done": True}},
+        {"item": {"list": "shopping", "text": "خبز"}}], "steps": [
+        {"say": "فضّي اللي تمّ من قائمة التسوق", "tools": ["list_update"],
+         "args": {"list_update": {"hide_done": True}}, "not_tools": ["list_delete"],
+         "item": {"list": "shopping", "has": "خبز"}}]},
+    {"name": "what did I buy", "setup": [
+        {"item": {"list": "shopping", "text": "رمان", "done": True}}], "steps": [
+        {"say": "شو اشتريت هالشهر؟", "any_tools": ["recall", "summarize"], "reply_has": ["رمان"]}]},
     # How results are emailed is his to say, and only then (phase one, the owner's 29 Oct).
     {"name": "task: tell me at once", "steps": [
         {"say": "كل ساعة شوفيلي سعر الدهب، وبلّغيني فوراً كل ما يتغيّر", "tools": ["task_create"],
@@ -340,6 +350,15 @@ EN_CASES += [
         {"say": "pause it", "tools": ["task_update"], "task": {"paused": True}},
         {"say": "start it again and make it every two hours", "tools": ["task_update"],
          "task": {"paused": False, "every": 120}}], [_task("Mostaql projects")]),
+    _en("clear the done ones", [
+        {"say": "clear the done ones from the shopping list", "tools": ["list_update"],
+         "args": {"list_update": {"hide_done": True}}, "not_tools": ["list_delete"],
+         "item": {"list": "shopping", "has": "bread"}}],
+        [{"item": {"list": "shopping", "text": "pomegranate", "done": True}},
+         {"item": {"list": "shopping", "text": "bread"}}]),
+    _en("what did I buy", [{"say": "what did I buy this month?", "any_tools": ["recall", "summarize"],
+                            "reply_has": ["pomegranate"]}],
+        [{"item": {"list": "shopping", "text": "pomegranate", "done": True}}]),
     _en("task: tell me at once", [
         {"say": "Check the gold price every hour and tell me right away whenever it changes",
          "tools": ["task_create"], "pending": True, "no_task": True},
