@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List
 
 from app.blocks.kinds import KINDS, LIST, LOG, SCHEDULE, names
 from app.brain import tools_blocks as B
+from app.brain import tools_browser as BW
 from app.brain import tools_tasks as T
 from app.brain import tools_world as X
 from app.brain.ctx import TurnCtx, refused
@@ -143,7 +144,9 @@ def _schemas() -> List[Dict[str, Any]]:
                              "skip_next": {"type": "boolean", "description": "تخطّي المرة الجاية بس («اليوم بس لا»)"}}, [])},
         {"name": "schedule_cancel", "description": "الغي تذكير أو كم تذكير («الغي تذكير الدوا»)؛ خدي الـ id من «وضعه هلأ».",
          "parameters": _obj(gone, [])},
-        {"name": "summarize", "description": "جيبي كل اللي صار بفترة عشان تلخّصيه — بس لما يطلب ملخّص.",
+        {"name": "summarize", "description": ("جيبي كل اللي صار بفترة عشان تلخّصيه — بس لما يطلب ملخّص. "
+                                               "«شو اشتريت هالشهر؟» مش ملخّص: هاد recall مع done و period "
+                                               "(what he bought or finished is recall, not a summary)."),
          "parameters": _obj({"period": {"type": "string", "enum": list(PERIODS)},
                              "focus": {**_S, "description": "نوع أو قائمة أو موضوع (اختياري)"}},
                             ["period"])},
@@ -193,7 +196,7 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
     "web_search": X.web_search, "weather": X.weather, "image": X.image,
     "undo": B.undo, "log_update": B.log_update, "room_restore": X.room_restore,
     "task_create": T.task_create, "task_list": T.task_list, "task_update": T.task_update,
-    "task_cancel": T.task_cancel,
+    "task_cancel": T.task_cancel, "page_read": BW.page_read,
 }
 
 
@@ -208,7 +211,7 @@ def _spoken_task(d: Dict[str, Any]) -> Dict[str, Any]:
     if "check_args" not in props:
         return d
     fields: Dict[str, Any] = {}
-    for spec in _schemas():
+    for spec in [*_schemas(), BW.SCHEMA]:
         if spec["name"] in T.READ_TOOLS:
             for k, v in spec["parameters"]["properties"].items():
                 if not _free_form(v):
@@ -217,13 +220,19 @@ def _spoken_task(d: Dict[str, Any]) -> Dict[str, Any]:
     return {**d, "parameters": {**d["parameters"], "properties": {**props, "check_args": check}}}
 
 
+def _switched(user_id: str) -> List[Dict[str, Any]]:
+    """The tools of the switches on for this account: the browser's."""
+    return [BW.SCHEMA] if user_id and BW.offered(user_id) else []
+
+
 def declarations(user_id: str = "") -> List[Dict[str, Any]]:
-    """Plain ``{name, description, parameters}`` for Gemini Live; the task tools too for an
-    account with their switch on (`_spoken_task`).
+    """Plain ``{name, description, parameters}`` for Gemini Live; the task tools (`_spoken_task`)
+    and the browser's too for an account with their switch on.
 
     Free-form ``data`` objects are dropped: Gemini refuses an object with no properties.
     """
     extra = [_spoken_task(d) for d in T.TASK_SCHEMAS] if user_id and T.offered(user_id) else []
+    extra += _switched(user_id)
     out = []
     for d in [*_schemas(), *extra]:
         props = {k: v for k, v in d["parameters"]["properties"].items() if not _free_form(v)}
@@ -232,8 +241,8 @@ def declarations(user_id: str = "") -> List[Dict[str, Any]]:
 
 
 def openai_tools(user_id: str = "") -> List[Dict[str, Any]]:
-    """The chat's tools; the task tools too for an account with their switch on."""
-    extra = T.TASK_SCHEMAS if user_id and T.offered(user_id) else []
+    """The chat's tools; the task tools and the browser's too for an account with their switch on."""
+    extra = [*(T.TASK_SCHEMAS if user_id and T.offered(user_id) else []), *_switched(user_id)]
     return [{"type": "function", "function": d} for d in [*_schemas(), *extra]]
 
 

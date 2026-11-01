@@ -230,9 +230,18 @@ def derive_check(instructions: str, user_id: str) -> Optional[Dict[str, Any]]:
     except (ValueError, OSError, RuntimeError, AttributeError, IndexError):
         return None
     tool, args = (found.get("tool"), found.get("args")) if isinstance(found, dict) else (None, None)
-    if tool not in READ_TOOLS or not isinstance(args, dict):
+    if tool not in READ_TOOLS or not isinstance(args, dict) or _check_allowed(tool, user_id):
         return None
     return {"tool": tool, "args": args}
+
+
+def _check_allowed(tool: str, user_id: str) -> Optional[str]:
+    """Why this account may not check with ``tool``; None when it may (a page read needs the
+    browser's switch)."""
+    from app.brain import tools_browser
+    if tool == "page_read" and not tools_browser.offered(user_id):
+        return "page_read needs the browser, which is not on for this account: use web_search"
+    return None
 
 
 def _minutes(value: Any) -> Optional[int]:
@@ -268,6 +277,9 @@ def task_create(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return refused("title, instructions and every_minutes (above zero) are needed")
     if check not in READ_TOOLS:
         return refused(f"check_tool must read: one of {list(READ_TOOLS)}")
+    why = next(filter(None, (_check_allowed(t, ctx.user_id) for t in [check, *allowed])), None)
+    if why:
+        return refused(why)
     if any(t not in ALLOWED for t in allowed):
         return refused(f"a task only reads and tells: its tools are within {list(ALLOWED)}; "
                        "«remind me» in a task is its own message, not a reminder")
@@ -344,6 +356,8 @@ def task_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         check = str(args.get("check_tool") or "")
         if check and check not in READ_TOOLS:
             return refused(f"check_tool must read: one of {list(READ_TOOLS)}")
+        if check and _check_allowed(check, ctx.user_id):
+            return refused(_check_allowed(check, ctx.user_id))
         payload = row.get("payload") or {}
         title = str(args.get("title") or row.get("text") or "").strip()
         instructions = str(args.get("instructions") or payload.get("instructions") or "").strip()

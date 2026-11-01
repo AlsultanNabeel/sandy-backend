@@ -100,7 +100,8 @@ _WEB_KEPT = ("title", "url")
 
 def fingerprint(found: Any, tool: str = "") -> str:
     """What the data says, not when it was read (`_stable`); a web search's results by their
-    title and link alone, in one order."""
+    title and link alone, in one order. A page is read already as it is compared
+    (`web_page.for_compare`)."""
     if tool == "web_search" and isinstance(found, dict):
         found = sorted({tuple(str(r.get(k) or "") for k in _WEB_KEPT)
                         for r in found.get("results") or [] if isinstance(r, dict)})
@@ -223,6 +224,16 @@ def _probe(spec: Dict[str, Any], ctx: TurnCtx) -> Any:
     if tool == "web_search":
         from app.features.research import web_results
         return {"results": web_results(str(args.get("query") or ""))}
+    if tool == "page_read":
+        # A listing by its links, else its words, without what moves by itself.
+        from app.brain import tools_browser
+        from app.features import web_page
+        if not tools_browser.offered(ctx.user_id):
+            raise RuntimeError("the browser is not on for this account")
+        try:
+            return web_page.for_compare(web_page.read(str(args.get("url") or ""), user_id=ctx.user_id))
+        except web_page.PageError as exc:
+            raise RuntimeError(f"the page could not be read: {exc.code}") from None
     result = tools.execute(tool, args, ctx)
     if result.get("broke"):
         raise RuntimeError(f"the check's tool {tool} broke")
@@ -242,7 +253,7 @@ def _think(doc: Dict[str, Any], spec: Dict[str, Any], diff: Dict[str, Any], befo
            ctx: TurnCtx, uid: str) -> str:
     """The model's message on what changed, or NOTHING."""
     allowed = [t for t in spec.get("tools") or [] if t in ALLOWED]
-    specs = [s for s in tools.openai_tools() if s["function"]["name"] in allowed]
+    specs = [s for s in tools.openai_tools(uid) if s["function"]["name"] in allowed]
     messages = _think_messages(spec, diff, before)
     for _ in range(MAX_STEPS):
         reply = _from_message(background.call(
@@ -432,5 +443,9 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
             tasks.save_state(_id(doc), state)
             return None
         tasks.save_state(_id(doc), {**state, "last_result": message})
+        if isinstance(found, dict) and found.get("warning"):
+            # The page tries to give orders: told with the result, never followed.
+            from app.features.web_page import site_of
+            message = f"{message}\n\n{lang.say('page_warning', site=site_of(str(found.get('url') or '')))}"
         return notify.deliver(_id(doc), str(doc.get("text") or ""), message, lang.current(),
                               state=task_diff.describe(found))

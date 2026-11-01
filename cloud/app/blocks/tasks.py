@@ -26,8 +26,9 @@ STATE = "sandy_task_state"
 SWITCH = "tasks"
 # What a task's check may run, and all its model may use: a task only reads and tells. Nothing
 # that writes, rings or switches a device («remind me two days before» is its own message,
-# through its channels, never a reminder).
-READ_TOOLS = ("web_search", "recall", "summarize", "weather", "device_state")
+# through its channels, never a reminder). `page_read` only for an account with the browser on
+# (`tools_tasks._check_allowed`, `task_runner._probe`).
+READ_TOOLS = ("web_search", "recall", "summarize", "weather", "device_state", "page_read")
 ALLOWED = READ_TOOLS
 
 

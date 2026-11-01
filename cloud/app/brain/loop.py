@@ -346,6 +346,12 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
             body = _without(question, honesty.correct(_joined(rewritten, question), ctx.worked,
                                                       ctx.results, question))
         outcome = {**outcome, "text": _joined(body, question)}
+        # What a tool must tell him whatever the model wrote (a page that gives orders,
+        # `tools_browser`), before the held question, which stays last.
+        notices = [n for n in ctx.artifacts.get("notices") or [] if n not in outcome["text"]]
+        if notices:
+            body = "\n\n".join(t for t in (_without(question, outcome["text"]), *notices) if t)
+            outcome = {**outcome, "text": _joined(body, question)}
     shown = None
     try:
         # Stopped from the app: memory keeps what was shown, marked as cut.
