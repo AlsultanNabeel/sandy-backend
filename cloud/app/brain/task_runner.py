@@ -352,6 +352,10 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
 
     if not flags.on(SWITCH, uid):
         return None
+    from app.features import stop_all
+    if stop_all.stopped(uid):
+        # The emergency stop: nothing runs, and that is no failure.
+        return None
     spec = dict(doc.get("payload") or {})
     before = tasks.state(_id(doc))
     # The check reads the whole of what it reads (a list past the chat's thirty rows).

@@ -35,7 +35,7 @@ def test_nineteen_tools_and_every_one_has_a_handler(monkeypatch):
     # The task tools and the browser's are offered only behind their switches, and handled
     # like the rest.
     monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["u1"]}')
-    assert {s["function"]["name"] for s in tools.openai_tools("u1")} == set(tools.HANDLERS) - {"page_read"}
+    assert {s["function"]["name"] for s in tools.openai_tools("u1")} == set(tools.HANDLERS) - {"page_read", "stop_everything", "resume_everything"}
     monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["u1"], "browser": ["u1"]}')
     assert {s["function"]["name"] for s in tools.openai_tools("u1")} == set(tools.HANDLERS)
 

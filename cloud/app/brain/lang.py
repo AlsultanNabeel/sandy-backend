@@ -530,6 +530,15 @@ PHRASES = {
     "nothing_done": {"ar": "لسا ما عملت هالإشي فعلياً. احكيلي مرة تانية شو بدك بالزبط وبعمله هلّق.",
                      "en": "I haven't actually done that yet. Tell me once more exactly what you "
                            "want and I'll do it now."},
+    # The emergency stop (`features/stop_all`).
+    "stop_done": {"ar": "وقّفت كل شي: المهام والمتصفح والشغل بالخلفية. التذكيرات بتضل ترن. قول «رجّعي» لما بدك.",
+                  "en": "I've stopped everything: tasks, the browser and work in the background. Reminders "
+                        "still ring. Say «resume» when you want."},
+    "resume_done": {"ar": "رجّعت كل شي يشتغل.", "en": "Everything is back on."},
+    "stop_failed": {"ar": "ما قدرت أغيّر هالإشي هلّق، جرّب كمان شوي.",
+                    "en": "I couldn't change that right now; try again in a bit."},
+    "browser_stopped": {"ar": "كل شي موقّف هلّق. قول «رجّعي» وبكمّل.",
+                        "en": "Everything is stopped right now. Say «resume» and I'll carry on."},
     # A page read (`features/web_page`, `brain/tools_browser`).
     "page_no_url": {"ar": "أي صفحة؟ ابعتلي الرابط.", "en": "Which page? Send me the link."},
     "page_bad_url": {"ar": "هاد مش رابط صفحة بقدر أفتحه.", "en": "That isn't a page link I can open."},

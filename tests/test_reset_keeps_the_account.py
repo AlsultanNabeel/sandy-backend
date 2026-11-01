@@ -96,6 +96,8 @@ def _full_account():
     users_store.move_token_generation(uid)
     notify_prefs.save(uid, {"daily": False, "quiet_start": "23:00"})
     users_store.set_notify_email(uid, {"address": "a@b.c", "confirmed": True})
+    from app.features import stop_all
+    stop_all.stop(uid)
     push_tokens_store.register_token(uid, "tok-1")
     usage_store.add_voice_seconds(uid, 30)
     d.sandy_usage_rl.insert_one({"_id": f"{uid}:1", "user_id": uid, "n": 1})

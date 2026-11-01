@@ -197,6 +197,7 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
     "undo": B.undo, "log_update": B.log_update, "room_restore": X.room_restore,
     "task_create": T.task_create, "task_list": T.task_list, "task_update": T.task_update,
     "task_cancel": T.task_cancel, "page_read": BW.page_read,
+    "stop_everything": BW.stop_everything, "resume_everything": BW.resume_everything,
 }
 
 
@@ -222,7 +223,7 @@ def _spoken_task(d: Dict[str, Any]) -> Dict[str, Any]:
 
 def _switched(user_id: str) -> List[Dict[str, Any]]:
     """The tools of the switches on for this account: the browser's."""
-    return [BW.SCHEMA] if user_id and BW.offered(user_id) else []
+    return list(BW.SCHEMAS) if user_id and BW.offered(user_id) else []
 
 
 def declarations(user_id: str = "") -> List[Dict[str, Any]]:
