@@ -82,7 +82,7 @@ def test_the_callers_say_their_priority(monkeypatch):
     """What the user waits on is direct; the rest is background; a task is scheduled."""
     import ast
     from pathlib import Path
-    want = {"when": "DIRECT", "web_summary": "DIRECT", "vision": "DIRECT",
+    want = {"when": "DIRECT", "web_summary": "DIRECT", "vision": "DIRECT", "page_shot": "DIRECT",
             "stm_summary": "BACKGROUND", "title": "BACKGROUND", "photo_tags": "BACKGROUND",
             "categorize": "BACKGROUND", "daily_nudge": "BACKGROUND",
             "task": "SCHEDULED", "task_review": "SCHEDULED", "task_check": "DIRECT"}

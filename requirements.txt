@@ -15,6 +15,7 @@ google-genai>=1.0.0
 google-auth>=2.0.0  # google-genai's own dependency
 Pillow>=10.0.0
 pypdf>=4.0  # text out of PDF chat attachments (features/attachments)
+beautifulsoup4>=4.12  # a page's words and links (features/web_page)
 urllib3==2.7.0
 cryptography>=42.0.0
 websockets>=13.0

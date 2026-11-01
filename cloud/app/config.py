@@ -68,6 +68,13 @@ GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON", "").strip()
 # Research
 EXA_API_KEY = os.getenv("EXA_API_KEY", "").strip()
 
+# The browser (phase seven): Steel's cloud browser for pages a plain request cannot read.
+STEEL_API_KEY = os.getenv("STEEL_API_KEY", "").strip()
+# Sites added to the ones a page read never opens (`features/web_page.BLOCKED`), comma separated.
+SANDY_BROWSER_BLOCKED = os.getenv("SANDY_BROWSER_BLOCKED", "").strip()
+# Calls to Steel a day per account.
+SANDY_BROWSER_DAILY = int(os.getenv("SANDY_BROWSER_DAILY", "100") or 100)
+
 # Database
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
 # No default: a guessed name opens another database (the old project's) and writes there.

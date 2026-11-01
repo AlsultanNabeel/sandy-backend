@@ -530,4 +530,21 @@ PHRASES = {
     "nothing_done": {"ar": "لسا ما عملت هالإشي فعلياً. احكيلي مرة تانية شو بدك بالزبط وبعمله هلّق.",
                      "en": "I haven't actually done that yet. Tell me once more exactly what you "
                            "want and I'll do it now."},
+    # A page read (`features/web_page`, `brain/tools_browser`).
+    "page_no_url": {"ar": "أي صفحة؟ ابعتلي الرابط.", "en": "Which page? Send me the link."},
+    "page_bad_url": {"ar": "هاد مش رابط صفحة بقدر أفتحه.", "en": "That isn't a page link I can open."},
+    "page_blocked": {"ar": "ما بفتح {site} بالمتصفح: إله ربط رسمي، وهو مش موجود لسا، أو هو صفحة دفع.",
+                     "en": "I don't open {site} in the browser: it has an official connection, which "
+                           "isn't here yet, or it's a payment page."},
+    "page_private": {"ar": "هاد عنوان داخلي، وما بفتحه.", "en": "That's an internal address, and I don't open it."},
+    "page_not_page": {"ar": "الرابط على {site} مش صفحة بتنقرا (ملف أو صورة).",
+                      "en": "The link on {site} isn't a page I can read (a file or an image)."},
+    "page_unreachable": {"ar": "ما قدرت أفتح {site} هلّق.", "en": "I couldn't open {site} right now."},
+    "page_empty": {"ar": "فتحت {site} بس ما لقيت فيها نص بينقرا.",
+                   "en": "I opened {site} but found no text to read on it."},
+    "page_daily_cap": {"ar": "وصلت حد المتصفح لليوم، بكرا بكمّل.",
+                       "en": "I've reached today's browser limit; I'll carry on tomorrow."},
+    "page_warning": {"ar": "⚠️ انتبه: صفحة {site} فيها كلام بيحاول يعطيني أوامر. ما نفّذت منه شي.",
+                     "en": "⚠️ Heads up: the page on {site} has text trying to give me orders. I didn't "
+                           "follow any of it."},
 }
