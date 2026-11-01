@@ -286,15 +286,17 @@ def test_the_subject_says_what_is_new(post, language, one, more):
 
 # The body (owner, 30 Oct): what changed, when, and how things are now in a line, in his
 # language and right to left in Arabic.
-@pytest.mark.parametrize("language, at_word, now_word", [("ar", "الساعة", "هلّق:"), ("en", "At", "Now:")])
-def test_the_body_says_what_changed_when_and_how_things_are_now(post, language, at_word, now_word):
+@pytest.mark.parametrize("language, now_word", [("ar", "هلّق:"), ("en", "Now:")])
+def test_the_body_says_what_changed_when_and_how_things_are_now(post, language, now_word):
+    from app.brain import lang
     post.db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"language": language}})
     _confirmed(post)
     with active_user_profile_context(A):
         notify.deliver("t1", "Mostaql", "انضاف «رمان» لـ«shopping»", language,
                        state="21 لسا و11 تم" if language == "ar" else "21 open and 11 done")
-    body = post.sent[-1].body
-    assert "انضاف «رمان» لـ«shopping»" in body and at_word in body and now_word in body
+    body = _plain(post.sent[-1].body)
+    assert "انضاف «رمان» لـ«shopping»" in body and now_word in body
+    assert any(month in body for month in lang.MONTHS[language])        # the day, as people say it
     lines = [ln for ln in body.splitlines() if ln.strip()]
     assert all(ln.startswith("‏") for ln in lines) == (language == "ar")
 
@@ -308,7 +310,7 @@ def test_quotes_are_guillemets(post, language, body, shown):
     _confirmed(post)
     _deliver(body=body)
     email = post.sent[-1]
-    assert shown in email.body and shown in email.subject
+    assert shown in _plain(email.body) and shown in email.subject
     assert '"' not in email.body + email.subject and "“" not in email.body
 
 
@@ -323,7 +325,12 @@ def test_the_email_has_a_tidy_html_part_and_a_plain_one(post, language, directio
     assert f'dir="{direction}"' in email.html and f'lang="{language}"' in email.html
     assert "#0077B6" in email.html and "&lt;b&gt;bold&lt;/b&gt;" in email.html
     assert "<b>bold</b>" in email.body                 # the plain copy is the words as they are
-    assert "انضاف «رمان»" in email.html
+    assert "انضاف «<bdi>رمان</bdi>»" in email.html
+
+
+def _plain(text):
+    """The plain copy without its isolate marks around names (`mail._isolated`)."""
+    return text.replace("\u2068", "").replace("\u2069", "")
 
 
 def test_both_parts_leave_together(monkeypatch):

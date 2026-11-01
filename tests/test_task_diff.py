@@ -158,7 +158,9 @@ def test_a_task_starts_on_its_yes_with_the_state_now_and_no_email(world, languag
         out = tools.execute("task_create", args, ctx)
         [row] = tasks.running()
         saw = tasks.state(row["id"])
-    assert out["ok"] and started in out["reply"] and "21" in out["reply"] and "11" in out["reply"]
+    with lang.using(language):
+        counts = lang.number(21), lang.number(11)
+    assert out["ok"] and started in out["reply"] and all(n in out["reply"] for n in counts)
     assert "موز" in out["reply"] and "تفاح" not in out["reply"]            # the open ones named
     assert saw["last_seen"]["rows"] and saw["fingerprint"] and world.sent == [] and world.asked == []
     assert row["fire_at"].replace(tzinfo=timezone.utc) > datetime.now(timezone.utc) + timedelta(minutes=55)

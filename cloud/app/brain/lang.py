@@ -116,6 +116,31 @@ def say(key: str, **slots: object) -> str:
     return PHRASES[key][_current.get()].format(**slots)
 
 
+_AR_DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
+
+
+def number(n: object) -> str:
+    """A count as it is read in the turn's language: «٢١» in Arabic, «21» in English."""
+    text = f"{n:g}" if isinstance(n, float) else str(n)
+    return text.translate(_AR_DIGITS) if _current.get() == AR else text
+
+
+# The months as they are said where Sandy speaks Arabic, and their English short names.
+MONTHS = {AR: ("كانون الثاني", "شباط", "آذار", "نيسان", "أيار", "حزيران", "تموز", "آب",
+               "أيلول", "تشرين الأول", "تشرين الثاني", "كانون الأول"),
+          EN: ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")}
+
+
+def day_and_time(dt) -> str:
+    """A moment on his clock as people say it: «٣١ تشرين الأول، ٦:٤٥ المسا», «31 Oct, 6:45 PM»."""
+    hour = dt.hour % 12 or 12
+    clock = f"{hour}:{dt.minute:02d}"
+    if _current.get() == AR:
+        part = "الصبح" if dt.hour < 12 else "الضهر" if dt.hour < 15 else "المسا"
+        return f"{number(dt.day)} {MONTHS[AR][dt.month - 1]}، {number(clock)} {part}"
+    return f"{dt.day} {MONTHS[EN][dt.month - 1]}, {clock} {'AM' if dt.hour < 12 else 'PM'}"
+
+
 PHRASES = {
     "error": {"ar": "حصل خطأ، حاول مرة ثانية.",
               "en": "Something went wrong, please try again."},
@@ -359,6 +384,7 @@ PHRASES = {
                            "en": "I've started watching «{title}» {every}. I couldn't read how things are right now; I'll try at its time ✅"},
     "state_rows": {"ar": "{n} عنصر: {names}", "en": "{n} items: {names}"},
     "state_list": {"ar": "{open} لسا و{done} تم: {names}", "en": "{open} open and {done} done: {names}"},
+    "state_all_done": {"ar": "{done} تم، وما في شي لسا", "en": "{done} done, nothing open"},
     "state_more": {"ar": "{names}، وغيرهم", "en": "{names}, and more"},
     "state_numbers": {"ar": "{pairs}", "en": "{pairs}"},
     "state_nothing": {"ar": "ما في إشي لسا", "en": "nothing yet"},
@@ -418,6 +444,11 @@ PHRASES = {
     "list_added": {"ar": "انضاف «{text}» لـ«{list}»", "en": "«{text}» was added to «{list}»"},
     "list_removed": {"ar": "انشال «{text}» من «{list}»", "en": "«{text}» was removed from «{list}»"},
     "list_done": {"ar": "«{text}» صار تم", "en": "«{text}» is done"},
+    # Several rows with the same change, in one line.
+    "list_added_many": {"ar": "انضافوا {n} عناصر لـ«{list}»: {names}", "en": "{n} items were added to «{list}»: {names}"},
+    "list_removed_many": {"ar": "انشالوا {n} عناصر من «{list}»: {names}", "en": "{n} items were removed from «{list}»: {names}"},
+    "list_done_many": {"ar": "صاروا {n} عناصر تم: {names}", "en": "{n} items are done: {names}"},
+    "list_reopened_many": {"ar": "رجعوا {n} عناصر مش متمّمين: {names}", "en": "{n} items are open again: {names}"},
     "list_reopened": {"ar": "«{text}» رجع مش متمّم", "en": "«{text}» is open again"},
     "list_moved": {"ar": "«{text}» انتقل لـ«{list}»", "en": "«{text}» moved to «{list}»"},
     "list_renamed": {"ar": "«{before}» صار «{after}»", "en": "«{before}» is now «{after}»"},
@@ -447,7 +478,7 @@ PHRASES = {
     "mail_stopped_page": {"ar": "وقّفت «{title}». بترجّعها من شاشة المهام بالتطبيق.",
                           "en": "«{title}» is paused. Turn it back on from the Tasks screen in the app."},
     "mail_brand": {"ar": "ساندي", "en": "Sandy"},
-    "mail_at": {"ar": "الساعة {time}", "en": "At {time}"},
+    "mail_at": {"ar": "{time}", "en": "{time}"},
     "mail_now": {"ar": "هلّق: {state}", "en": "Now: {state}"},
     "mail_result_subject": {"ar": "ساندي: {line}", "en": "Sandy: {line}"},
     "mail_results_subject": {"ar": "ساندي: {line} وكمان {n}", "en": "Sandy: {line} and {n} more"},

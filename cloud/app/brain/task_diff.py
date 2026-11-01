@@ -158,17 +158,39 @@ def template(diff: Dict[str, Any]) -> Optional[str]:
         return None
     if any(not set(c["fields"]) <= _TOLD_FIELDS for c in diff["changed"]):
         return None
-    lines = [lang.say("list_added", text=r["text"], list=list_name(r["list"])) for r in diff["added"]]
-    lines += [lang.say("list_removed", text=r["text"], list=list_name(r["list"])) for r in diff["removed"]]
+    lines = _grouped("list_added", diff["added"], by_list=True)
+    lines += _grouped("list_removed", diff["removed"], by_list=True)
     for c in diff["changed"]:
         if "text" in c["fields"]:
             lines.append(lang.say("list_renamed", before=c["before"]["text"], after=c["after"]["text"]))
         if "list" in c["fields"]:
             lines.append(lang.say("list_moved", text=c["after"]["text"], list=list_name(c["after"]["list"])))
-        if "done" in c["fields"]:
-            lines.append(lang.say("list_done" if c["after"].get("done") else "list_reopened",
-                                  text=c["after"]["text"]))
+    ticked = [c["after"] for c in diff["changed"] if "done" in c["fields"]]
+    lines += _grouped("list_done", [r for r in ticked if r.get("done")])
+    lines += _grouped("list_reopened", [r for r in ticked if not r.get("done")])
     return "\n".join(lines)
+
+
+def _grouped(key: str, rows: List[Dict[str, Any]], *, by_list: bool = False) -> List[str]:
+    """One line per row, or one line for several rows with the same change (and list)."""
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for r in rows:
+        groups.setdefault(str(r.get("list")) if by_list else "", []).append(r)
+    lines = []
+    for raw, same in groups.items():
+        where = {"list": list_name(raw)} if by_list else {}
+        if len(same) == 1:
+            lines.append(lang.say(key, text=same[0]["text"], **where))
+        else:
+            lines.append(lang.say(f"{key}_many", n=lang.number(len(same)),
+                                  names=_listed([f"«{r['text']}»" for r in same]), **where))
+    return lines
+
+
+def _listed(names: List[str]) -> str:
+    """The first names, then «and more»."""
+    listed = lang.say("sep").join(names[:_SHOWN])
+    return lang.say("state_more", names=listed) if len(names) > _SHOWN else listed
 
 
 # How many names the state now shows before «and more».
@@ -181,14 +203,13 @@ def describe(found: Any) -> str:
     if rows:
         ticked = all("done" in r for r in rows)
         open_rows = [r for r in rows if not r.get("done")] if ticked else rows
-        names = [f"«{_name(r)}»" for r in open_rows if _name(r)]
-        listed = lang.say("sep").join(names[:_SHOWN])
-        if len(names) > _SHOWN:
-            listed = lang.say("state_more", names=listed)
+        listed = _listed([f"«{_name(r)}»" for r in open_rows if _name(r)])
+        done = lang.number(len(rows) - len(open_rows))
+        if ticked and not open_rows:
+            return lang.say("state_all_done", done=done)
         if ticked:
-            return lang.say("state_list", open=len(open_rows), done=len(rows) - len(open_rows),
-                            names=listed)
-        return lang.say("state_rows", n=len(rows), names=listed)
+            return lang.say("state_list", open=lang.number(len(open_rows)), done=done, names=listed)
+        return lang.say("state_rows", n=lang.number(len(rows)), names=listed)
     numbers = _numbers(found)
     if numbers:
         return lang.say("state_numbers", pairs=lang.say("sep").join(

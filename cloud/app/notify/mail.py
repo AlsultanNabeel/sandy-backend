@@ -228,12 +228,40 @@ def _links(row: Dict[str, Any]) -> Optional[tuple]:
     return f"{base}/api/notify/task/open?t={token}", f"{base}/api/notify/task/stop?t={token}"
 
 
+def _when(at: Any) -> str:
+    """When it happened on his clock, as people say it (`lang.day_and_time`)."""
+    from app.brain.when import aware_utc
+    from app.utils.time import USER_TZ
+    return lang.day_and_time(aware_utc(at).astimezone(USER_TZ)) if isinstance(at, datetime) else ""
+
+
+# A name in «…» keeps its own direction among words of the other one: «orange» in an Arabic
+# line, «ليمون» in an English one. The plain copy isolates it with the Unicode marks, the HTML
+# with <bdi>.
+_NAME = re.compile(r"«([^«»\n]+)»")
+_FSI, _PDI = "\u2068", "\u2069"
+
+
+def _isolated(text: str) -> str:
+    return _NAME.sub(lambda m: f"«{_FSI}{m.group(1)}{_PDI}»", text)
+
+
+def _isolated_html(escaped: str) -> str:
+    return _NAME.sub(lambda m: f"«<bdi>{m.group(1)}</bdi>»", escaped)
+
+
+def _lines_html(text: str) -> str:
+    """Each line its own block with the language's direction, every name isolated."""
+    side = "rtl" if lang.current() == lang.AR else "ltr"
+    return "".join(f'<div dir="{side}">{_isolated_html(html.escape(ln))}</div>'
+                   for ln in _guillemets(text).splitlines() if ln.strip())
+
+
 def _block(row: Dict[str, Any], titled: bool) -> str:
     """One result: what changed, when (his clock), how things are now, and its two links."""
-    from app.brain.when import local_text
     lines = [f"«{_one_line(row.get('title'))}»"] if titled else []
     lines.append(str(row.get("body") or "").strip())
-    lines.append(lang.say("mail_at", time=local_text(row.get("at"))))
+    lines.append(lang.say("mail_at", time=_when(row.get("at"))))
     if row.get("state"):
         lines.append(lang.say("mail_now", state=row["state"]))
     links = _links(row)
@@ -279,22 +307,21 @@ def _buttons(row: Dict[str, Any]) -> str:
 
 def _html(rows: List[Dict[str, Any]], titled: bool) -> str:
     """The same email, simple and tidy in Sandy's colours: a card per result."""
-    from app.brain.when import local_text
     rtl = lang.current() == lang.AR
     side = "right" if rtl else "left"
     cards = []
     for r in rows:
         title = (f'<div style="font-size:13px;color:{_DEEP};font-weight:600;margin-bottom:6px">'
-                 f'«{html.escape(_one_line(r.get("title")))}»</div>') if titled else ""
+                 f'{_lines_html("«" + _one_line(r.get("title")) + "»")}</div>') if titled else ""
         state = (f'<div style="font-size:13px;color:#555;margin-top:6px">'
-                 f'{html.escape(lang.say("mail_now", state=r["state"]))}</div>') if r.get("state") else ""
+                 f'{_lines_html(lang.say("mail_now", state=r["state"]))}</div>') if r.get("state") else ""
         cards.append(
             f'<div style="background:#fff;border-radius:14px;padding:16px 18px;margin:0 0 12px;'
             f'border-{side}:4px solid {_ACCENT}">{title}'
             f'<div style="font-size:16px;line-height:1.6;color:#111">'
-            f'{html.escape(_guillemets(str(r.get("body") or "").strip())).replace(chr(10), "<br>")}</div>'
+            f'{_lines_html(str(r.get("body") or "").strip())}</div>'
             f'<div style="font-size:12px;color:#888;margin-top:8px">'
-            f'{html.escape(lang.say("mail_at", time=local_text(r.get("at"))))}</div>{state}'
+            f'{_lines_html(lang.say("mail_at", time=_when(r.get("at"))))}</div>{state}'
             f'{_buttons(r)}</div>')
     return (f'<!doctype html><html lang="{lang.current()}" dir="{"rtl" if rtl else "ltr"}">'
             f'<head><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
@@ -312,7 +339,7 @@ def _compose(rows: List[Dict[str, Any]]) -> tuple:
     titled = len({_one_line(r.get("title")) for r in rows}) > 1
     body = "\n\n———\n\n".join(_block(r, titled) for r in rows)
     return (_guillemets(_subject(rows)),
-            _rtl(_guillemets(f"{body}\n\n—\n{lang.say('mail_footer')}")), _html(rows, titled))
+            _rtl(_isolated(_guillemets(f"{body}\n\n—\n{lang.say('mail_footer')}"))), _html(rows, titled))
 
 
 def _last_slot(at: str, now: datetime) -> datetime:
