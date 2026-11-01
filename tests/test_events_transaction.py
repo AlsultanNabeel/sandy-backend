@@ -76,3 +76,22 @@ def test_an_event_that_fails_leaves_an_edit_and_a_delete_undone(real, monkeypatc
     with pytest.raises(RuntimeError):
         items.delete(iid)
     assert real["sandy_items"].count_documents({"_id": iid}) == 1
+
+
+def test_clearing_the_done_ones_is_one_transaction(real, monkeypatch):
+    """«فضّي اللي تمّ» hides them all or none (review, 1 Nov 2026): an event that fails on the
+    second leaves the first not hidden either."""
+    for text in ("رمان", "خبز", "حليب"):
+        items.add("shopping", text, done=True)
+    real_add, written = events.add, []
+
+    def second_fails(*a, **k):
+        written.append(1)
+        if len(written) == 2:
+            raise RuntimeError("the event could not be written")
+        return real_add(*a, **k)
+    monkeypatch.setattr(events, "add", second_fails)
+    with pytest.raises(RuntimeError):
+        items.hide_done("shopping")
+    assert real["sandy_items"].count_documents({"hidden_at": {"$ne": None}}) == 0
+    assert [e["op"] for e in events.since(0)] == ["added"] * 3

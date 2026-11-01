@@ -136,13 +136,18 @@ def hide_done(list_name: str, mongo_db=None) -> int:
     coll = _base.coll(_base.ITEMS, mongo_db)
     if coll is None or not list_name:
         return 0
-    rows = list(coll.find({"list": list_name, "done": True, "hidden_at": None}, {"_id": 1}))
     at = _base.now()
-    for row in rows:
-        _base.write("updated", _base.ITEMS, row["_id"], coll,
-                    lambda s, i=row["_id"]: coll.update_one({"_id": i}, {"$set": {"hidden_at": at}},
-                                                            session=s))
-    return len(rows)
+
+    def hide(session) -> int:
+        rows = list(coll.find({"list": list_name, "done": True, "hidden_at": None}, {"_id": 1},
+                              session=session))
+        for row in rows:
+            _base.write("updated", _base.ITEMS, row["_id"], coll,
+                        lambda s, i=row["_id"]: coll.update_one({"_id": i}, {"$set": {"hidden_at": at}},
+                                                                session=s))
+        return len(rows)
+    # All of them or none.
+    return _base.together(coll, hide)
 
 
 def delete(item_id: str, mongo_db=None) -> bool:

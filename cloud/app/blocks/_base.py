@@ -78,6 +78,11 @@ def _in_transaction(handle, fn: Callable[[Any], Any]) -> Any:
         return session.with_transaction(body)
 
 
+def together(handle, fn: Callable[[Any], Any]) -> Any:
+    """Several writes in one transaction: every `write` inside ``fn`` is kept, or none."""
+    return _in_transaction(handle, fn)
+
+
 def write(op: str, name: str, doc_id: str, handle, apply: Callable[[Any], Any], *,
           created: Optional[Dict[str, Any]] = None, text: str = "", journal: bool = True) -> Any:
     """The one way a block row changes: ``apply(session)`` and its event in one transaction,

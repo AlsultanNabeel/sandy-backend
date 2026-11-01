@@ -95,3 +95,15 @@ def test_a_hidden_item_is_no_news_to_a_task():
     log = [{"row": "1", "op": "hidden", "list": "shopping", "label": "رمان",
             "before": {"hidden_at": None}, "after": {"hidden_at": NOW}}]
     assert task_diff.empty(task_diff.from_events(log))
+
+
+def test_clearing_the_done_ones_opens_one_transaction(shop, monkeypatch):
+    """On the stand-in, which has none: the hiding runs inside one `_base.together` (the real
+    engine's test is in tests/test_events_transaction.py)."""
+    from app.blocks import _base
+    opened = []
+    real = _base.together
+    monkeypatch.setattr(_base, "together", lambda handle, fn: opened.append(1) or real(handle, fn))
+    with active_user_profile_context(A):
+        assert items.hide_done("shopping") == 2
+    assert opened == [1]
