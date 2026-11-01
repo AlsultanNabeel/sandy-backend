@@ -103,19 +103,24 @@ def fingerprint(found: Any, tool: str = "") -> str:
 
 
 # A check on his own data reads what happened from the log (`blocks/events`), from where it
-# stopped (`cursor`); its rows come from there, never from two reads. Only its numbers (a
-# month's spending) come from the read. A search, a page or a price is read and compared.
+# stopped (`cursor`), and only the events of what it watches (`tools_blocks.log_scope`: a
+# summary's focus and period, a recall's kind or list and words); its rows come from there,
+# never from two reads. Only its numbers (a month's spending) come from the read. A check
+# that watches nothing in particular, a search, a page or a price is read and compared.
 _FROM_LOG = ("recall", "summarize")
 
 
-def _in_scope(spec: Dict[str, Any]):
-    """Whether an event is of what the task's check reads: its list, its kind, or all of it."""
-    args = (spec.get("probe") or {}).get("args") or {}
-    wanted = str(args.get("list") or "")
-    if wanted == "project" and args.get("project"):
-        wanted = f"project:{args['project']}"
-    kind = str(args.get("kind") or "")
-    return lambda e: (not wanted or e.get("list") == wanted) and (not kind or e.get("kind") == kind)
+def _scope(spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """What the task's check watches in the log; None when it does not read the log."""
+    from app.brain.tools_blocks import log_scope
+    probe = spec.get("probe") or {}
+    tool = str(probe.get("tool") or "")
+    return log_scope(tool, dict(probe.get("args") or {})) if tool in _FROM_LOG else None
+
+
+def _of(scope: Dict[str, Any], log: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    from app.brain.tools_blocks import in_scope
+    return [e for e in log if in_scope(scope, e)]
 
 
 # Once a day a check on the log is checked against a full read: a change with no event is an
@@ -127,7 +132,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _audit(spec: Dict[str, Any], before: Dict[str, Any], found: Any, task_id: str) -> Dict[str, Any]:
+def _audit(scope: Dict[str, Any], before: Dict[str, Any], found: Any, task_id: str) -> Dict[str, Any]:
     """Once a day: the rows that changed since the last full read and have no event in the log.
     What to keep for the next audit."""
     keep = {"audit_at": _now(), "audit_seen": found, "audit_cursor": events.last_seq()}
@@ -137,7 +142,7 @@ def _audit(spec: Dict[str, Any], before: Dict[str, Any], found: Any, task_id: st
     if _now() - (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) < AUDIT_EVERY:
         return {}
     diff = task_diff.compute(before.get("audit_seen"), found)
-    logged = {e["row"] for e in events.since(before.get("audit_cursor") or 0) if _in_scope(spec)(e)}
+    logged = {e["row"] for e in _of(scope, events.since(before.get("audit_cursor") or 0))}
     missed = sorted({str(r.get("id")) for r in [*diff["added"], *diff["removed"],
                                                 *(c["after"] for c in diff["changed"])]} - logged)
     if missed:
@@ -293,7 +298,8 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
             if message is None:
                 found = _kept(_probe(spec, ctx))
                 seen = fingerprint(found, tool)
-                logged = tool in _FROM_LOG
+                scope = _scope(spec)
+                logged = scope is not None
                 if before.get("last_seen") is None or (logged and cursor is None):
                     # Its first run, or its first on the log: where it starts, nothing told.
                     tasks.save_state(_id(doc), {"fingerprint": seen, "last_seen": found, "failures": 0,
@@ -302,12 +308,12 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                                                    if logged else {})})
                     return None
                 if logged:
-                    audit = _audit(spec, before, found, _id(doc))
+                    audit = _audit(scope, before, found, _id(doc))
                     if audit:
                         tasks.save_state(_id(doc), audit)
                     log = events.since(cursor)
                     cursor = log[-1]["seq"] if log else cursor
-                    diff = task_diff.from_events([e for e in log if _in_scope(spec)(e)])
+                    diff = task_diff.from_events(_of(scope, log))
                     diff["numbers"] = task_diff.compute(before["last_seen"], found)["numbers"]
                 elif seen == before.get("fingerprint"):
                     tasks.save_state(_id(doc), {"failures": 0})

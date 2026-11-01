@@ -211,7 +211,7 @@ _CHECK = (
     "each time and compared with the last run. Given the task's words, answer only JSON "
     '{"tool": ..., "args": {...}} with tool one of: web_search {"query"} for anything on the web; '
     'recall {"list", "project", "kind", "query"} for his own lists, notes and reminders; '
-    'summarize {"period": "month"} for his spending; weather {"city"}; device_state {}. '
+    'summarize {"period": "month", "focus": "expense"} for his spending; weather {"city"}; device_state {}. '
     "Keep his words for the query.")
 
 

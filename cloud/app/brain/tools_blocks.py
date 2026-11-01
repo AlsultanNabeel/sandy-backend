@@ -257,11 +257,50 @@ def _route(kind: Optional[str], list_name: Optional[str]) -> Tuple[Optional[str]
     return kind, list_name
 
 
-def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+def _recall_filters(args: Dict[str, Any]) -> Tuple[Optional[str], Optional[str], str]:
+    """(kind, list, the words left) a recall reads by."""
     query = str(args.get("query") or "")
     kind, list_name = _route(str(args.get("kind") or "") or None, _list_name(args) or None)
     if kind is None and list_name is None:
         kind, list_name, query = _alias_filters(query)
+    return kind, list_name, query
+
+
+def log_scope(tool: str, args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """What a task's check watches, to read its events from the log: {kind, list, words,
+    since, until}; None when it watches nothing in particular (it then compares two reads).
+    A summary's is its focus and its period, a recall's its kind or list and its words."""
+    if tool == "summarize":
+        focus = str(args.get("focus") or "").strip()
+        kind, list_name = _route(focus or None, focus or None)
+        words = "" if (kind or list_name) else focus
+        period = str(args.get("period") or "")
+        since, until = W.period_range(period) if period in W.PERIODS else (None, None)
+    elif tool == "recall" and not args.get("rang"):
+        kind, list_name, words = _recall_filters(args)
+        since, until = W.parse_bound(args.get("since")), W.parse_bound(args.get("until"), end=True)
+    else:
+        return None
+    if not (kind or list_name or match_key(words).strip()):
+        return None
+    return {"kind": kind, "list": list_name, "words": words, "since": since, "until": until}
+
+
+def in_scope(scope: Dict[str, Any], event: Dict[str, Any]) -> bool:
+    """Whether an event of the log (its words opened) is of what ``scope`` watches."""
+    if scope["list"] and event.get("list") != scope["list"]:
+        return False
+    if scope["kind"] and event.get("kind") != scope["kind"]:
+        return False
+    at = event.get("at")
+    if at is not None and ((scope["since"] and W.aware_utc(at) < scope["since"])
+                           or (scope["until"] and W.aware_utc(at) >= scope["until"])):
+        return False
+    return _matches_query({"text": event.get("label") or ""}, scope["words"])
+
+
+def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    kind, list_name, query = _recall_filters(args)
     since = W.parse_bound(args.get("since"))
     until = W.parse_bound(args.get("until"), end=True)
     rows: List[Dict[str, Any]] = []
