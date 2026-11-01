@@ -37,16 +37,22 @@ jobs:
         # A change and its event are one transaction (`blocks/_base.write`); the in-memory
         # stand-in has none, so those tests need the real engine, as a single-node replica set.
         run: |
+          # Each wait fails the step when the engine is not ready in time, so the transaction
+          # tests never run against nothing.
           docker run -d --name mongo -p 27017:27017 mongo:7.0 --replSet rs0 --bind_ip_all
+          up=""
           for i in $(seq 1 30); do
-            docker exec mongo mongosh --quiet --eval "db.adminCommand('ping')" && break
+            docker exec mongo mongosh --quiet --eval "db.adminCommand('ping')" && up=1 && break
             sleep 1
           done
+          [ -n "$up" ] || { echo "MongoDB did not start"; docker logs mongo; exit 1; }
           docker exec mongo mongosh --quiet --eval "rs.initiate({_id:'rs0',members:[{_id:0,host:'localhost:27017'}]})"
+          primary=""
           for i in $(seq 1 30); do
-            docker exec mongo mongosh --quiet --eval "rs.isMaster().ismaster" | grep -q true && break
+            docker exec mongo mongosh --quiet --eval "rs.isMaster().ismaster" | grep -q true && primary=1 && break
             sleep 1
           done
+          [ -n "$primary" ] || { echo "The replica set has no primary"; docker logs mongo; exit 1; }
 
       - name: Run tests with coverage
         env:
