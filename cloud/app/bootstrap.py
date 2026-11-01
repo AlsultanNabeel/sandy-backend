@@ -59,6 +59,7 @@ def init_runtime() -> None:
     env_guard.check_settings()
     from app.config import MONGODB_DB_NAME, MONGODB_URI
     from app.db import configure
+    from app.features.browser_sites import init_browser_sites
     from app.features.device_store import init_device_store
     from app.features.focus_store import init_focus_store
     from app.features.node_store import init_node_store
@@ -79,7 +80,7 @@ def init_runtime() -> None:
     configure(mongo_db)
     for init in (init_users_store, init_speaker_store, init_photo_album, init_focus_store,
                  init_scene_store, init_device_store, init_node_store, init_usage_store,
-                 init_push_tokens_store, init_trace_store):
+                 init_push_tokens_store, init_trace_store, init_browser_sites):
         init(mongo_db)
     start_mqtt_ingest()
     _initialized = True

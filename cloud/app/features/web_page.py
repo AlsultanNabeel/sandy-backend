@@ -103,7 +103,7 @@ def site_of(url: str) -> str:
         return ""
 
 
-def _blocked(host: str) -> bool:
+def blocked_site(host: str) -> bool:
     extra = tuple(s.strip().lower() for s in config.SANDY_BROWSER_BLOCKED.split(",") if s.strip())
     return any(host == s or host.endswith("." + s) for s in (*BLOCKED, *extra))
 
@@ -123,7 +123,7 @@ def check_url(url: str) -> str:
         raise PageError("bad_url")
     if parts.username or parts.password or port not in (None, 80, 443):
         raise PageError("bad_url")
-    if _blocked(host):
+    if blocked_site(host):
         raise PageError("blocked", host.removeprefix("www."))
     return parts.geturl()
 

@@ -72,6 +72,8 @@ _BY_USER: List[str] = [
     # A task's memory of what it saw, and what it found (`blocks/tasks.py`, `notify`).
     "sandy_task_state",
     "sandy_task_results",
+    # The sites Sandy may open, his level and sealed sign-in on each (`features/browser_sites.py`).
+    "sandy_browser_sites",
     # What was deleted or changed in the blocks, kept seven days for undo.
     "sandy_changes",
     # The log of what happened to his data, and his count in it (`blocks/events.py`).

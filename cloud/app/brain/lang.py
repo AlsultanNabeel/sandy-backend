@@ -539,6 +539,12 @@ PHRASES = {
                     "en": "I couldn't change that right now; try again in a bit."},
     "browser_stopped": {"ar": "كل شي موقّف هلّق. قول «رجّعي» وبكمّل.",
                         "en": "Everything is stopped right now. Say «resume» and I'll carry on."},
+    # The sites screen (`features/browser_sites`).
+    "browser_bad_level": {"ar": "المستوى لازم يكون قراءة بس، أو تعبئة، أو إرسال.",
+                          "en": "The level has to be read only, fill, or send."},
+    "browser_bad_session": {"ar": "هالدخول مش لهالموقع، أو فيه إشي غريب. جرّب تسجّل كمان مرة.",
+                            "en": "That sign-in isn't for this site, or has something odd in it. Try signing in again."},
+    "browser_not_kept": {"ar": "ما قدرت أحفظ دخولك بأمان هلّق.", "en": "I couldn't keep your sign-in safely right now."},
     # A page read (`features/web_page`, `brain/tools_browser`).
     "page_no_url": {"ar": "أي صفحة؟ ابعتلي الرابط.", "en": "Which page? Send me the link."},
     "page_bad_url": {"ar": "هاد مش رابط صفحة بقدر أفتحه.", "en": "That isn't a page link I can open."},
