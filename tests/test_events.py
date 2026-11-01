@@ -126,3 +126,15 @@ def test_every_write_of_his_data_goes_through_the_one_function():
               and not str(p.relative_to(root)).startswith("blocks/")
               and blocks.search(p.read_text(encoding="utf-8")) and writes.search(p.read_text(encoding="utf-8"))]
     assert not [o for o in others if o not in ("utils/tenant_version.py",)], others
+
+
+def test_the_log_is_read_whole_in_pages_with_no_cap(brain_db):  # noqa: F811
+    """A task far behind reads every event since its place, not the first five hundred
+    (review, 1 Nov 2026)."""
+    from app.blocks import _base
+    with active_user_profile_context(A):
+        for n in range(1, 1203):
+            _base.coll(events.EVENTS).insert_one({"_id": f"e{n}", "seq": n, "op": "added", "row": str(n)})
+        read = events.since(0)
+        assert [e["seq"] for e in read] == list(range(1, 1203))
+        assert [e["seq"] for e in events.since(1200)] == [1201, 1202]

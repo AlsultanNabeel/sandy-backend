@@ -124,12 +124,21 @@ def add(name: str, op: str, row_id: str, before: Optional[Mapping[str, Any]],
     return seq
 
 
-def since(seq: int, *, limit: int = 500) -> List[Dict[str, Any]]:
-    """His events after ``seq``, oldest first."""
+PAGE = 500
+
+
+def since(seq: int) -> List[Dict[str, Any]]:
+    """Every one of his events after ``seq``, oldest first, read a page at a time."""
     coll = _base.coll(EVENTS)
-    if coll is None:
-        return []
-    return list(coll.find({"seq": {"$gt": int(seq or 0)}}).sort("seq", 1).limit(limit))
+    out: List[Dict[str, Any]] = []
+    at = int(seq or 0)
+    while coll is not None:
+        page = list(coll.find({"seq": {"$gt": at}}).sort("seq", 1).limit(PAGE))
+        out += page
+        if len(page) < PAGE:
+            break
+        at = int(page[-1]["seq"])
+    return out
 
 
 def opened(event: Mapping[str, Any]) -> Dict[str, Any]:
