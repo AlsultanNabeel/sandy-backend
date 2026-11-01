@@ -1,10 +1,10 @@
 {
- "when": "2026-10-30T11:39",
+ "when": "2026-11-01T22:05",
  "model": "sandy-chat",
  "api": "chat",
  "repeat": 1,
  "temperature": 0.5,
- "passed": 100,
+ "passed": 99,
  "total": 103,
  "cases": {
   "shopping add": true,
@@ -19,10 +19,10 @@
   "empty a list asks first": false,
   "delete one item": true,
   "delete is never an edit": true,
-  "bulk delete asks then goes": true,
+  "bulk delete asks then goes": false,
   "no put it back": true,
   "delete what is not there": true,
-  "an edit that changes nothing": false,
+  "an edit that changes nothing": true,
   "reminder relative": true,
   "reminder clock": true,
   "reminder repeats": true,
@@ -102,7 +102,7 @@
   "remembers the thread · en": true,
   "task: student deadlines · en": true,
   "task: freelancer projects · en": true,
-  "task: shop stock · en": true,
+  "task: shop stock · en": false,
   "task: home budget · en": true,
   "task: run by talk · en": true,
   "clear the done ones · en": true,
@@ -118,14 +118,14 @@
    "total": 51
   },
   "en": {
-   "passed": 51,
+   "passed": 50,
    "total": 52
   }
  },
  "disagreed": [],
- "seconds": 256.0,
- "tokens_in": 1538776,
- "tokens_out": 7105,
+ "seconds": 267.3,
+ "tokens_in": 1563352,
+ "tokens_out": 6995,
  "tokens_reasoning": 0,
- "usd": 0.1599882
+ "usd": 0.18585179999999996
 }
