@@ -278,7 +278,7 @@ def log_scope(tool: str, args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         since, until = W.period_range(period) if period in W.PERIODS else (None, None)
     elif tool == "recall" and not args.get("rang"):
         kind, list_name, words = _recall_filters(args)
-        since, until = W.parse_bound(args.get("since")), W.parse_bound(args.get("until"), end=True)
+        since, until = _bounds(args)
     else:
         return None
     if not (kind or list_name or match_key(words).strip()):
@@ -299,10 +299,25 @@ def in_scope(scope: Dict[str, Any], event: Dict[str, Any]) -> bool:
     return _matches_query({"text": event.get("label") or ""}, scope["words"])
 
 
+def _bounds(args: Dict[str, Any]) -> Tuple[Optional[datetime], Optional[datetime]]:
+    """A recall's range: a named period by the code (`W.period_range`), else its dates."""
+    period = str(args.get("period") or "")
+    if period in W.PERIODS:
+        return W.period_range(period)
+    return W.parse_bound(args.get("since")), W.parse_bound(args.get("until"), end=True)
+
+
+def _far(*bounds: Optional[datetime]) -> bool:
+    now = W.now_utc()
+    return any(b is not None and abs(b - now) > W.FAR for b in bounds)
+
+
 def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     kind, list_name, query = _recall_filters(args)
-    since = W.parse_bound(args.get("since"))
-    until = W.parse_bound(args.get("until"), end=True)
+    since, until = _bounds(args)
+    if _far(since, until):
+        return refused("a date more than a year from today: ask him which date he means before "
+                       "reading; for «this month», «last week» send period, never dates")
     rows: List[Dict[str, Any]] = []
     if args.get("rang"):
         return _rang(since, until, query)

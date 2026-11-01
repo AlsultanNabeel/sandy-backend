@@ -205,7 +205,8 @@ CASES += [
          "item": {"list": "shopping", "has": "خبز"}}]},
     {"name": "what did I buy", "setup": [
         {"item": {"list": "shopping", "text": "رمان", "done": True}}], "steps": [
-        {"say": "شو اشتريت هالشهر؟", "any_tools": ["recall", "summarize"], "reply_has": ["رمان"]}]},
+        {"say": "شو اشتريت هالشهر؟", "tools": ["recall"], "reply_has": ["رمان"],
+         "args": {"recall": {"done": True, "period": "month"}}}]},
     # How results are emailed is his to say, and only then (phase one, the owner's 29 Oct).
     {"name": "task: tell me at once", "steps": [
         {"say": "كل ساعة شوفيلي سعر الدهب، وبلّغيني فوراً كل ما يتغيّر", "tools": ["task_create"],
@@ -356,8 +357,9 @@ EN_CASES += [
          "item": {"list": "shopping", "has": "bread"}}],
         [{"item": {"list": "shopping", "text": "pomegranate", "done": True}},
          {"item": {"list": "shopping", "text": "bread"}}]),
-    _en("what did I buy", [{"say": "what did I buy this month?", "any_tools": ["recall", "summarize"],
-                            "reply_has": ["pomegranate"]}],
+    _en("what did I buy", [{"say": "what did I buy this month?", "tools": ["recall"],
+                            "reply_has": ["pomegranate"],
+                            "args": {"recall": {"done": True, "period": "month"}}}],
         [{"item": {"list": "shopping", "text": "pomegranate", "done": True}}]),
     _en("task: tell me at once", [
         {"say": "Check the gold price every hour and tell me right away whenever it changes",

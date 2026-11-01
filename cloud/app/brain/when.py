@@ -20,7 +20,9 @@ from app.utils.time_awareness import plausible_future_iso
 
 logger = logging.getLogger(__name__)
 
-PERIODS = ("today", "yesterday", "week", "month", "year")
+PERIODS = ("today", "yesterday", "week", "last_week", "month", "last_month", "year")
+# A date the model sends further than this from today is asked about, never read.
+FAR = timedelta(days=366)
 RECURRENCES = {"daily": "FREQ=DAILY", "weekly": "FREQ=WEEKLY",
                "monthly": "FREQ=MONTHLY", "yearly": "FREQ=YEARLY"}
 
@@ -237,16 +239,22 @@ def parse_bound(text: str, *, end: bool = False) -> Optional[datetime]:
 
 def period_range(period: str, now: Optional[datetime] = None) -> Tuple[datetime, datetime]:
     """[start, end) in UTC for a named period, in the user's calendar: «هالأسبوع» is from
-    Saturday (the week runs Saturday to Friday), «هالشهر» from the 1st, «هالسنة» from January, each up to the end of today."""
+    Saturday (the week runs Saturday to Friday), «هالشهر» from the 1st, «هالسنة» from January, each up to the end of today;
+    «الأسبوع الماضي» and «الشهر الماضي» the whole one before."""
     now = (now or datetime.now(USER_TZ)).astimezone(USER_TZ)
     day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = day + timedelta(days=1)
     if period == "yesterday":
         start, end = day - timedelta(days=1), day
-    elif period == "week":
+    elif period in ("week", "last_week"):
         start = day - timedelta(days=(day.weekday() - 5) % 7)
+        if period == "last_week":
+            start, end = start - timedelta(days=7), start
     elif period == "month":
         start = day.replace(day=1)
+    elif period == "last_month":
+        end = day.replace(day=1)
+        start = (end - timedelta(days=1)).replace(day=1)
     elif period == "year":
         start = day.replace(month=1, day=1)
     else:

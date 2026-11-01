@@ -61,13 +61,19 @@ _THINK = (
     "never name anything that is not in it. Use your tools only if you need more. If nothing in "
     "it is worth telling him, answer exactly NOTHING. Otherwise answer the message to send him: "
     "short, in {language}, names and his words kept as they are. Never say how or when he "
-    "is told; the way it reaches him is set apart. Only what changed.")
+    "is told; the way it reaches him is set apart. Only what changed.\n{now}")
 _REVIEW = (
     "You check a message before it is sent to the user. The task, in his own words: "
     "{instructions}\nWorth telling him: {notify_when}\nRead the message against the task and "
     "what changed. If it is wrong, names anything that did not change, or says how or when he "
     "is told, fix it; if it is not worth sending, answer exactly NOTHING. "
-    "Otherwise answer the message as it should be sent, in {language}, and nothing else.")
+    "Otherwise answer the message as it should be sent, in {language}, and nothing else.\n{now}")
+
+
+def _clock() -> str:
+    """Today and his clock, in his zone: what «today» and «this month» mean in the prompts."""
+    from app.utils.time import USER_TZ, zone_name
+    return f"Now, on his clock: {datetime.now(USER_TZ):%A %Y-%m-%d %H:%M} ({zone_name()})."
 
 
 def _id(doc: Dict[str, Any]) -> str:
@@ -255,7 +261,7 @@ def _think_messages(spec: Dict[str, Any], diff: Dict[str, Any], before: Dict[str
         {"role": "system", "content": _THINK.format(
             instructions=without_way(spec.get("instructions", "")),
             notify_when=without_way(spec.get("notify_when", "")),
-            last=before.get("last_result") or "nothing yet", language=language)},
+            last=before.get("last_result") or "nothing yet", language=language, now=_clock())},
         {"role": "user", "content": json.dumps({"changed": task_diff.shown(diff)},
                                                ensure_ascii=False, default=str)}]
 
@@ -267,7 +273,7 @@ def _review(spec: Dict[str, Any], diff: Dict[str, Any], message: str, uid: str) 
         {"role": "system", "content": _REVIEW.format(
             instructions=without_way(spec.get("instructions", "")),
             notify_when=without_way(spec.get("notify_when", "")),
-            language=language)},
+            language=language, now=_clock())},
         {"role": "user", "content": json.dumps({"changed": task_diff.shown(diff), "message": message},
                                                ensure_ascii=False, default=str)}],
         priority=background.SCHEDULED, user_id=uid, max_tokens=500, temperature=0)) or NOTHING

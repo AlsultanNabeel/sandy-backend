@@ -79,6 +79,9 @@ def _schemas() -> List[Dict[str, Any]]:
         {"name": "recall", "description": "دوّري بالسجلّ والقوائم والتذكيرات ورجّعي صفوف مختصرة.",
          "parameters": _obj({"query": _S,
                              "kind": {**_S, "description": "نوع سجلّ أو تذكير (اختياري)"},
+                             "period": {"type": "string", "enum": list(PERIODS), "description": (
+                                 "فترة بالاسم، الكود بيحسبها («هالشهر» month، «الأسبوع الماضي» last_week)؛ "
+                                 "أحسن من since/until")},
                              "since": {**_S, "description": "ISO date"},
                              "rang": {"type": "boolean", "description": "التذكيرات اللي رنّت («شو فاتني؟»)، آخر يوم إذا ما في since"},
                              "until": {**_S, "description": "ISO date"},
