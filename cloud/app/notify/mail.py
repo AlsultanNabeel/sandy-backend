@@ -382,7 +382,7 @@ def flush() -> None:
     now = _now()
     held: Dict[str, List[Dict[str, Any]]] = {}
     for r in coll.find({"email": HELD}).sort("at", 1):
-        held.setdefault(str(r.get("task_id") or ""), []).append(r)
+        held.setdefault(str(r.get("task_id") or ""), []).append(notify.opened(r))
     due = [t for t in held if _due(coll, t, now)]
     for n, task_id in enumerate(due):
         sent = _sent_this_hour(coll, now)

@@ -126,7 +126,8 @@ def _scope(spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def _of(scope: Dict[str, Any], log: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     from app.brain.tools_blocks import in_scope
-    return [e for e in log if in_scope(scope, e)]
+    opened = (events.opened(e) for e in log)
+    return [e for e in opened if in_scope(scope, e)]
 
 
 # A task made before this moved to the log quietly on its first run there (where it starts,

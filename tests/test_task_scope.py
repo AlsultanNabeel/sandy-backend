@@ -237,3 +237,33 @@ def test_a_change_of_his_with_no_event_is_still_an_error(world, monkeypatch):
     clock[0] += timedelta(days=1, minutes=1)
     _run(doc)
     assert [e for e in _errors(world.db) if rid in e]
+
+
+# ── sealed words (review, 1 Nov): opened on the server before the task's model reads them, as
+# in the chat, and never written open anywhere: the task's own state keeps them sealed ──
+
+@pytest.fixture
+def sealed(monkeypatch):
+    from cryptography.fernet import Fernet
+    from app.utils import ltm_crypto
+    monkeypatch.setattr(ltm_crypto, "_fernet", Fernet(Fernet.generate_key()))
+    monkeypatch.setattr(ltm_crypto, "_init_attempted", True)
+
+
+@pytest.mark.parametrize("language", ["ar", "en"])
+def test_sealed_words_reach_the_model_open_and_are_kept_sealed(world, sealed, language):
+    import json
+    from app.utils.ltm_crypto import encrypt_field
+    doc = _task({"tool": "recall", "args": {"kind": "mood"}}, language)
+    _run(doc)
+    secret = "زعلان كتير من الشغل"
+    with active_user_profile_context(A):
+        entries.add("mood", encrypt_field(secret), {"mood": "sad", "encrypted": True}, embed=False)
+    _run(doc)
+    shown = json.dumps([m for _, ms in world.asked for m in ms], ensure_ascii=False)
+    assert secret in shown and "enc:" not in shown
+    for name in world.db.list_collection_names():
+        kept = json.dumps(list(world.db[name].find()), ensure_ascii=False, default=str)
+        assert secret not in kept, name
+    with active_user_profile_context(A):
+        assert secret in json.dumps(tasks.state(doc["id"]), ensure_ascii=False, default=str)   # opened on reading

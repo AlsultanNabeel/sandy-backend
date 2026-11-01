@@ -161,14 +161,33 @@ def remove(task_id: str) -> bool:
     return True
 
 
+# What a task keeps of his words (the reads, the difference, what it told him) is kept sealed,
+# as the rows it read are, and opened when it is read back.
+_SEALED = ("last_seen", "audit_seen", "batch_found", "batch_diff", "last_result")
+_WORDS = ("text", "label")
+
+
+def _walk(value: Any, change, words: bool = False) -> Any:
+    if isinstance(value, dict):
+        return {k: _walk(v, change, k in _WORDS) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_walk(v, change, words) for v in value]
+    return change(value) if words and isinstance(value, str) else value
+
+
 def state(task_id: str) -> Dict[str, Any]:
     """What the task saw on its last run; {} before its first."""
+    from app.utils.ltm_crypto import decrypt_field
     coll = _base.coll(STATE)
     row = coll.find_one({"_id": task_id}) if coll is not None else None
-    return {k: v for k, v in (row or {}).items() if k not in ("_id", "user_id")}
+    return {k: _walk(v, decrypt_field, k == "last_result") if k in _SEALED else v
+            for k, v in (row or {}).items() if k not in ("_id", "user_id")}
 
 
 def save_state(task_id: str, values: Mapping[str, Any]) -> None:
+    from app.utils.ltm_crypto import encrypt_field
     coll = _base.coll(STATE)
     if coll is not None:
-        coll.update_one({"_id": task_id}, {"$set": dict(values)}, upsert=True)
+        kept = {k: _walk(v, encrypt_field, k == "last_result") if k in _SEALED else v
+                for k, v in values.items()}
+        coll.update_one({"_id": task_id}, {"$set": kept}, upsert=True)

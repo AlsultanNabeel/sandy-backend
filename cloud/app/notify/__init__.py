@@ -29,16 +29,27 @@ CHANNELS: List[Callable[[Dict[str, Any]], None]] = [mail.send]
 FLUSHES: List[Callable[[], None]] = [mail.flush]
 
 
+# His words in a result are kept sealed, and opened for whoever reads it (the app, the chat,
+# the email).
+_SEALED = ("body", "state")
+
+
+def opened(row: Dict[str, Any]) -> Dict[str, Any]:
+    from app.utils.ltm_crypto import decrypt_field
+    return {**row, **{k: decrypt_field(row[k]) for k in _SEALED if isinstance(row.get(k), str)}}
+
+
 def deliver(task_id: str, title: str, body: str, language: str, state: str = "") -> str:
     """Keep the result and send it through every channel; its id ("" with no tenant).
     ``state`` is how things are now, in a line (`task_diff.describe`)."""
     coll = _base.coll(RESULTS)
     if coll is None:
         return ""
+    from app.utils.ltm_crypto import encrypt_field
     row = {"_id": _base.new_id(), "task_id": str(task_id), "title": str(title or ""),
            "body": str(body or ""), "lang": language, "at": datetime.now(timezone.utc),
            "state": str(state or ""), "seen": False}
-    coll.insert_one(row)
+    coll.insert_one({**row, **{k: encrypt_field(row[k]) for k in _SEALED}})
     from app.services import schedule_sync
     schedule_sync.changed("task")       # the Tasks screen shows it at once
     out = {**row, "id": row["_id"]}
@@ -76,7 +87,7 @@ def unseen(limit: int = 20) -> List[Dict[str, Any]]:
     if coll is None:
         return []
     rows = coll.find({"seen": False}).sort("at", -1).limit(limit)
-    return [{**{k: v for k, v in r.items() if k not in ("_id", "user_id")}, "id": r["_id"]}
+    return [opened({**{k: v for k, v in r.items() if k not in ("_id", "user_id")}, "id": r["_id"]})
             for r in rows]
 
 
@@ -92,7 +103,7 @@ def of_task(task_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     if coll is None:
         return []
     rows = coll.find({"task_id": str(task_id)}).sort("at", -1).limit(limit)
-    return [_base.out(r) for r in rows]
+    return [opened(_base.out(r)) for r in rows]
 
 
 def unseen_by_task() -> Dict[str, int]:

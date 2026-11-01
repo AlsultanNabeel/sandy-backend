@@ -132,6 +132,19 @@ def since(seq: int, *, limit: int = 500) -> List[Dict[str, Any]]:
     return list(coll.find({"seq": {"$gt": int(seq or 0)}}).sort("seq", 1).limit(limit))
 
 
+def opened(event: Mapping[str, Any]) -> Dict[str, Any]:
+    """An event with its sealed words opened, on the server, for what reads it now (a task's
+    scope and its model); the log itself keeps them sealed."""
+    from app.utils.ltm_crypto import decrypt_field
+
+    out = dict(event)
+    out["label"] = decrypt_field(out.get("label") or "") or out.get("label")
+    for side in ("before", "after"):
+        if isinstance(out.get(side), dict) and isinstance(out[side].get("text"), str):
+            out[side] = {**out[side], "text": decrypt_field(out[side]["text"])}
+    return out
+
+
 def seq_at(at) -> int:
     """Where his log was at ``at`` (0 before his first event)."""
     coll = _base.coll(EVENTS)
