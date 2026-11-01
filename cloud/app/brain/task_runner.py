@@ -147,6 +147,38 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# What the system writes on his rows with no event, never compared by the audit: a schedule's
+# time and state move as it rings and repeats, a message to himself is opened when delivered
+# (and leaves the pending ones it is read from), and his clock renders every time (compared as
+# the instant it is).
+_SCHEDULES = ("reminder", "message_to_future_self")
+_TIMES = ("at", "due")
+
+
+def _instant(value: Any) -> Any:
+    try:
+        when = datetime.fromisoformat(str(value))
+    except ValueError:
+        return value
+    return (when if when.tzinfo else when.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
+
+
+def _his(row: Dict[str, Any]) -> Dict[str, Any]:
+    """A row as only he changes it."""
+    if row.get("kind") in _SCHEDULES:
+        keep = ("id", "kind", "recurrence") if row["kind"] == "message_to_future_self" else (
+            "id", "kind", "text", "recurrence")
+        return {k: row[k] for k in keep if k in row}
+    return {k: _instant(v) if k in _TIMES and v else v for k, v in row.items()}
+
+
+def _audited(found: Any) -> Dict[str, Any]:
+    if not isinstance(found, dict):
+        return {}
+    return {k: [_his(r) if isinstance(r, dict) else r for r in v]
+            for k, v in found.items() if isinstance(v, list)}
+
+
 def _audit(scope: Dict[str, Any], before: Dict[str, Any], found: Any, task_id: str) -> Dict[str, Any]:
     """Once a day: the rows that changed since the last full read and have no event in the log.
     What to keep for the next audit."""
@@ -156,9 +188,11 @@ def _audit(scope: Dict[str, Any], before: Dict[str, Any], found: Any, task_id: s
         return keep
     if _now() - (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) < AUDIT_EVERY:
         return {}
-    diff = task_diff.compute(before.get("audit_seen"), found)
+    diff = task_diff.compute(_audited(before.get("audit_seen")), _audited(found))
     logged = {e["row"] for e in _of(scope, events.since(before.get("audit_cursor") or 0))}
-    missed = sorted({str(r.get("id")) for r in [*diff["added"], *diff["removed"],
+    # A schedule that left the pending ones rang or was delivered; one he removed is logged.
+    gone = [r for r in diff["removed"] if r.get("kind") not in _SCHEDULES]
+    missed = sorted({str(r.get("id")) for r in [*diff["added"], *gone,
                                                 *(c["after"] for c in diff["changed"])]} - logged)
     if missed:
         logger.error("[tasks] task %s: changes with no event in the log: %s", task_id, missed)

@@ -187,3 +187,53 @@ def test_an_item_moved_away_is_told_by_the_old_lists_task(world, language, said)
     _run(doc)
     with lang.using(language):
         assert world.sent == [said.format(task_diff.list_name("tasks"))]
+
+
+# ── the daily check against a full read compares only what he changes (review, 1 Nov): a
+# reminder's ring, a repeat moving to its next time, a message to himself marked delivered and
+# a new time zone are the system's own writes, with no event, and are no error ──
+
+def _errors(db):
+    from app.features import trace_store
+    return [r["error"] for r in db[trace_store.COLLECTION].find({"error": {"$ne": None}})]
+
+
+def test_the_systems_own_writes_are_no_error_in_the_daily_check(world, monkeypatch):
+    from zoneinfo import ZoneInfo
+    clock = [datetime.now(timezone.utc)]
+    monkeypatch.setattr(task_runner, "_now", lambda: clock[0])
+    soon = clock[0] + timedelta(hours=2)
+    with active_user_profile_context(A):
+        daily = schedules.add("reminder", "الدوا", soon, recurrence="FREQ=DAILY")
+        once = schedules.add("reminder", "اتصل بأمي", soon)
+        future = schedules.add("message_to_future_self", "رسالة لإلي", soon)
+        items.add("shopping", "رمان", due=soon)
+    reminders = _task({"tool": "recall", "args": {"kind": "reminder"}})
+    future_task = _task({"tool": "recall", "args": {"kind": "message_to_future_self"}})
+    shopping = _task({"tool": "recall", "args": {"list": "shopping"}})
+    for doc in (reminders, future_task, shopping):
+        _run(doc)
+    rows = world.db["sandy_schedules"]
+    with active_user_profile_context(A):
+        schedules.arm("tok", [daily, once])                                   # the phone rings it
+    rows.update_one({"_id": daily}, {"$set": {"fire_at": soon + timedelta(days=1)}})   # its next time
+    rows.update_one({"_id": once}, {"$set": {"status": "fired"}})                      # rang
+    rows.update_one({"_id": future}, {"$set": {"status": "sent"}})                     # delivered
+    monkeypatch.setattr("app.utils.time.current_zone", lambda: ZoneInfo("Asia/Tokyo"))  # he travelled
+    clock[0] += timedelta(days=1, minutes=1)
+    for doc in (reminders, future_task, shopping):
+        _run(doc)
+    assert _errors(world.db) == []
+
+
+def test_a_change_of_his_with_no_event_is_still_an_error(world, monkeypatch):
+    clock = [datetime.now(timezone.utc)]
+    monkeypatch.setattr(task_runner, "_now", lambda: clock[0])
+    with active_user_profile_context(A):
+        rid = schedules.add("reminder", "الدوا", clock[0] + timedelta(hours=2))
+    doc = _task({"tool": "recall", "args": {"kind": "reminder"}})
+    _run(doc)
+    world.db["sandy_schedules"].update_one({"_id": rid}, {"$set": {"text": "دوا تاني"}})
+    clock[0] += timedelta(days=1, minutes=1)
+    _run(doc)
+    assert [e for e in _errors(world.db) if rid in e]
