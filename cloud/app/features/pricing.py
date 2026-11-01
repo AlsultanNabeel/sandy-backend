@@ -18,7 +18,7 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-PRICES_UPDATED = date(2026, 10, 29)
+PRICES_UPDATED = date(2026, 11, 1)
 
 PRICES: Dict[str, Dict[str, float]] = {
     "gpt-4.1": {"in": 2.00, "cached": 0.50, "out": 8.00},
@@ -37,6 +37,14 @@ PRICES: Dict[str, Dict[str, float]] = {
 
 # Prices taken from an outside source, not the provider's own: each must be checked against
 # the first official invoice that bills it (Azure's, Google's), then taken off this list.
+# What a call to a service that is not a model costs, in US dollars a call, as its provider
+# publishes it.
+FEES: Dict[str, float] = {
+    # Steel's Browser Tools (scrape, screenshot): $5 per 1,000 calls on Launch and Scale,
+    # docs.steel.dev/overview/browser-tools/overview, 1 Nov 2026.
+    "steel_tool": 0.005,
+}
+
 UNCONFIRMED: Dict[str, str] = {
     "gpt-6-luna": "azurespeed.com/AzureAiModelPricing/Models/openai-gpt-6-luna, 29 Oct 2026",
     "gemini-3.8-live": "productbuilder.net/models/gemini-3-8-live (audio rates), 29 Oct 2026",
@@ -75,3 +83,13 @@ def cost(model: str, *, tokens_in: int, tokens_out: int, tokens_cached: int = 0)
     cached = min(max(tokens_cached, 0), max(tokens_in, 0))
     return ((tokens_in - cached) * price["in"] + cached * price["cached"]
             + tokens_out * price["out"]) / 1_000_000
+
+
+def fee(name: str) -> float:
+    """What one call of a service in `FEES` costs; 0 for one not listed (logged once)."""
+    if name in FEES:
+        return FEES[name]
+    if name not in _unpriced_seen:
+        _unpriced_seen.add(name)
+        logger.warning("[pricing] no fee for %r — counted as free", name)
+    return 0.0

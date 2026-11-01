@@ -105,6 +105,8 @@ class Trace:
         self._lock = threading.Lock()
         self.model_calls: List[Dict[str, Any]] = []
         self.tools: List[Dict[str, Any]] = []
+        # Calls to paid services that are not models (`pricing.FEES`): {what, usd}.
+        self.fees: List[Dict[str, Any]] = []
         # The live model's turn being counted (`note_live_usage`); one voice turn of ours can
         # span two of its turns, each billed on its own.
         self._live: Optional[Dict[str, Any]] = None
@@ -133,18 +135,25 @@ class Trace:
             self.tools.append({"name": name, "args": args, "result": result, "ok": ok,
                                "ms": round(float(ms or 0))})
 
+    def add_fee(self, what: str, usd: float) -> None:
+        with self._lock:
+            self.fees.append({"what": str(what), "usd": float(usd or 0)})
+
     def _row(self, request: str, reply: str, routed_by: str, error: Optional[str]) -> Dict[str, Any]:
         with self._lock:
             calls = list(self.model_calls)
             used = list(self.tools)
-        cost = sum(pricing.cost(c["model"], tokens_in=c["tokens_in"], tokens_out=c["tokens_out"],
-                                tokens_cached=c["tokens_cached"]) for c in calls)
+            fees = list(self.fees)
+        cost = sum(f["usd"] for f in fees) + sum(
+            pricing.cost(c["model"], tokens_in=c["tokens_in"], tokens_out=c["tokens_out"],
+                         tokens_cached=c["tokens_cached"]) for c in calls)
         return {
             "_id": self.id, "at": self.at, "source": self.source, "thread_id": self.thread_id,
             "routed_by": routed_by,
             "request": _seal(request or None), "reply": _seal(reply or None),
             "tools": [{**t, "args": _seal(t["args"]), "result": _seal(t["result"])} for t in used],
             "model_calls": calls,
+            "fees": fees,
             "tokens_in": sum(c["tokens_in"] for c in calls),
             "tokens_out": sum(c["tokens_out"] for c in calls),
             "tokens_reasoning": sum(c.get("tokens_reasoning", 0) for c in calls),
@@ -239,6 +248,13 @@ def note_tool(name: str, args: Any, result: Any, ms: float = 0) -> None:
     trace = _current.get()
     if trace is not None:
         trace.add_tool(name, args, result, ms)
+
+
+def note_fee(name: str, count: int = 1) -> None:
+    """``count`` calls of the paid service ``name`` (`pricing.FEES`) into the current trace."""
+    trace = _current.get()
+    if trace is not None:
+        trace.add_fee(name, pricing.fee(name) * count)
 
 
 @contextmanager
