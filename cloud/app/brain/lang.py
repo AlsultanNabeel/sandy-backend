@@ -539,6 +539,17 @@ PHRASES = {
                     "en": "I couldn't change that right now; try again in a bit."},
     "browser_stopped": {"ar": "كل شي موقّف هلّق. قول «رجّعي» وبكمّل.",
                         "en": "Everything is stopped right now. Say «resume» and I'll carry on."},
+    # What stops the browser on a page (`brain/browser_guard`).
+    "browser_forbidden_password": {"ar": "وقفت: صفحة {site} بدها كلمة سر، وأنا ما بكتب كلمات سر. سجّل إنت بإيدك من التطبيق.",
+                                   "en": "I stopped: the page on {site} asks for a password, and I never type "
+                                         "passwords. Sign in yourself from the app."},
+    "browser_forbidden_card": {"ar": "وقفت: صفحة {site} بدها رقم بطاقة، وأنا ما بدخّل بطاقات أبداً.",
+                               "en": "I stopped: the page on {site} asks for a card number, and I never enter cards."},
+    "browser_forbidden_captcha": {"ar": "وقفت: صفحة {site} فيها صورة تحقق، وما بحلّها. بتقدر تكمّل إنت من «متصفح ساندي».",
+                                  "en": "I stopped: the page on {site} has a captcha, and I don't solve those. You "
+                                        "can carry on yourself from «Sandy's browser»."},
+    "browser_forbidden_payment": {"ar": "وقفت: صفحة {site} صفحة دفع، وأنا ما بدفع أبداً.",
+                                  "en": "I stopped: the page on {site} is a payment page, and I never pay."},
     # The sites screen (`features/browser_sites`).
     "browser_bad_level": {"ar": "المستوى لازم يكون قراءة بس، أو تعبئة، أو إرسال.",
                           "en": "The level has to be read only, fill, or send."},
