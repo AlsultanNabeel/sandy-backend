@@ -267,3 +267,24 @@ def test_sealed_words_reach_the_model_open_and_are_kept_sealed(world, sealed, la
         assert secret not in kept, name
     with active_user_profile_context(A):
         assert secret in json.dumps(tasks.state(doc["id"]), ensure_ascii=False, default=str)   # opened on reading
+
+
+# ── a task paused longer than the log keeps (review, 1 Nov): it starts afresh from now and
+# says so, instead of telling a log with a hole in it ──
+
+@pytest.mark.parametrize("language, said", [("ar", "بلّشت من جديد"), ("en", "started afresh")])
+def test_a_task_paused_past_the_logs_days_starts_afresh_and_says_so(world, language, said):
+    from app.blocks import events
+    doc = _task({"tool": "recall", "args": {"list": "shopping"}}, language)
+    _run(doc)
+    with active_user_profile_context(A):
+        tasks.save_state(doc["id"], {"ran_at": datetime.now(timezone.utc) - timedelta(days=events.KEEP_DAYS + 1)})
+        items.add("shopping", "رمان")
+    _run(doc)
+    assert len(world.sent) == 1 and said in world.sent[0] and "رمان" not in world.sent[0]
+    with active_user_profile_context(A):
+        assert tasks.state(doc["id"])["cursor"] == events.last_seq()
+        items.add("shopping", "خبز")
+    _run(doc)
+    assert world.sent[-1] == ("انضاف «خبز» لـ«قائمة التسوق»" if language == "ar"
+                              else "«خبز» was added to «Shopping list»")

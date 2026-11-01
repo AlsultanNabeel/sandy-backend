@@ -423,6 +423,8 @@ PHRASES = {
     "list_renamed": {"ar": "«{before}» صار «{after}»", "en": "«{before}» is now «{after}»"},
     "task_stopped": {"ar": "وقّفت مهمة «{title}»: فشلت تلات مرات ورا بعض. خبّرني إذا بدك أرجّعها.",
                      "en": "I stopped the task «{title}»: it failed three times in a row. Tell me if you want it back."},
+    "task_restarted": {"ar": "مهمة «{title}» كانت موقّفة أكتر من تسعين يوم، فبلّشت من جديد من هلّق: اللي صار قبل ما بقدر أقارنه.",
+                       "en": "The task «{title}» was paused for more than ninety days, so it started afresh from now: I can't compare what happened before."},
     "task_missing": {"ar": "ما لقيت هالمهمة.", "en": "I couldn't find that task."},
     "mail_bad_address": {"ar": "هالإيميل مش مزبوط، تأكّد منه.", "en": "That email doesn't look right; check it."},
     "mail_too_soon": {"ar": "لسا باعتة رابط قبل شوي. استنى خمس دقايق وجرّب.",

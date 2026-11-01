@@ -145,6 +145,14 @@ def _where_it_starts(doc: Dict[str, Any]) -> Optional[int]:
     return None if made < LOG_FROM else events.seq_at(made)
 
 
+def _gone_by(ran_at: Any) -> bool:
+    """Whether its last run is older than what the log keeps (`events.KEEP_DAYS`)."""
+    if not isinstance(ran_at, datetime):
+        return False
+    ran_at = ran_at if ran_at.tzinfo else ran_at.replace(tzinfo=timezone.utc)
+    return _now() - ran_at > timedelta(days=events.KEEP_DAYS)
+
+
 # Once a day a check on the log is checked against a full read: a change with no event is an
 # error in the trace (the log is the truth only while every write goes through it).
 AUDIT_EVERY = timedelta(days=1)
@@ -364,10 +372,20 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                 logged = scope is not None
                 if logged and cursor is None:
                     cursor = _where_it_starts(doc)
+                if logged and cursor is not None and _gone_by(before.get("ran_at")):
+                    # Paused past what the log keeps: a hole in it is never told as news.
+                    at = events.last_seq()
+                    tasks.save_state(_id(doc), {"fingerprint": seen, "last_seen": found, "failures": 0,
+                                                "cursor": at, "audit_at": _now(), "audit_seen": found,
+                                                "audit_cursor": at, "ran_at": _now()})
+                    title = str(doc.get("text") or "")
+                    return notify.deliver(_id(doc), title, lang.say("task_restarted", title=title),
+                                          lang.current(), state=task_diff.describe(found))
                 if (not logged and before.get("last_seen") is None) or (logged and cursor is None):
                     # Its first run, or an old task's first on the log: where it starts,
                     # nothing told.
                     tasks.save_state(_id(doc), {"fingerprint": seen, "last_seen": found, "failures": 0,
+                                                "ran_at": _now(),
                                                 **({"cursor": events.last_seq(), "audit_at": _now(),
                                                     "audit_seen": found, "audit_cursor": events.last_seq()}
                                                    if logged else {})})
@@ -408,7 +426,7 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
             message = NOTHING
         # What it saw now, and where it stopped in the log, is where the next run starts,
         # whatever was told.
-        state = {"fingerprint": seen, "last_seen": found, "failures": 0,
+        state = {"fingerprint": seen, "last_seen": found, "failures": 0, "ran_at": _now(),
                  **({"cursor": cursor} if cursor is not None else {})}
         if message.strip() == NOTHING:
             tasks.save_state(_id(doc), state)
