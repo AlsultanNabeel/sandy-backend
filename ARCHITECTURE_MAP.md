@@ -125,8 +125,8 @@ package import in a test with no credentials. Do not add import-time side effect
 | `app/brain/` | The agent: the loop, its tools, short-term memory, held confirmations, persona, the fast path (§2.3–§2.5). |
 | `app/blocks/` | The data layer — log / lists / schedules + the kinds table (§2.12). |
 | `app/api/` | HTTP routes and the `/voice` WebSocket (§2.9). |
-| `app/features/` | What is not a block: devices, nodes, scenes, focus, photos, users, usage, speaker id, firmware, device keys, research, weather, image analysis and generation (`vision`), account deletion. |
-| `app/integrations/` | Clients for everything external: the chat client (`openai_client.chat_fn`), embeddings, Exa, Places, FLUX/Azure images, Gemini TTS, MQTT (`mqtt_ingest` in, `device_publisher` out), Sentry. |
+| `app/features/` | What is not a block: devices, nodes, scenes, focus, photos, users, usage, speaker id, firmware, device keys, research, a page read (`web_page`), weather, image analysis and generation (`vision`), account deletion. |
+| `app/integrations/` | Clients for everything external: the chat client (`openai_client.chat_fn`), embeddings, Exa, Steel (`steel_client`), Places, FLUX/Azure images, Gemini TTS, MQTT (`mqtt_ingest` in, `device_publisher` out), Sentry. |
 | `app/services/` | APNs, the `sandy_schedules` runner (once a minute) and the daily-nudge scheduler. |
 | `app/utils/` | Tenancy (`tenant_db`, `tenant_version`), `ltm_crypto`, circuit breaker, background thread pool, process leader, profiles, time, Arabic days. Rate limiting lives in `features/usage_store.py` and `api/metering.py`. |
 
@@ -278,12 +278,14 @@ side-by-side tools of one step report into it too. The words — request, reply,
 arguments and results — are sealed with `SANDY_LTM_KEY`; without the key none are kept,
 only the numbers. Rows expire after thirty days (TTL on `expire_at`), are written under
 their user (`ScopedCollection`) and erased with the account. `finish` never raises: a
-trace that cannot be written is a warning, never a broken turn. Image generation and
+trace that cannot be written is a warning, never a broken turn. A paid call that is not a model
+(Steel's, `pricing.FEES`) is kept on the row as `fees` (`trace_store.note_fee`) and counted in its
+cost. Image generation and
 embeddings are not counted yet.
 
 ### 2.4 Tools
 
-Nineteen (`tools.py`), and four more for an account with the `tasks` switch on (`tools_tasks.py`: `task_create`, which shows the task and waits for a yes, one question only (a turn where only tasks wait and nothing else was done answers with our question alone, the model's own words dropped, `loop._only_tasks`; how often said as people say it, «كل دقيقة», «كل ساعتين», «كل 3 ساعات», «every minute», `tools_tasks._span`), refusing a check that does not read and a tool outside `tasks.ALLOWED` (reads only: that list is the guard); words that ask to pay, transfer, send in his name, publish or delete (`_asks_to_act`) do not refuse, they make the yes it waits for say a task never does them (`task_confirm_reads_only`); `task_list`, `task_update` for pause, resume, a new interval and a new way of telling (`notify_how`, `notify_hours`, `notify_at`, on `task_create` too, set only from his words), all at once, and new words (`title`, `instructions`, a new `check_tool`/`check_args` that must read), which wait for a yes on the same question the Tasks screen shows (`edit_summary`), all through `tasks.edit`, the one change of a task (new words or a new check forget what it saw); the robot's call has them as the app's, `task_cancel`, which deletes only when his own words ask for it (`_DELETE`: on the real model «وقّفيها» once went to it; refused and sent back to `task_update` pause); `openai_tools(user_id)`, and on the call too, `declarations(user_id)` from the session's caller, the check's free-form arguments spelled out as the read tools' own fields since Gemini refuses an object with none (`tools._spoken_task`), the yes held and answered by `confirm` as any other, and the tasks' rule in the call's per-session context, not the cached instruction, since the switch moves no tenant version; for those accounts the prompt carries `context.TASKS_RULE`: «track…», «every hour check…», «tell me if…» is a task made at once on a best guess, a list named for what is tracked («المخزون», «Inventory») its check, and one clear question only when nothing can be checked), voice adds `confirm`, and the robot's call `end_call` (`brain/voice.END_CALL`, handled by the session, not the brain: the call closes once her goodbye has played, `_GOODBYE_MAX_S` at most, and the board reads the clean close as the end; the app has its own end button and is told to point to it; the per-call channel line says only the tool ends a call, «سكّري» alone means it, with a list item it is the list's, unclear she asks). The extra fields are named (`LOG_DATA`,
+Nineteen (`tools.py`); `page_read` for an account with the `browser` switch on (`tools_browser.py`, §2.4b); and four more for an account with the `tasks` switch on (`tools_tasks.py`: `task_create`, which shows the task and waits for a yes, one question only (a turn where only tasks wait and nothing else was done answers with our question alone, the model's own words dropped, `loop._only_tasks`; how often said as people say it, «كل دقيقة», «كل ساعتين», «كل 3 ساعات», «every minute», `tools_tasks._span`), refusing a check that does not read and a tool outside `tasks.ALLOWED` (reads only: that list is the guard); words that ask to pay, transfer, send in his name, publish or delete (`_asks_to_act`) do not refuse, they make the yes it waits for say a task never does them (`task_confirm_reads_only`); `task_list`, `task_update` for pause, resume, a new interval and a new way of telling (`notify_how`, `notify_hours`, `notify_at`, on `task_create` too, set only from his words), all at once, and new words (`title`, `instructions`, a new `check_tool`/`check_args` that must read), which wait for a yes on the same question the Tasks screen shows (`edit_summary`), all through `tasks.edit`, the one change of a task (new words or a new check forget what it saw); the robot's call has them as the app's, `task_cancel`, which deletes only when his own words ask for it (`_DELETE`: on the real model «وقّفيها» once went to it; refused and sent back to `task_update` pause); `openai_tools(user_id)`, and on the call too, `declarations(user_id)` from the session's caller, the check's free-form arguments spelled out as the read tools' own fields since Gemini refuses an object with none (`tools._spoken_task`), the yes held and answered by `confirm` as any other, and the tasks' rule in the call's per-session context, not the cached instruction, since the switch moves no tenant version; for those accounts the prompt carries `context.TASKS_RULE`: «track…», «every hour check…», «tell me if…» is a task made at once on a best guess, a list named for what is tracked («المخزون», «Inventory») its check, and one clear question only when nothing can be checked), voice adds `confirm`, and the robot's call `end_call` (`brain/voice.END_CALL`, handled by the session, not the brain: the call closes once her goodbye has played, `_GOODBYE_MAX_S` at most, and the board reads the clean close as the end; the app has its own end button and is told to point to it; the per-call channel line says only the tool ends a call, «سكّري» alone means it, with a list item it is the list's, unclear she asks). The extra fields are named (`LOG_DATA`,
 `LIST_DATA`: amount, category, mood, habit days and time, repeat, qty…), never a
 free-form object, which the voice model drops. Enums come from `kinds.KINDS`, so a new
 kind needs no tool change. A field the kind does not have («time» on a task) is set aside quietly
@@ -310,6 +312,33 @@ to the model saying what to pass, or to ask the user when (`_ASK_TIME`).
 | `weather` | `features/weather` (the city as itself, nothing appended); with no city, `home_city`: the city the app last showed weather for (`/api/weather` keeps it on `sandy_users.city`); with none saved she asks which city (no default, no guess from the zone; the route answers 400 `city_required`) |
 | `image` | `vision.generate_image_with_azure` on the model's own prompt (FLUX, then Azure DALL-E); one a turn, a second is refused (so it never runs side by side) |
 | `undo` | «تراجعي»، «لا رجّعيه»، «غلطت رجّعيها» take back the last change (everything one reply, or one tool of a call, wrote), however much was said since; `match_text` one row by name («رجّعي الحليب»), `count` the last that many rows. A deleted row comes back as it was (same id, text, dates, reminder, place in its list), an edited or cancelled one gets its old values, an added one goes (and the reply says it was removed, «شلت «جبنة»», `undo_removed`, when all it took back were adds); devices are not undone. Read from `blocks.changes`, seven days back |
+
+### 2.4b The browser — `page_read` (phase seven, session one)
+
+Behind the `browser` switch: the tool, and `context.BROWSER_RULE` in the chat's prompt and the
+call's per-session context (`voice_ws/memory.session_context`), are there only for an account with
+it on; without it the tool refuses. `features/web_page.read` reads a public page in up to three
+steps, each only when the one before read too little (`THIN`, 200 characters): a plain request
+(`_fetch_html`, the body cut at 2 MB, ten seconds), Steel's browser (`integrations/steel_client.scrape`,
+`POST /v1/scrape` with `STEEL_API_KEY`), then Steel's screenshot read by the vision model
+(`background.call("page_shot")`; Steel keeps the picture at a public link, so this is for public
+pages only). Every link is checked before it is opened and at every redirect (`check_url`): http or
+https, no name and password, ports 80 and 443, never a site of `BLOCKED` (the ones with an official
+connection, Gmail, Google accounts, GitHub, Facebook, Messenger, Instagram, and payment pages; more
+from `SANDY_BROWSER_BLOCKED`), never an address that is not public (`_public`; DNS rebinding between
+the check and the connect is the risk left). A page is `{url, title, text, links, via, warning}`:
+its words in paragraphs and its content's links (navigation, header, footer and aside dropped).
+What it hides (`display:none`, `hidden`, a font of size zero, `sr-only`) never reaches the model;
+when the hidden words speak to an assistant, or the visible ones give one orders (`_ORDERS`, both
+languages), `warning` is set: in the chat the code adds `page_warning` at the end of the reply,
+before a held question (`loop`, `ctx.artifacts["notices"]`), whatever the model wrote; on the call
+the tool's answer carries it to be said. Three pages a turn; Steel calls count a day per account on
+the usage row (`usage_store.browser_calls_today`, `SANDY_BROWSER_DAILY`, 100) and are billed on the
+trace. A task may check a page (`tasks.READ_TOOLS` has `page_read`; only with the switch on,
+`tools_tasks._check_allowed`, and a run with it off fails its check): a listing (five content links
+or more) is compared by its links, else by its words, both without the time that moves by itself
+(«منذ دقيقتين», «2 hours ago», `web_page.for_compare`), and a result from a page that gives orders
+carries the warning line. Signing in, forms and «متصفح ساندي» are session two (`docs/AGENT_PLAN.md`).
 
 **A result says whether it happened** (`CONVENTIONS.md` C10): `ok`, `error`,
 `reply`; `broke` when the tool raised (`tools.execute` catches it — one tool never
@@ -638,7 +667,8 @@ Who calls what:
   unreadable is off; `flags.on(name, user_id)` is the one way the code asks). The owner's
   account is `9125cd8fafb74c5e820e2bd8636759cd`; on production `SANDY_FLAGS` is
   `{"dev_tools": ["9125cd8fafb74c5e820e2bd8636759cd"], "tasks": ["9125cd8fafb74c5e820e2bd8636759cd"]}`
-  for phase one's acceptance, and `SANDY_PUBLIC_URL` (the emailed link, `notify/mail.py`) is
+  for phase one's acceptance (phase seven's adds `"browser": [<the owner's account>]`, with
+  `STEEL_API_KEY` set), and `SANDY_PUBLIC_URL` (the emailed link, `notify/mail.py`) is
   `https://sandy-robot-3da0693d32f7.herokuapp.com`.
 - **The owner** (`api/owner_api.py`, the accounts in `SANDY_OWNER_ACCOUNTS`; anyone else
   404) — `GET /api/owner/traces?limit=&user=&source=` (newest first, never words),
@@ -737,7 +767,7 @@ Speech-to-text on the voice path is Gemini Live's own input transcription. TTS
 (`/api/voice/tts`) is Gemini only. Images are Azure FLUX with an Azure OpenAI image
 fallback, taken only when FLUX failed, not when it timed out (`azure_flux.FluxTimedOut`: it may still be
 drawing and billing, and a second sixty seconds is past the worker's limit). Embeddings are Azure (`AZURE_OPENAI_EMBEDDING_DEPLOYMENT`) or OpenAI
-direct. Research is Exa; places are Google Places. Push is APNs over HTTP/2 (`h2`
+direct. Research is Exa; a page a plain request cannot read is Steel's (§2.4b); places are Google Places. Push is APNs over HTTP/2 (`h2`
 is in `requirements.txt` for exactly this). MQTT is HiveMQ Cloud over TLS.
 
 Circuit breakers (`utils/circuit_breaker.py`) wrap `openai_client`, `exa_client`,
@@ -1719,7 +1749,7 @@ cross-channel read from scanning every conversation on the server.
 
 ## 9. Tests and CI
 
-141 test files, pytest + mongomock, no hardware and no live credentials needed.
+184 test files, pytest + mongomock, no hardware and no live credentials needed.
 `tests/test_device_system.py` carries the headline guarantee: the brain may only
 act on a **registered** device with a **validated** action, and refuses with the
 allowed list rather than guessing. `tests/test_routes_kept.py` pins every route a
@@ -1772,7 +1802,14 @@ ar 38/41, en 40/42, two cases moved, $0.11, 3.3 s a message, 398 reasoning token
 `sandy-chat` ar 40/41, en 41/42, two moved, $0.18, 2.0 s (`T1752`). With the tasks' twelve cases
 (phase one, session A; their switch on for the run's account): ar 46/47, en 45/48, $0.13, 1.8 s
 (`2026-10-29T2031`); the task cases 10/12, «shop stock» asked which stock instead of making the
-task, in both languages. Session B of phase one (`2026-10-29T2156`, two runs, the morning's case added in both languages): ar 45/48, en 47/49, four cases moved between the runs (4.1%), $0.25; against the baseline «empty a list asks first», «reminder before another» and «undo» fell, none of them touched by it. After the review of phase one's fixes (`2026-10-29T2327`, two runs): ar 48/48, en 47/49, one case moved (1.0%), $0.26, 1.6 s a message; every task case passed in both languages and both runs; «shopping implied · en» missed once and «apply a scene is not a restore · en» twice (it answered without a tool), neither touched by the fixes. The undo cases alone, five runs each after «لا غلط ارجعي عنه» was added to the prompt: ar 5/5, en 5/5. After the ways of telling and the edits from everywhere (`2026-10-30T0031`, one run, 99 cases): ar 48/49, en 48/50, $0.15, 1.6 s; the run fails its verdict only on the old baseline (28 Oct), two fell and three rose of 83 (6%); «device later» fell (two of three in Arabic, one of three in English on a rerun): the model schedules the AC with no `value`, the schedule is refused, and it switches the AC off at once instead, a defect of the timed device command, not of this round; «shop stock · en» is the known one that asks instead of making the task. After the computed difference, the start on his yes and the email's look (`2026-10-30T0926`, one run): ar 48/49, en 48/49 (one case unanswered by the model), nothing fell against `T0135`, and it is the baseline now; on the way the real model sent «وقّفيها» and «delete the gym task» to `task_cancel`, both closed (`_DELETE`, its description). After the event log and the done items (`2026-10-30T1139`, one run, 103 cases): ar 49/51, en 51/52, the new cases «clear the done ones» and «what did I buy» passing in both languages; «an edit that changes nothing» fell once and passed three of three on a rerun. After the review of the event log was fixed (`2026-11-01T2205`, one run, 103 cases): ar 49/51, en 50/52, $0.19, 2.0 s, the baseline now; «what did I buy» passed in both languages with `done` and `period=month`; «bulk delete asks then goes» moved (two of three on a rerun); «empty a list asks first» fails in Arabic three of three, the same on the commit before the fixes (likely «فضّيلي» read as «فضّي اللي تمّ»), on the later list. After the bulk delete gate (`2026-11-01T2234`, one run): ar 51/51, en 51/52, $0.18, 1.6 s, the baseline now; «empty a list asks first» and «clear the done ones» five of five in both languages; «device later · en» fell, the known timed device defect.
+task, in both languages. Session B of phase one (`2026-10-29T2156`, two runs, the morning's case added in both languages): ar 45/48, en 47/49, four cases moved between the runs (4.1%), $0.25; against the baseline «empty a list asks first», «reminder before another» and «undo» fell, none of them touched by it. After the review of phase one's fixes (`2026-10-29T2327`, two runs): ar 48/48, en 47/49, one case moved (1.0%), $0.26, 1.6 s a message; every task case passed in both languages and both runs; «shopping implied · en» missed once and «apply a scene is not a restore · en» twice (it answered without a tool), neither touched by the fixes. The undo cases alone, five runs each after «لا غلط ارجعي عنه» was added to the prompt: ar 5/5, en 5/5. After the ways of telling and the edits from everywhere (`2026-10-30T0031`, one run, 99 cases): ar 48/49, en 48/50, $0.15, 1.6 s; the run fails its verdict only on the old baseline (28 Oct), two fell and three rose of 83 (6%); «device later» fell (two of three in Arabic, one of three in English on a rerun): the model schedules the AC with no `value`, the schedule is refused, and it switches the AC off at once instead, a defect of the timed device command, not of this round; «shop stock · en» is the known one that asks instead of making the task. After the computed difference, the start on his yes and the email's look (`2026-10-30T0926`, one run): ar 48/49, en 48/49 (one case unanswered by the model), nothing fell against `T0135`, and it is the baseline now; on the way the real model sent «وقّفيها» and «delete the gym task» to `task_cancel`, both closed (`_DELETE`, its description). After the event log and the done items (`2026-10-30T1139`, one run, 103 cases): ar 49/51, en 51/52, the new cases «clear the done ones» and «what did I buy» passing in both languages; «an edit that changes nothing» fell once and passed three of three on a rerun. After the review of the event log was fixed (`2026-11-01T2205`, one run, 103 cases): ar 49/51, en 50/52, $0.19, 2.0 s, the baseline now; «what did I buy» passed in both languages with `done` and `period=month`; «bulk delete asks then goes» moved (two of three on a rerun); «empty a list asks first» fails in Arabic three of three, the same on the commit before the fixes (likely «فضّيلي» read as «فضّي اللي تمّ»), on the later list. After the bulk delete gate (`2026-11-01T2234`, one run): ar 51/51, en 51/52, $0.18, 1.6 s, the baseline now; «empty a list asks first» and «clear the done ones» five of five in both languages; «device later · en» fell, the known timed device defect. With the browser's twelve cases (phase seven, session one, `2026-11-02T0003`, one run,
+115 cases): ar 56/57, en 56/58, $0.21, 1.6 s, the baseline now; every page case passed in both
+languages. A first version of `BROWSER_RULE`, eight lines, sent «شو اشتريت هالشهر؟» to `summarize`
+(one of five against three of five on the commit before); two lines and a sentence on
+`summarize` (what he bought is `recall`) brought it to five of five. The run after it
+(`2026-11-02T0008`): ar 53/57, en 55/58, six fell («delete one item», «no put it back», «shopping
+bought», «device later»), each of them swinging the same way on the commit before when run three
+times each.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
