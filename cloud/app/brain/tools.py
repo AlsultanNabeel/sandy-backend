@@ -82,6 +82,9 @@ def _schemas() -> List[Dict[str, Any]]:
                              "since": {**_S, "description": "ISO date"},
                              "rang": {"type": "boolean", "description": "التذكيرات اللي رنّت («شو فاتني؟»)، آخر يوم إذا ما في since"},
                              "until": {**_S, "description": "ISO date"},
+                             "done": {"type": "boolean", "description": (
+                                 "بس لما يسأل عن اللي تمّ («شو اشتريت هالشهر؟»، «what did I finish?»): "
+                                 "اللي تمّ بالفترة، مع list")},
                              "list": _list_enum(), "project": _S}, [])},
         {"name": "list_add", "description": "ضيفي عنصر لقائمة (مهمة، تسوق، هدف...). لو موجود: qty بتنضاف عكميته و due بيتحدّث.",
          "parameters": _obj({"list": _list_enum(labels=True), "project": _S, "text": _S,

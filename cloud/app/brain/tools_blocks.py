@@ -313,8 +313,9 @@ def recall(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             rows += [_entry_row(e) for e in entries.list_entries(
                 k, since=since, until=until, limit=_base.MAX_LIMIT if k == "expense" else SUMMARY_ROWS)]
     if not kind:
-        if list_name and (since or until):
-            # «شو اشتريت هالشهر؟»: what was done in the period, hidden or not.
+        if list_name and args.get("done"):
+            # «شو اشتريت هالشهر؟»: what was done in the period, hidden or not. A period alone
+            # («لحد الجمعة») is the list as he sees it.
             found = items.list_items(list_name, done=True, done_after=since, done_before=until,
                                      limit=SUMMARY_ROWS)
         else:

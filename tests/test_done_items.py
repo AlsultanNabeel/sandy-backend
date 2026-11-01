@@ -58,9 +58,21 @@ def test_clearing_the_done_hides_them_at_once_and_keeps_them(shop, language, sai
 @pytest.mark.parametrize("language", ["ar", "en"])
 def test_what_he_bought_this_month_comes_from_the_done_ones_hidden_or_not(shop, language):
     _run("list_update", language, list="shopping", hide_done=True)
-    out = _run("recall", language, list="shopping", since=(NOW - timedelta(days=30)).isoformat())
+    out = _run("recall", language, list="shopping", since=(NOW - timedelta(days=30)).isoformat(),
+               done=True)
     bought = {r["text"] for r in out["rows"] if r.get("done")}
     assert bought == {"رمان", "حليب"} and "خبز" not in {r["text"] for r in out["rows"]}
+
+
+# «شو عندي بقائمة المهام لحد الجمعة؟» is what is open on it, as before the done items
+# (review, 1 Nov): a period alone never filters by when an item was done.
+@pytest.mark.parametrize("language", ["ar", "en"])
+def test_whats_on_a_list_until_friday_is_what_is_open(shop, language):
+    with active_user_profile_context(A):
+        items.add("tasks", "التقرير", due=NOW + timedelta(days=2))
+        items.add("tasks", "مكالمة", done=True, done_at=NOW - timedelta(days=1))
+    out = _run("recall", language, list="tasks", until=(NOW + timedelta(days=4)).date().isoformat())
+    assert "التقرير" in {r["text"] for r in out["rows"] if not r.get("done")}
 
 
 def test_the_apps_list_hides_the_old_done_ones_and_can_show_all(shop, monkeypatch):
