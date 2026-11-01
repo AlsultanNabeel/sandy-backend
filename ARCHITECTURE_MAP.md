@@ -319,7 +319,11 @@ success: «ما تغيّر شي» (`tools_blocks.NOTHING_CHANGED`), so the model
 
 **Confirmation** (`confirm.py`, `pending.py`): one row, or a few named ones, is deleted,
 cancelled or changed at once, on chat and voice alike; only a bulk change, more than
-`tools_blocks.BULK_ROWS` (5) rows at once, returns `needs_confirmation`;
+`tools_blocks.BULK_ROWS` (5) rows at once, returns `needs_confirmation`; a delete is held by the
+tool itself whatever the model decided (`_remove`): emptying a list (`everything`, or every open
+item of it named one by one) or more than five rows in one turn, over one call or several
+(`ctx.artifacts["deleted_rows"]`), goes only on the replay of his yes (`ctx.confirmed`);
+«فضّي اللي تمّ» (`hide_done`) only hides and never asks;
 two matching rows return `needs_choice`. The
 loop stores a `brain_confirm` pending (10 minutes, a nonce, `consumed_at`; its
 `steps` are every held `{tool, args, summary, ids}` of the turn, `ids` the rows the question

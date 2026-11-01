@@ -71,7 +71,9 @@ def _schemas() -> List[Dict[str, Any]]:
     # A delete names its rows like an edit does, a few at once by `ids`, or a whole list
     # or kind by `everything` (that one waits for a yes).
     gone = {**target, "ids": {"type": "array", "items": _S, "description": "كم عنصر بالـ id مرة وحدة"},
-            "everything": {"type": "boolean", "description": "كل اللي فيها (تفضية)؛ بيستنى تأكيده"}}
+            "everything": {"type": "boolean", "description": (
+                "كل اللي فيها (تفضية: «فضّيلي قائمة التسوق»، «امسحي القائمة كلها»، «empty my shopping "
+                "list»)؛ بيستنى تأكيده")}}
     return [
         {"name": "remember", "description": "سجّلي إشي صار أو معلومة عن المستخدم بالسجلّ.",
          "parameters": _obj({"kind": _enum(LOG, "النوع"), "text": _S, "data": LOG_DATA},
@@ -102,8 +104,9 @@ def _schemas() -> List[Dict[str, Any]]:
                              "no_due": {"type": "boolean", "description": "شيلي الموعد عن العنصر"},
                              "qty": {"type": "number", "description": "الكمية اللي ضايلة (لو اشترى جزء بس)"},
                              "hide_done": {"type": "boolean", "description": (
-                                 "«فضّي اللي تمّ»، «clear the done ones»: خبّي اللي تمّ من القائمة "
-                                 "(بيضلّوا محفوظين بتاريخهم، مش حذف)، مع list")}}, [])},
+                                 "«فضّي اللي تمّ»، «شيلي اللي خلصوا»، «clear the done ones»: خبّي اللي "
+                                 "تمّ من القائمة (بيضلّوا محفوظين بتاريخهم، مش حذف)، مع list. "
+                                 "«فضّيلي القائمة» بلا «اللي تمّ» مش هون: هاد list_delete مع everything")}}, [])},
         {"name": "list_delete", "description": "احذفي عنصر أو كم عنصر من قائمة («شيلي الحليب»)؛ خدي الـ id من «وضعه هلأ».",
          "parameters": _obj({**gone, "list": _list_enum(), "project": _S}, [])},
         {"name": "log_update",

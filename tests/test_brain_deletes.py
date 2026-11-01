@@ -56,6 +56,7 @@ def test_more_than_five_rows_at_once_asks_once(brain_db):  # noqa: F811
 
 def test_five_matching_rows_run_at_once(brain_db):  # noqa: F811
     ids = _add(*[f"جيم {n}" for n in range(5)], list_name="tasks")
+    _add("التقرير", list_name="tasks")           # not the whole list: emptying it asks
     model = ScriptedModel(tools_reply(call("list_delete", list="tasks", match_text="جيم",
                                            all_matching=True)), text_reply("حذفتهم"))
     state = _turn(model, "احذفي مهام الجيم")

@@ -849,17 +849,23 @@ def schedule_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
 # ── deleting: one tool per block, so a delete is never a flag an edit forgets ─────
 
 def _remove(picked: Dict[str, Any], ctx: TurnCtx, ask: str, said: str, remove,
-            everything: bool) -> Dict[str, Any]:
-    """Deletes (or cancels) the rows at once; a bulk one (the whole list or kind, or more
-    than BULK_ROWS rows) waits for one yes."""
+            everything: bool, whole: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Deletes (or cancels) the rows at once; a bulk one waits for his yes in a turn before,
+    whatever the model decided: the whole list or kind (`everything`, or every open row of
+    ``whole`` named one by one), or more than BULK_ROWS rows in this turn, in one call or
+    several. Only the replay of that yes (`ctx.confirmed`, set by `confirm.run_held`) deletes it."""
     if "rows" not in picked:
         return picked
     rows = picked["rows"]
     if not rows:
         return refused("nothing there", reply=lang.say("nothing_there"))
-    if not ctx.confirmed and (everything or len(rows) > BULK_ROWS):
+    ids = {r["id"] for r in rows}
+    emptied = whole is not None and len(whole) > 1 and {r["id"] for r in whole} <= ids
+    so_far = int(ctx.artifacts.get("deleted_rows") or 0)
+    if not ctx.confirmed and (everything or emptied or so_far + len(rows) > BULK_ROWS):
         return needs_confirmation(lang.say(ask, names=_names(rows)), [r["id"] for r in rows])
     gone = [r for r in rows if remove(r["id"])]
+    ctx.artifacts["deleted_rows"] = so_far + len(gone)
     if not gone:
         return _not_found("")
     missing = picked.get("missing", 0) + len(rows) - len(gone)
@@ -877,7 +883,7 @@ def list_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     picked = _held_rows(ctx, items.get) or (
         {"rows": pool} if everything else _named(args, pool, items.get))
     picked = takeback.not_corrected("list_delete", picked, ctx)
-    return _remove(picked, ctx, "held_delete", "deleted", items.delete, everything)
+    return _remove(picked, ctx, "held_delete", "deleted", items.delete, everything, whole=pool)
 
 
 def log_delete(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:

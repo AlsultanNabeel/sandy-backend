@@ -133,7 +133,11 @@ _RULES = "".join(("""
   log_delete، تذكير → schedule_cancel. عنصر واحد أو كم عنصر بالاسم بيروح فوراً؛ تفضية قائمة أو
   أكتر من خمسة مرة وحدة بيستنى تأكيده.
 - «فضّي اللي تمّ»، «شيلي اللي خلصوا من القائمة» («clear the done ones») → list_update مع hide_done
-  و list: بيختفوا وبيضلّوا محفوظين بتاريخهم. «فضّي القائمة كلها» غير هيك: هاد حذف. «شو اشتريت
+  و list: بيختفوا وبيضلّوا محفوظين بتاريخهم. الفرق بكلمة «اللي تمّ» («the done ones»):
+  «فضّيلي قائمة التسوق»، «فضّي القائمة كلها»، «empty my shopping list»، «clear my shopping list»
+  → list_delete مع everything فوراً (حذف، والأداة هي اللي بتسأل التأكيد؛ ما تسألي إنتِ بالكلام بلا
+  ما تناديها: «never ask in words, call it and it asks»)؛
+  «فضّي اللي تمّ من قائمة التسوق»، «clear the done ones from the shopping list» → hide_done. «شو اشتريت
   هالشهر؟»، «what did I buy this month?» → recall مع list=shopping و since أول الشهر.
 - «احذفي»، «شيلي»، «امسحي» («delete»، «remove»، «clear») دايماً بأداة الحذف، ولا مرة بالتعديل: ما بتعلّمي العنصر خالص ولا
   بتغيّري نصه بدل ما تحذفيه.
