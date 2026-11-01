@@ -250,8 +250,8 @@ def note_tool(name: str, args: Any, result: Any, ms: float = 0) -> None:
         trace.add_tool(name, args, result, ms)
 
 
-def note_fee(name: str, count: int = 1) -> None:
-    """``count`` calls of the paid service ``name`` (`pricing.FEES`) into the current trace."""
+def note_fee(name: str, count: float = 1) -> None:
+    """``count`` calls (or hours) of the paid service ``name`` (`pricing.FEES`) into the current trace."""
     trace = _current.get()
     if trace is not None:
         trace.add_fee(name, pricing.fee(name) * count)

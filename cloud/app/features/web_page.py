@@ -52,6 +52,8 @@ MAX_TEXT = 20_000
 MAX_LINKS = 100
 # A page with this many links in its content is a listing: a task compares its links.
 LISTING_LINKS = 5
+# A page with a password field and less text than this is a sign-in page (`_wants_login`).
+LOGIN_TEXT = 600
 _PAGE_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
 _HEADERS = {"User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
                            "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
@@ -271,6 +273,7 @@ def _by_steel(url: str, user_id: str) -> Dict[str, Any]:
     usage_store.add_browser_call(user_id)
     data = steel_client.scrape(url)
     page = extract(data["html"], url)
+    page["login"] = _wants_login(data["html"], url, page["text"])
     page["title"] = page["title"] or data["title"]
     if not page["links"]:
         page["links"] = [link for link in data["links"] if link["title"]
@@ -319,6 +322,7 @@ def read(url: str, *, user_id: str) -> Dict[str, Any]:
     try:
         final, kind, body = _fetch_html(url)
         page = _plain(body, final) if kind == "text/plain" else extract(body, final)
+        page["login"] = kind != "text/plain" and _wants_login(body, final, page["text"])
         page["via"] = "http"
     except PageError as exc:
         if exc.code != "unreachable":
@@ -343,9 +347,67 @@ def read(url: str, *, user_id: str) -> Dict[str, Any]:
         raise PageError("daily_cap" if capped else "unreachable", site_of(url))
     if not str(page.get("text") or "").strip() and not page.get("links"):
         raise PageError("empty", site_of(page["url"]))
+    return _answer(page)
+
+
+def _answer(page: Dict[str, Any]) -> Dict[str, Any]:
     out = {k: page[k] for k in ("url", "title", "text", "links", "via")}
     out["warning"] = warned(page)
+    out["login"] = bool(page.get("login"))
     return out
+
+
+def _wants_login(markup: Any, url: str, text: str) -> bool:
+    """A sign-in page: a password field, and little else to read."""
+    from app.brain import browser_guard
+    return len(text or "") < LOGIN_TEXT and browser_guard.forbidden(
+        browser_guard.of_html(markup, url)) == browser_guard.PASSWORD
+
+
+def read_signed_in(url: str, state: Dict[str, Any], *, user_id: str) -> Dict[str, Any]:
+    """The page at ``url`` in a browser of his own with his sign-in in it (a Steel session):
+    the same answer as `read`, ``via`` «session»; PageError when it cannot be read. Never a
+    screenshot: Steel keeps those at a public link."""
+    import asyncio
+
+    from app.features import usage_store
+    from app.integrations import steel_client
+    url = check_url(url)
+    if not steel_client.configured():
+        raise PageError("unreachable", site_of(url))
+    if _over_cap(user_id):
+        raise PageError("daily_cap", site_of(url))
+    usage_store.add_browser_call(user_id)
+    try:
+        page = asyncio.run(_live_read(url, state))
+    except (steel_client.SteelError, OSError, RuntimeError, KeyError) as exc:
+        logger.warning("[browser] a signed-in read of %s failed: %s", site_of(url), type(exc).__name__)
+        raise PageError("unreachable", site_of(url)) from None
+    if not str(page.get("text") or "").strip() and not page.get("links") and not page.get("login"):
+        raise PageError("empty", site_of(url))
+    return _answer(page)
+
+
+async def _live_read(url: str, state: Dict[str, Any]) -> Dict[str, Any]:
+    import time
+
+    from app.integrations import browser_cdp, steel_client
+    session = steel_client.create_session()
+    began, client = time.monotonic(), None
+    try:
+        client = await browser_cdp.connect(steel_client.connect_url(session["id"]))
+        tab = await browser_cdp.first_page(client)
+        await browser_cdp.apply_state(client, tab, state)
+        await browser_cdp.goto(client, tab, url)
+        markup, final = await browser_cdp.html(client, tab), await browser_cdp.where(client, tab) or url
+        page = extract(markup, final)
+        page["login"] = _wants_login(markup, final, page["text"])
+        page["via"] = "session"
+        return page
+    finally:
+        if client is not None:
+            await client.stop()
+        steel_client.release(session["id"], time.monotonic() - began)
 
 
 def _still(words: str) -> str:

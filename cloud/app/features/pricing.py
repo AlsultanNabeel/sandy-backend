@@ -37,12 +37,14 @@ PRICES: Dict[str, Dict[str, float]] = {
 
 # Prices taken from an outside source, not the provider's own: each must be checked against
 # the first official invoice that bills it (Azure's, Google's), then taken off this list.
-# What a call to a service that is not a model costs, in US dollars a call, as its provider
-# publishes it.
+# What a call to a service that is not a model costs, in US dollars a call (or an hour, for
+# `steel_hour`), as its provider publishes it.
 FEES: Dict[str, float] = {
     # Steel's Browser Tools (scrape, screenshot): $5 per 1,000 calls on Launch and Scale,
     # docs.steel.dev/overview/browser-tools/overview, 1 Nov 2026.
     "steel_tool": 0.005,
+    # A browser session, by the hour: $0.10 on Launch, steel.dev/pricing, 1 Nov 2026.
+    "steel_hour": 0.10,
 }
 
 UNCONFIRMED: Dict[str, str] = {

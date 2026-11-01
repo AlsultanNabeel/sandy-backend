@@ -1,9 +1,13 @@
 """Steel's cloud browser (steel.dev), for pages a plain request cannot read.
 
-One call for now: `scrape`, Steel's Browser Tools endpoint (`POST /v1/scrape`), which opens the
-page in a real browser, lets its scripts run, and gives back the HTML, the links and, when
-asked, a screenshot. Steel keeps that screenshot at a public link, so a page that needs a
-sign-in never asks for one (the second session's pages go through a session of their own).
+`scrape`, Steel's Browser Tools endpoint (`POST /v1/scrape`), opens a public page in a real
+browser, lets its scripts run, and gives back the HTML, the links and, when asked, a screenshot.
+Steel keeps that screenshot at a public link, so a page that needs a sign-in never asks for one.
+
+`create_session` opens a browser of his own for a while (`POST /v1/sessions`): its id, the
+address our code drives it by (`connect_url`, the key inside it, never logged) and the live view
+Steel draws it in (`debug_url`, which has no protection of its own: it reaches only the job's
+owner, `api/browser_api`). `release` closes it and bills its time on the trace (`steel_hour`).
 
 `STEEL_API_KEY` names the account; without it nothing is sent and `configured` is false.
 Each call is one `pricing.FEES["steel_tool"]` on the current trace. A failure raises
@@ -24,38 +28,68 @@ logger = logging.getLogger(__name__)
 
 API = "https://api.steel.dev/v1"
 TIMEOUT_S = 30
+# A session is closed by Steel itself after this long, whatever happens to us.
+SESSION_MS = 15 * 60 * 1000
 
 
 class SteelError(RuntimeError):
-    """Steel could not read the page."""
+    """Steel could not do what was asked."""
 
 
 def configured() -> bool:
     return bool(config.STEEL_API_KEY)
 
 
+def _post(path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    if not configured():
+        raise SteelError("no Steel key")
+    try:
+        resp = requests.post(f"{API}{path}", json=body, timeout=TIMEOUT_S,
+                             headers={"steel-api-key": config.STEEL_API_KEY})
+    except requests.RequestException as exc:
+        raise SteelError(f"Steel did not answer: {type(exc).__name__}") from exc
+    if resp.status_code not in (200, 201):
+        logger.warning("[steel] %s answered %s", path.strip("/").split("/")[0], resp.status_code)
+        raise SteelError(f"Steel answered {resp.status_code}")
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise SteelError("Steel answered something that is not JSON") from exc
+
+
+def connect_url(session_id: str) -> str:
+    return f"wss://connect.steel.dev?apiKey={config.STEEL_API_KEY}&sessionId={session_id}"
+
+
+def create_session() -> Dict[str, str]:
+    """A browser of his own: ``{id, debug_url}``; Steel closes it after `SESSION_MS`."""
+    data = _post("/sessions", {"timeout": SESSION_MS})
+    if not data.get("id"):
+        raise SteelError("Steel gave no session")
+    return {"id": str(data["id"]), "debug_url": str(data.get("debugUrl") or "")}
+
+
+def release(session_id: str, seconds: float = 0) -> None:
+    """The session closed, its time billed; a failure is logged (Steel closes it in time)."""
+    if seconds > 0:
+        trace_store.note_fee("steel_hour", seconds / 3600)
+    try:
+        _post(f"/sessions/{session_id}/release", {})
+    except SteelError as exc:
+        logger.warning("[steel] a session was not released: %s", exc)
+
+
 def scrape(url: str, *, screenshot: bool = False) -> Dict[str, Any]:
     """The page as Steel's browser saw it: ``{html, title, links, screenshot}`` (the
     screenshot's link, or "")."""
-    if not configured():
-        raise SteelError("no Steel key")
     body: Dict[str, Any] = {"url": url, "format": ["html"]}
     if screenshot:
         body["screenshot"] = True
     try:
-        resp = requests.post(f"{API}/scrape", json=body, timeout=TIMEOUT_S,
-                             headers={"steel-api-key": config.STEEL_API_KEY})
-    except requests.RequestException as exc:
-        raise SteelError(f"Steel did not answer: {type(exc).__name__}") from exc
+        data = _post("/scrape", body)
     finally:
-        trace_store.note_fee("steel_tool")
-    if resp.status_code != 200:
-        logger.warning("[steel] scrape answered %s", resp.status_code)
-        raise SteelError(f"Steel answered {resp.status_code}")
-    try:
-        data = resp.json()
-    except ValueError as exc:
-        raise SteelError("Steel answered something that is not JSON") from exc
+        if configured():
+            trace_store.note_fee("steel_tool")
     content = data.get("content") or {}
     meta = data.get("metadata") or {}
     shot = data.get("screenshot") or {}

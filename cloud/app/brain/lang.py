@@ -570,6 +570,11 @@ PHRASES = {
                    "en": "I opened {site} but found no text to read on it."},
     "page_daily_cap": {"ar": "وصلت حد المتصفح لليوم، بكرا بكمّل.",
                        "en": "I've reached today's browser limit; I'll carry on tomorrow."},
+    "page_needs_login": {"ar": "صفحة {site} بدها دخول. سجّل إنت بإيدك من هون، وأنا ما بشوف كلمة السر، وبعدين اطلبها مني كمان مرة: {link}",
+                         "en": "The page on {site} needs you to sign in. Sign in yourself from here (I never see "
+                               "the password), then ask me again: {link}"},
+    "page_login_expired": {"ar": "دخولك على {site} انتهى. سجّل كمان مرة من هون: {link}",
+                           "en": "Your sign-in on {site} has expired. Sign in again from here: {link}"},
     "page_warning": {"ar": "⚠️ انتبه: صفحة {site} فيها كلام بيحاول يعطيني أوامر. ما نفّذت منه شي.",
                      "en": "⚠️ Heads up: the page on {site} has text trying to give me orders. I didn't "
                            "follow any of it."},
