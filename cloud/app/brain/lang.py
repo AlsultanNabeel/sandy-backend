@@ -419,6 +419,7 @@ PHRASES = {
     "list_removed": {"ar": "انشال «{text}» من «{list}»", "en": "«{text}» was removed from «{list}»"},
     "list_done": {"ar": "«{text}» صار تم", "en": "«{text}» is done"},
     "list_reopened": {"ar": "«{text}» رجع مش متمّم", "en": "«{text}» is open again"},
+    "list_moved": {"ar": "«{text}» انتقل لـ«{list}»", "en": "«{text}» moved to «{list}»"},
     "list_renamed": {"ar": "«{before}» صار «{after}»", "en": "«{before}» is now «{after}»"},
     "task_stopped": {"ar": "وقّفت مهمة «{title}»: فشلت تلات مرات ورا بعض. خبّرني إذا بدك أرجّعها.",
                      "en": "I stopped the task «{title}»: it failed three times in a row. Tell me if you want it back."},

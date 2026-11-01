@@ -288,7 +288,7 @@ def log_scope(tool: str, args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def in_scope(scope: Dict[str, Any], event: Dict[str, Any]) -> bool:
     """Whether an event of the log (its words opened) is of what ``scope`` watches."""
-    if scope["list"] and event.get("list") != scope["list"]:
+    if scope["list"] and scope["list"] not in (event.get("list"), event.get("from_list")):
         return False
     if scope["kind"] and event.get("kind") != scope["kind"]:
         return False

@@ -166,3 +166,24 @@ def test_only_a_task_made_before_the_log_moves_to_it_quietly(world):
 def schedules_get(tid):
     with active_user_profile_context(A):
         return schedules.get(tid)
+
+
+# ── an item moved to another list (review, 1 Nov): its event carries the list before and after,
+# and the task on the old list says where it went ──
+
+@pytest.mark.parametrize("language, said", [("ar", "«رمان» انتقل لـ«{}»"), ("en", "«رمان» moved to «{}»")])
+def test_an_item_moved_away_is_told_by_the_old_lists_task(world, language, said):
+    from app.blocks import events
+    from app.brain import lang, task_diff
+    doc = _task({"tool": "recall", "args": {"list": "shopping"}}, language)
+    with active_user_profile_context(A):
+        iid = items.add("shopping", "رمان")
+    _run(doc)
+    world.sent.clear()
+    with active_user_profile_context(A):
+        items.update(iid, list_name="tasks")
+        moved = events.since(events.last_seq() - 1)[-1]
+    assert (moved["from_list"], moved["list"]) == ("shopping", "tasks")
+    _run(doc)
+    with lang.using(language):
+        assert world.sent == [said.format(task_diff.list_name("tasks"))]

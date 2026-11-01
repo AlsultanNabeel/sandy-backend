@@ -31,8 +31,8 @@ MOVES_BY_ITSELF = frozenset({"last_seen", "to", "now", "read_at", "checked_at", 
 _KEYS = ("id", "url", "device", "name", "title")
 # The top-level words compared as text.
 _TEXTS = ("reply", "text", "summary", "answer", "body")
-# A list's change the template tells: rows of a list, added, removed, ticked or renamed.
-_TOLD_FIELDS = {"done", "done_at", "text"}
+# A list's change the template tells: rows of a list, added, removed, ticked, renamed or moved.
+_TOLD_FIELDS = {"done", "done_at", "text", "list"}
 
 
 def _key(row: Dict[str, Any]) -> str:
@@ -163,6 +163,8 @@ def template(diff: Dict[str, Any]) -> Optional[str]:
     for c in diff["changed"]:
         if "text" in c["fields"]:
             lines.append(lang.say("list_renamed", before=c["before"]["text"], after=c["after"]["text"]))
+        if "list" in c["fields"]:
+            lines.append(lang.say("list_moved", text=c["after"]["text"], list=list_name(c["after"]["list"])))
         if "done" in c["fields"]:
             lines.append(lang.say("list_done" if c["after"].get("done") else "list_reopened",
                                   text=c["after"]["text"]))
