@@ -123,6 +123,21 @@ def _of(scope: Dict[str, Any], log: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return [e for e in log if in_scope(scope, e)]
 
 
+# A task made before this moved to the log quietly on its first run there (where it starts,
+# nothing told); one made since keeps where the log is from its start (`start`).
+LOG_FROM = datetime(2026, 11, 1, tzinfo=timezone.utc)
+
+
+def _where_it_starts(doc: Dict[str, Any]) -> Optional[int]:
+    """The log's place for a task on the log with no pointer: None for one made before
+    `LOG_FROM` (it moves to the log quietly), else where the log was when it was made."""
+    made = doc.get("created_at")
+    if not isinstance(made, datetime):
+        return None
+    made = made if made.tzinfo else made.replace(tzinfo=timezone.utc)
+    return None if made < LOG_FROM else events.seq_at(made)
+
+
 # Once a day a check on the log is checked against a full read: a change with no event is an
 # error in the trace (the log is the truth only while every write goes through it).
 AUDIT_EVERY = timedelta(days=1)
@@ -137,7 +152,7 @@ def _audit(scope: Dict[str, Any], before: Dict[str, Any], found: Any, task_id: s
     What to keep for the next audit."""
     keep = {"audit_at": _now(), "audit_seen": found, "audit_cursor": events.last_seq()}
     at = before.get("audit_at")
-    if at is None:
+    if at is None or before.get("audit_seen") is None:
         return keep
     if _now() - (at if at.tzinfo else at.replace(tzinfo=timezone.utc)) < AUDIT_EVERY:
         return {}
@@ -250,18 +265,24 @@ def _failed(doc: Dict[str, Any], before: Dict[str, Any], error: str) -> None:
 
 
 def start(task_id: str, uid: str) -> Any:
-    """On his yes: one read now, kept as where the task starts (nothing told, no email); what
-    it read, or None when the check could not read (its first run at its time starts it)."""
+    """On his yes: one read now, kept as where the task starts (nothing told, no email), and
+    for a check on the log where the log is, taken before the read, so whatever he adds after
+    is the next run's news; what it read, or None when the check could not read (its first
+    run at its time keeps the read, and reads the log from here)."""
     row = tasks.get(task_id)
     spec = dict((row or {}).get("payload") or {})
     tool = str((spec.get("probe") or {}).get("tool") or "")
+    if _scope(spec) is not None:
+        at = events.last_seq()
+        tasks.save_state(task_id, {"cursor": at, "audit_at": _now(), "audit_cursor": at})
     try:
         found = _kept(_probe(spec, TurnCtx(user_id=uid, source="app", whole=True)))
     except (ValueError, RuntimeError, OSError, KeyError, PyMongoError) as exc:  # the task stands
         logger.warning("[tasks] task %s: could not read at its start: %s", task_id, exc)
         return None
     tasks.save_state(task_id, {"fingerprint": fingerprint(found, tool), "last_seen": found,
-                               "failures": 0})
+                               "failures": 0,
+                               **({"audit_seen": found} if _scope(spec) is not None else {})})
     return found
 
 
@@ -300,8 +321,11 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                 seen = fingerprint(found, tool)
                 scope = _scope(spec)
                 logged = scope is not None
-                if before.get("last_seen") is None or (logged and cursor is None):
-                    # Its first run, or its first on the log: where it starts, nothing told.
+                if logged and cursor is None:
+                    cursor = _where_it_starts(doc)
+                if (not logged and before.get("last_seen") is None) or (logged and cursor is None):
+                    # Its first run, or an old task's first on the log: where it starts,
+                    # nothing told.
                     tasks.save_state(_id(doc), {"fingerprint": seen, "last_seen": found, "failures": 0,
                                                 **({"cursor": events.last_seq(), "audit_at": _now(),
                                                     "audit_seen": found, "audit_cursor": events.last_seq()}
@@ -314,7 +338,7 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                     log = events.since(cursor)
                     cursor = log[-1]["seq"] if log else cursor
                     diff = task_diff.from_events(_of(scope, log))
-                    diff["numbers"] = task_diff.compute(before["last_seen"], found)["numbers"]
+                    diff["numbers"] = task_diff.compute(before.get("last_seen"), found)["numbers"]
                 elif seen == before.get("fingerprint"):
                     tasks.save_state(_id(doc), {"failures": 0})
                     return None

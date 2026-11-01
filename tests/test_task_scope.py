@@ -111,3 +111,58 @@ def test_the_template_tells_only_events_inside_the_scope(world):
         items.add("shopping", "رمان")
     _run(doc)
     assert world.sent == ["انضاف «رمان» لـ«قائمة التسوق»"]
+
+
+# ── on his yes the start keeps where the log is, in the same moment it reads (review, 1 Nov):
+# it kept the read with no pointer, so its first run took itself for an old task and moved to
+# the log quietly, and what he added in between was never told ──
+
+@pytest.mark.parametrize("language, told", [("ar", "انضاف «رمان» لـ«قائمة التسوق»"),
+                                            ("en", "«رمان» was added to «Shopping list»")])
+def test_what_is_added_after_the_yes_is_told_by_the_next_run(world, language, told):
+    from app.brain import lang, tools
+    from app.brain.ctx import TurnCtx
+    from app.blocks import events
+    args = {"title": "التسوق", "instructions": "تابعي قائمة التسوق", "every_minutes": 60,
+            "check_tool": "recall", "check_args": {"list": "shopping"}}
+    with active_user_profile_context(A), lang.using(language):
+        ctx = TurnCtx(user_id="userA")
+        ctx.confirmed = True
+        assert tools.execute("task_create", args, ctx)["ok"]
+        [row] = tasks.running()
+        assert tasks.state(row["id"])["cursor"] == events.last_seq()
+        items.add("shopping", "رمان")
+    _run(row)
+    assert world.sent == [told]
+
+
+def test_a_start_that_cannot_read_still_keeps_where_the_log_is(world, monkeypatch):
+    doc = _task({"tool": "recall", "args": {"list": "shopping"}})
+    monkeypatch.setattr(task_runner, "_probe", lambda spec, ctx: (_ for _ in ()).throw(RuntimeError("down")))
+    with active_user_profile_context(A):
+        assert task_runner.start(doc["id"], "userA") is None
+    monkeypatch.undo()
+    monkeypatch.setenv("SANDY_FLAGS", '{"tasks": ["userA"]}')
+    monkeypatch.setattr(notify, "CHANNELS", [lambda r: world.sent.append(r["body"])])
+    with active_user_profile_context(A):
+        items.add("shopping", "رمان")
+    _run(doc)
+    assert world.sent == ["انضاف «رمان» لـ«قائمة التسوق»"]
+
+
+def test_only_a_task_made_before_the_log_moves_to_it_quietly(world):
+    old, new = _task({"tool": "recall", "args": {"list": "shopping"}}), \
+        _task({"tool": "recall", "args": {"list": "shopping"}})
+    with active_user_profile_context(A):
+        world.db["sandy_schedules"].update_one(
+            {"_id": old["id"]}, {"$set": {"created_at": task_runner.LOG_FROM - timedelta(days=1)}})
+        for doc in (old, new):
+            tasks.save_state(doc["id"], {"last_seen": {"rows": []}, "fingerprint": "x"})
+        items.add("shopping", "رمان")
+    _run(schedules_get(old["id"])), _run(schedules_get(new["id"]))
+    assert world.sent == ["انضاف «رمان» لـ«قائمة التسوق»"]       # the new one only
+
+
+def schedules_get(tid):
+    with active_user_profile_context(A):
+        return schedules.get(tid)

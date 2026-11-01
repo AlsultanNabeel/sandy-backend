@@ -128,6 +128,13 @@ def since(seq: int, *, limit: int = 500) -> List[Dict[str, Any]]:
     return list(coll.find({"seq": {"$gt": int(seq or 0)}}).sort("seq", 1).limit(limit))
 
 
+def seq_at(at) -> int:
+    """Where his log was at ``at`` (0 before his first event)."""
+    coll = _base.coll(EVENTS)
+    row = coll.find_one({"at": {"$lte": at}}, sort=[("seq", -1)]) if coll is not None else None
+    return int((row or {}).get("seq") or 0)
+
+
 def last_seq() -> int:
     """Where his log is now (0 before his first event)."""
     from app.utils.user_profiles import current_user_id
