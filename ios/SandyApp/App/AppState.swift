@@ -193,6 +193,7 @@ final class AppState: ObservableObject {
     /// there is a way back.
     var showsDeveloper: Bool { DeveloperAccess.shows(on: serverFeatures.on, server: server) }
     var showsTasks: Bool { ScheduledTasksAccess.shows(on: serverFeatures.on) }
+    var showsBrowser: Bool { BrowserAccess.shows(on: serverFeatures.on) }
 
     enum SwitchOutcome { case done, unsent }
 

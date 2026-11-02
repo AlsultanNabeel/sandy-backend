@@ -136,6 +136,7 @@ let L10nRegistry: [String: L10nTable] = [
     L10nControl.ns:       L10nControl.table,
     L10nDeveloper.ns:     L10nDeveloper.table,
     L10nTasks.ns:         L10nTasks.table,
+    L10nBrowser.ns:       L10nBrowser.table,
     L10nErrors.ns:        L10nErrors.table,
 ]
 

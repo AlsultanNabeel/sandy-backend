@@ -3,10 +3,15 @@ import Foundation
 
 enum DeepLink: Equatable {
     case call, chat, quickAdd, scheduledTasks
+    /// A page to sign in to by hand (`sandy://browser/login?url=…`).
+    case browserLogin(URL)
+    /// «Sandy's browser» for a fill (`sandy://browser/live?job=…`).
+    case browserLive(String)
 }
 
 /// Routes sandy://call, call/end, chat, quickadd, focus/stop, tasks (a task's email:
-/// «افتح المهمة» opens the Tasks screen).
+/// «افتح المهمة» opens the Tasks screen), browser/login?url= and browser/live?job= (links in
+/// Sandy's replies).
 /// A link arriving before the main screen exists waits in `pending` for `MainTabView`, a
 /// minute at most and never across a sign-out: a «talk to Sandy» tapped signed out must not
 /// open the mic minutes later, once sign-in is done.
@@ -57,6 +62,15 @@ final class DeepLinkRouter: ObservableObject {
             ask(.quickAdd)
         case "tasks":
             ask(.scheduledTasks)
+        case "browser":
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let value = { (name: String) in query.first { $0.name == name }?.value }
+            if path == "/login", let raw = value("url"), let page = URL(string: raw),
+               ["http", "https"].contains(page.scheme?.lowercased() ?? "") {
+                ask(.browserLogin(page))
+            } else if path == "/live", let job = value("job"), !job.isEmpty {
+                ask(.browserLive(job))
+            }
         case "focus":
             if path == "/stop" { FocusLiveActivity.shared.stopFromLink() }
         default:

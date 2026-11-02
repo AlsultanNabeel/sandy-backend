@@ -1,0 +1,66 @@
+import Foundation
+
+// Namespace: browser — the sites Sandy may open, signing in by hand, «Sandy's browser» and the
+// emergency stop (Features/Browser/).
+enum L10nBrowser {
+    static let ns = "browser"
+
+    static let table = L10nTable(
+        ar: [
+            "title": .text("المتصفح"),
+            "sites": .text("المواقع اللي ساندي داخلة فيها"),
+            "empty": .text("لسا ما في مواقع. لما ساندي تفتح صفحة بدها دخول، بتبعتلك رابط تسجّل منه بإيدك."),
+            "level": .text("شو مسموحلها"),
+            "level.read": .text("قراءة بس"),
+            "level.fill": .text("تعبئة"),
+            "level.submit": .text("إرسال"),
+            "levelsFooter": .text("قراءة بس: بتقرا وما بتلمس شي. تعبئة: بتعبّي وما بتبعت أبداً. إرسال: بتبعت بس بعد موافقتك."),
+            "signedIn": .text("داخلة"),
+            "signOut": .text("طلّعها"),
+            "live": .text("متصفح ساندي"),
+            "status.running": .text("شغّالة"),
+            "status.held": .text("ناطرة موافقتك"),
+            "status.handed": .text("صارت إلك"),
+            "takeOver": .text("خليني أكمّل أنا"),
+            "liveGone": .text("هالجلسة خلصت."),
+            "stop": .text("وقّفي كل شي"),
+            "resume": .text("رجّعي كل شي"),
+            "stopHint": .text("بتوقف كل المهام والمتصفح والشغل بالخلفية"),
+            "resumeHint": .text("بترجع كل شي يشتغل"),
+            "stopFooter": .text("بيوقف المهام والمتصفح والشغل بالخلفية فوراً. التذكيرات بتضل ترن."),
+            "loginNote": .text("سجّل بإيدك هون. ساندي ما بتشوف كلمة السر، وبتاخد دخولك لهالموقع بس."),
+            "loginDone": .text("خلصت"),
+            "loginFailed": .text("ما قدرت أحفظ دخولك، جرّب كمان مرة."),
+            "loadFailed": .text("ما قدرت أجيب المواقع هلّق."),
+            "saveFailed": .text("ما زبط هلّق، جرّب كمان شوي."),
+        ],
+        en: [
+            "title": .text("Browser"),
+            "sites": .text("Sites Sandy is signed in to"),
+            "empty": .text("No sites yet. When Sandy opens a page that needs signing in, she sends you a link to sign in yourself."),
+            "level": .text("What she may do"),
+            "level.read": .text("Read only"),
+            "level.fill": .text("Fill"),
+            "level.submit": .text("Send"),
+            "levelsFooter": .text("Read only: she reads and touches nothing. Fill: she fills and never sends. Send: she sends only after your yes."),
+            "signedIn": .text("Signed in"),
+            "signOut": .text("Sign her out"),
+            "live": .text("Sandy's browser"),
+            "status.running": .text("Working"),
+            "status.held": .text("Waiting for your yes"),
+            "status.handed": .text("Yours now"),
+            "takeOver": .text("Let me take it from here"),
+            "liveGone": .text("This session has ended."),
+            "stop": .text("Stop everything"),
+            "resume": .text("Resume everything"),
+            "stopHint": .text("Stops every task, the browser and work in the background"),
+            "resumeHint": .text("Turns everything back on"),
+            "stopFooter": .text("Stops tasks, the browser and background work at once. Reminders still ring."),
+            "loginNote": .text("Sign in yourself here. Sandy never sees the password, and takes your sign-in to this site only."),
+            "loginDone": .text("Done"),
+            "loginFailed": .text("I couldn't keep your sign-in; try again."),
+            "loadFailed": .text("I couldn't get the sites right now."),
+            "saveFailed": .text("That didn't work right now, try again in a bit."),
+        ]
+    )
+}

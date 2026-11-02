@@ -42,6 +42,7 @@ struct MainTabView: View {
     @ObservedObject private var router = DeepLinkRouter.shared
     @ObservedObject private var spotlight = SpotlightRouter.shared
     @State private var showLiveCall = false
+    @State private var browserSheet: BrowserSheet?
     @ObservedObject private var call = GeminiLiveManager.shared
     @ObservedObject private var review = ReviewPrompter.shared
     @Environment(\.requestReview) private var requestReview
@@ -121,6 +122,18 @@ struct MainTabView: View {
             spotlight.pendingTab = nil
             selection = tab
         }
+        .sheet(item: $browserSheet) { sheet in
+            Group {
+                switch sheet {
+                case .login(let page): BrowserLoginView(url: page)
+                case .live(let job): NavigationStack { LiveBrowserView(jobId: job) }
+                }
+            }
+            .environmentObject(state)
+            .environmentObject(lang)
+            .environment(\.layoutDirection, lang.lang.layoutDirection)
+            .environment(\.locale, AppLocale.locale(for: lang.lang))
+        }
         .sheet(isPresented: $showLiveCall) {
             LiveVoiceView()
                 .environmentObject(state)
@@ -162,6 +175,10 @@ struct MainTabView: View {
         case .scheduledTasks:
             // Only an account the server shows the Tasks screen to.
             if state.showsTasks { notifs.pendingRoute = .scheduledTasks }
+        case .browserLogin(let page):
+            if state.showsBrowser { browserSheet = .login(page) }
+        case .browserLive(let job):
+            if state.showsBrowser { browserSheet = .live(job) }
         }
     }
 
@@ -272,5 +289,18 @@ private struct SandyOrb: View {
         .accessibilityLabel(lang.s("tabs.sandy"))
         .accessibilityHint(lang.s("today.holdToTalk"))
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// A browser screen a link in Sandy's reply opens over the tabs.
+enum BrowserSheet: Identifiable {
+    case login(URL)
+    case live(String)
+
+    var id: String {
+        switch self {
+        case .login(let url): return "login:" + url.absoluteString
+        case .live(let job): return "live:" + job
+        }
     }
 }

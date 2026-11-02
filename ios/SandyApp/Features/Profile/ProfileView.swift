@@ -124,6 +124,9 @@ struct ProfileView: View {
                 if state.showsTasks {
                     archiveRow(icon: "checklist", titleKey: "tasks.title") { ScheduledTasksView() }
                 }
+                if state.showsBrowser {
+                    archiveRow(icon: "safari", titleKey: "browser.title") { BrowserView() }
+                }
                 // ربط الروبوت، وفكّه للبيع، وحذف الحساب.
                 //
                 // بأسفل الملف الشخصي مش مخبّى بإعدادات فرعية: أبل بتشترط إنّ
