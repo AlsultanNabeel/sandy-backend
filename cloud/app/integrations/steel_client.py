@@ -7,7 +7,8 @@ Steel keeps that screenshot at a public link, so a page that needs a sign-in nev
 `create_session` opens a browser of his own for a while (`POST /v1/sessions`): its id, the
 address our code drives it by (`connect_url`, the key inside it, never logged) and the live view
 Steel draws it in (`debug_url`, which has no protection of its own: it reaches only the job's
-owner, `api/browser_api`). `release` closes it and bills its time on the trace (`steel_hour`).
+owner, `api/browser_api`). `release` closes it and bills its time on the trace (`steel_hour`);
+`closed` asks whether it is.
 
 `STEEL_API_KEY` names the account; without it nothing is sent and `configured` is false.
 Each call is one `pricing.FEES["steel_tool"]` on the current trace. A failure raises
@@ -69,14 +70,30 @@ def create_session() -> Dict[str, str]:
     return {"id": str(data["id"]), "debug_url": str(data.get("debugUrl") or "")}
 
 
-def release(session_id: str, seconds: float = 0) -> None:
-    """The session closed, its time billed; a failure is logged (Steel closes it in time)."""
+def release(session_id: str, seconds: float = 0) -> bool:
+    """The session closed, its time billed; True once Steel has it closed (a failure is logged)."""
     if seconds > 0:
         trace_store.note_fee("steel_hour", seconds / 3600)
     try:
         _post(f"/sessions/{session_id}/release", {})
+        return True
     except SteelError as exc:
+        if closed(session_id):
+            return True
         logger.warning("[steel] a session was not released: %s", exc)
+        return False
+
+
+def closed(session_id: str) -> bool:
+    """Whether Steel says the session is closed; False when it cannot be told."""
+    if not configured() or not session_id:
+        return False
+    try:
+        resp = requests.get(f"{API}/sessions/{session_id}", timeout=TIMEOUT_S,
+                            headers={"steel-api-key": config.STEEL_API_KEY})
+        return resp.ok and str((resp.json() or {}).get("status") or "") == "released"
+    except (requests.RequestException, ValueError, AttributeError):
+        return False
 
 
 def scrape(url: str, *, screenshot: bool = False) -> Dict[str, Any]:

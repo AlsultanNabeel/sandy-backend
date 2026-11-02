@@ -257,13 +257,14 @@ def detach(job_id: str) -> None:
         _tell(row)
 
 
-def _release(row: Dict[str, Any]) -> None:
-    """Its session closed, once whoever gets there first (its holder, his no, the stop),
-    billed from when it opened."""
+def _release(row: Dict[str, Any]) -> bool:
+    """Its session closed, billed once from when it opened, by whoever gets there first (its
+    holder, his no, the stop); True once Steel has it closed."""
     from app.integrations import steel_client
     db = get_db()
-    if db is None:
-        return
+    steel_id = str(row.get("steel_id") or "")
+    if db is None or not steel_id:
+        return False
     try:
         claimed = db[COLLECTION].find_one_and_update(
             {"_id": str(row.get("_id") or row.get("id") or ""), "closed_at": None}, {"$set": {"closed_at": _now()}})
@@ -271,13 +272,33 @@ def _release(row: Dict[str, Any]) -> None:
         logger.warning("[browser] could not mark a session closed", exc_info=True)
         claimed = row
     if claimed is None:
-        return
+        # Another closed it already: asked again, never billed again, so its holder knows.
+        return steel_client.closed(steel_id) or steel_client.release(steel_id)
     began = row.get("created_at")
     if isinstance(began, datetime) and began.tzinfo is None:
         began = began.replace(tzinfo=timezone.utc)
     seconds = max(0.0, (_now() - began).total_seconds()) if isinstance(began, datetime) else 0.0
     # Steel closes a session itself after `SESSION_MS`: never billed past that.
-    steel_client.release(str(row.get("steel_id") or ""), min(seconds, steel_client.SESSION_MS / 1000))
+    return steel_client.release(steel_id, min(seconds, steel_client.SESSION_MS / 1000))
+
+
+# While Steel has not closed a session, its holder asks again this often, the gate still on it.
+SHUT_S = 15
+
+
+async def _shut(row: Dict[str, Any]) -> None:
+    """Its session closed at Steel before the gate comes off it: while Steel has not closed it,
+    the gate stays on and Steel is asked again, until Steel's own time for it is up."""
+    from app.integrations import steel_client
+    began = row.get("created_at")
+    if isinstance(began, datetime) and began.tzinfo is None:
+        began = began.replace(tzinfo=timezone.utc)
+    ends = (began if isinstance(began, datetime) else _now()) + timedelta(milliseconds=steel_client.SESSION_MS)
+    while not _release(row):
+        if _now() >= ends:
+            logger.error("[browser] Steel never closed a session; its own time is up")
+            return
+        await asyncio.sleep(SHUT_S)
 
 
 # A fill that has not beaten for this long has no holder any more (its worker died).
@@ -326,6 +347,7 @@ def _run(job_id: str, user_id: str) -> None:
     row = get(job_id) or {}
     with trace_store.background(user_id, "browser_fill", keep=True):
         try:
+            # Its session is closed in there, before the gate comes off it.
             outcome = asyncio.run(_drive(row, user_id))
         except browser_gate.GateError:
             outcome = {"status": FAILED, "reason": "gate"}
@@ -334,15 +356,18 @@ def _run(job_id: str, user_id: str) -> None:
         except (SteelError, OSError, RuntimeError, ValueError, KeyError) as exc:
             logger.warning("[browser] a fill failed: %s", type(exc).__name__)
             outcome = {"status": FAILED, "reason": "broke"}
-        now = get(job_id) or {}
-        if now.get("status") in (STOPPED, HANDED) and outcome.get("status") not in (DONE, FAILED):
-            outcome = {"status": now["status"]}
-        _save(job_id, **outcome)
-        if outcome["status"] != HANDED:
-            _release(row)
+        _save(job_id, **_ending(job_id, outcome))
         final = get(job_id)
         if final and final.get("detached"):
             _tell(final)
+
+
+def _ending(job_id: str, outcome: Dict[str, Any]) -> Dict[str, Any]:
+    """What a fill ended as: his stop or his taking over, unless it was done or failed first."""
+    now = get(job_id) or {}
+    if now.get("status") in (STOPPED, HANDED) and outcome.get("status") not in (DONE, FAILED):
+        return {"status": now["status"]}
+    return outcome
 
 
 async def _first(work, stopped: asyncio.Event, seconds: float):
@@ -366,9 +391,10 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from app.brain import browser_gate, browser_guard
     from app.features import browser_sites, web_page
     from app.integrations import browser_cdp, steel_client
-    client = await browser_cdp.connect(steel_client.connect_url(row["steel_id"]))
-    beat = asyncio.ensure_future(_beating(row["_id"]))
+    client, beat = None, asyncio.ensure_future(_beating(row["_id"]))
+    outcome: Dict[str, Any] = {"status": FAILED, "reason": "broke"}
     try:
+        client = await browser_cdp.connect(steel_client.connect_url(row["steel_id"]))
         gate = browser_gate.Gate(row["site"])
         stopped = asyncio.Event()
         gate.on_breach = lambda why: stopped.set()
@@ -383,12 +409,14 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         why = browser_guard.forbidden(json.loads(await browser_cdp.evaluate(client, tab, browser_guard.SNAPSHOT_JS) or "{}"))
         if why:
             _note("browser_forbidden", {"site": row["site"], "why": why}, ok=False)
-            return {"status": FAILED, "reason": why}
+            outcome = {"status": FAILED, "reason": why}
+            return outcome
         # Read as the browser drew it: hidden words that give orders stop the fill before any step.
         seen = web_page.extract(str(await browser_cdp.evaluate(client, tab, web_page.MARK_HIDDEN_JS) or ""), row["url"])
         if web_page.warned(seen):
             _note("browser_orders", {"site": row["site"]}, ok=False)
-            return {"status": FAILED, "reason": "orders"}
+            outcome = {"status": FAILED, "reason": "orders"}
+            return outcome
         asked: Dict[str, Any] = {}
         outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped, RUN_S)
         if gate.breach is None and asked:
@@ -397,11 +425,17 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             _note("browser_blocked", {"method": method, "site": browser_gate.root_of(url)}, ok=False)
         if gate.breach is not None:
             _note("browser_gate_stop", {"site": row["site"], "why": gate.breach}, ok=False)
-            return {"status": FAILED, "reason": gate.breach}
+            outcome = {"status": FAILED, "reason": gate.breach}
+        outcome = _ending(row["_id"], outcome or {"status": STOPPED})
         return outcome
     finally:
+        # Whatever stopped it (a leak, the emergency stop, an error, its end): Steel closes the
+        # session first, and only then does the gate come off it. A page handed to him stays open.
+        if outcome.get("status") != HANDED:
+            await _shut(row)
         beat.cancel()
-        await client.stop()
+        if client is not None:
+            await client.stop()
 
 
 async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asyncio.Event,

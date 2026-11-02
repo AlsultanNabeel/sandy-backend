@@ -210,8 +210,9 @@ def _status(session_id: str) -> str:
     return str((resp.json() if resp.ok else {}).get("status") or resp.status_code)
 
 
-def leaking_fill() -> bool:
-    """A whole fill on a page that leaks what she typed: stopped, its Steel session closed, told."""
+def leaking_fill() -> list:
+    """A whole fill on a page that leaks what she typed: stopped, its Steel session closed before
+    the gate comes off, told."""
     from app.brain import tools
     from app.brain.ctx import TurnCtx
     from app.features import browser_job, browser_sites
@@ -223,7 +224,28 @@ def leaking_fill() -> bool:
         await browser_cdp.evaluate(client, tab, LEAK_JS)
         await asyncio.sleep(10)
         return {"status": browser_job.DONE, "result": "the page leaked and nothing stopped it"}
+    from app.integrations import steel_client
+    order, connect, release = [], browser_cdp.connect, steel_client.release
+
+    async def watched(url):
+        client = await connect(url)
+        stop = client.stop
+
+        async def stopped():
+            # The gate comes off here: Steel must say the session is closed by now.
+            order.append(("gate off", steel_client.closed(job_id[0])))
+            await stop()
+        client.stop = stopped
+        return client
+
+    def releasing(sid, seconds=0):
+        job_id[:] = [sid]
+        done = release(sid, seconds)
+        order.append(("released", done))
+        return done
+    job_id = [""]
     real, browser_job.AGENT = browser_job.AGENT, leaks
+    browser_cdp.connect, steel_client.release = watched, releasing
     try:
         with active_user_profile_context(_world()):
             browser_sites.set_level("httpbin.org", browser_sites.SUBMIT)
@@ -234,14 +256,13 @@ def leaking_fill() -> bool:
             job = get_db()[browser_job.COLLECTION].find_one({}) or {}
     finally:
         browser_job.AGENT = real
-    # Its release goes after its answer: Steel is asked until it says (twenty seconds at most).
-    deadline, status = time.monotonic() + 20, ""
-    while time.monotonic() < deadline and status != "released":
-        time.sleep(2)
-        status = _status(job.get("steel_id", ""))
-    return report("a page that leaks stops the whole fill and closes its session",
-                  out.get("ok") is False and job.get("reason") == "leak" and status == "released" and not row,
-                  f"{job.get('status')} {job.get('reason')}, Steel {status}: {(out.get('reply') or '')[:80]}")
+        browser_cdp.connect, steel_client.release = connect, release
+    status = _status(job.get("steel_id", ""))
+    first = report("a page that leaks stops the whole fill and closes its session",
+                   out.get("ok") is False and job.get("reason") == "leak" and status == "released" and not row,
+                   f"{job.get('status')} {job.get('reason')}, Steel {status}: {(out.get('reply') or '')[:80]}")
+    return [first, report("Steel closed it before the gate came off", order[:1] == [("released", True)]
+                            and order[-1:] == [("gate off", True)], str(order))]
 
 
 def whole_fill() -> bool:
@@ -296,7 +317,7 @@ def main() -> int:
         results.append(live_view(session["debug_url"]))
     finally:
         steel_client.release(session["id"], time.monotonic() - began)
-    results.append(leaking_fill())
+    results += leaking_fill()
     if args.fill:
         results.append(whole_fill())
     print(f"\n{sum(results)}/{len(results)} passed")

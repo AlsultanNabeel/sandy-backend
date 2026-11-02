@@ -392,7 +392,10 @@ a page loads goes (script, style, font, image, media, by GET), anything that sen
 logged and the fill goes on. Any site but its own: a request whose address or body carries a value
 Sandy typed (as typed or encoded, `MIN_TYPED` 3) stops the fill (`leak`), an image too. A stop
 cancels the agent at once (`on_breach`), closes the session and tells him (`fill_leak`,
-`fill_unasked`); no gate, no fill. A session is closed once, by whoever gets there first
+`fill_unasked`); no gate, no fill. Whatever stops a fill (a leak, the emergency stop, an error, its
+end), Steel closes the session first and only then does the gate come off it (`_shut`, in
+`_drive`'s own `finally`): while Steel has not closed it (`steel_client.release` and `closed` both
+say no) the gate stays on and Steel is asked again every `SHUT_S`, until Steel's own time is up. A session is closed once, by whoever gets there first
 (`_release`, `closed_at`); the emergency stop, the account deleted or reset (`account_delete._erase`)
 and «طلّعها» on a site (`browser_sites.sign_out`, that site's fills) close every open fill's
 session at once (`stop_for`), not when Steel would a quarter hour later. A fill beats (`beat_at`, `BEAT_S`) while it
