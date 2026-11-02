@@ -727,3 +727,20 @@ def test_a_fill_only_site_never_asks_a_question_its_yes_cannot_answer(world, mon
     said = chat["messages"][-1]["text"]
     assert "didn't send it" in said and "sandy://browser/live?job=" in said and "Are you sure" not in said
     assert pending.load(C9, "userA", brain_db) is None and _job(out["job"])["status"] == browser_job.HANDED
+
+
+def test_what_came_of_a_fill_is_told_once_whoever_tells_it(world, monkeypatch, brain_db):  # noqa: F811
+    """The caller giving up (`detach`) and the fill reaching its question race to tell him: once."""
+    from app.services import apns
+    pushed = []
+    monkeypatch.setattr(apns, "is_configured", lambda: True)
+    monkeypatch.setattr(apns, "send", lambda token, title, body, **kw: pushed.append(body) or (True, "ok"))
+    brain_db["sandy_push_tokens"].insert_one({"_id": "tok-1", "user_id": "userA", "token": "tok-1"})
+    _level("submit")
+    job = _fill("en", thread=C8)["ids"][0]
+    with active_user_profile_context(A):
+        browser_job.detach(job)
+        browser_job.detach(job)
+        browser_job._tell(browser_job.get(job))
+    chat = brain_db["conversations"].find_one({"_id": C8, "user_id": "userA"})
+    assert len([m for m in chat["messages"] if m["role"] == "sandy"]) == 1 and len(pushed) == 1

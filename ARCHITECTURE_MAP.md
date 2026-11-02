@@ -400,7 +400,7 @@ closes the session at once (`confirm.let_go`, `tools.LET_GO`), in the chat and o
 call to the browser has `browser_cdp.CALL_S` (20 s) at most. The tool waits `WAIT_S` (80 s); past
 it the fill is `detached`, and once it is held or stops it tells him in the chat he asked from
 (`conversations_api.say_in`: its question, kept as the thread's `pending` so his next message
-answers it, or its result) and on his phone; never as a task's result. Each action on the page is
+answers it, or its result) and on his phone, each state once whoever tells it (`told`); never as a task's result. Each action on the page is
 a tool on the fill's own background trace row (`trace_store.background(…, keep=True)`). *Live view*:
 `/api/browser/jobs/<id>/live` gives Steel's `debugUrl` with `interactive=false` (watch only) to the
 fill's owner alone, `…/takeover` stops the agent and gives it with `interactive=true`; it is kept

@@ -4,7 +4,7 @@ without his yes (behind the `browser` switch).
 `sandy_browser_jobs`, one row per fill under its user, kept a day (TTL on `expire_at`):
 
   {site, url, goal, args, status, steel_id, live, action, summary, result, reason, thread_id,
-   lang, detached, beat_at, created_at, updated_at, expire_at}
+   lang, detached, told, beat_at, closed_at, created_at, updated_at, expire_at}
 
 with `live` (Steel's view of the session, which has no protection of its own), `summary` and
 `result` sealed (`ltm_crypto`). `start` opens the session and runs the fill: our own gate goes on
@@ -721,6 +721,17 @@ def _tell(row: Dict[str, Any]) -> None:
     from app.api.conversations_api import say_in
     from app.brain import confirm, lang, pending
     uid, thread = str(row.get("user_id") or ""), str(row.get("thread_id") or "")
+    coll = _coll()
+    try:
+        # Each state is told once, whoever gets there first (the caller giving up, the fill itself).
+        claimed = coll is not None and coll.find_one_and_update(
+            {"_id": str(row.get("_id") or row.get("id")), "told": {"$ne": row.get("status")}},
+            {"$set": {"told": row.get("status")}}) is not None
+    except PyMongoError:
+        logger.warning("[browser] could not mark a fill told", exc_info=True)
+        claimed = False
+    if not claimed:
+        return
     with lang.using(row.get("lang") or lang.AR):
         if row["status"] == HELD:
             summary = lang.say("fill_summary", site=row["site"], fields=row.get("summary") or "")
