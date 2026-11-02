@@ -447,9 +447,13 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
             tasks.save_state(_id(doc), state)
             return None
         tasks.save_state(_id(doc), {**state, "last_result": message})
-        if isinstance(found, dict) and found.get("warning"):
-            # The page tries to give orders: told with the result, never followed.
+        if isinstance(found, dict) and tool == "page_read":
+            # Where it came from, and a page that tries to give orders: told with the result.
             from app.features.web_page import site_of
-            message = f"{message}\n\n{lang.say('page_warning', site=site_of(str(found.get('url') or '')))}"
+            site = site_of(str(found.get("url") or ""))
+            if site and site not in message:
+                message = f"{message}\n\n{lang.say('sources_line', sites=site)}"
+            if found.get("warning"):
+                message = f"{message}\n\n{lang.say('page_warning', site=site)}"
         return notify.deliver(_id(doc), str(doc.get("text") or ""), message, lang.current(),
                               state=task_diff.describe(found))

@@ -202,6 +202,7 @@ def test_a_new_project_on_the_page_is_one_message(watched):
                                                   "Translate a book", "Data entry", "Chatbot for a clinic"])
     _tick(watched.doc)
     assert len(watched.sent) == 1 and "Chatbot for a clinic" in watched.sent[0]
+    assert "📎 Source: jobs.example" in watched.sent[0]
     assert watched.asked == ["task", "task_review"]
     _tick(watched.doc)
     assert len(watched.sent) == 1
@@ -234,3 +235,21 @@ def test_a_page_check_needs_the_browser(on, monkeypatch):
     with active_user_profile_context(A):
         refused = tools.execute("task_create", args, TurnCtx(user_id="userA"))
     assert refused["ok"] is False and "browser" in refused["error"]
+
+
+# ── Where it came from ──
+
+@pytest.mark.parametrize("language, reply, line", [
+    ("ar", "الصفحة عن البحر.", "📎 المصدر: notes.example"),
+    ("en", "The page is about the sea.", "📎 Source: notes.example")])
+def test_what_she_read_names_where_it_came_from(on, web, language, reply, line):
+    model = ScriptedModel(tools_reply(call("page_read", url="https://notes.example/")), text_reply(reply))
+    assert _turn(model, "read https://notes.example/" if language == "en" else
+                 "اقريلي https://notes.example/")["final_response"].endswith(line)
+
+
+def test_a_reply_that_names_its_source_gets_no_second_line(on, web):
+    model = ScriptedModel(tools_reply(call("page_read", url="https://notes.example/")),
+                          text_reply("On notes.example: the sea."))
+    out = _turn(model, "read https://notes.example/")["final_response"]
+    assert "📎" not in out

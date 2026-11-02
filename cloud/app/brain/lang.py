@@ -597,6 +597,7 @@ PHRASES = {
                                "the password), then ask me again: {link}"},
     "page_login_expired": {"ar": "دخولك على {site} انتهى. سجّل كمان مرة من هون: {link}",
                            "en": "Your sign-in on {site} has expired. Sign in again from here: {link}"},
+    "sources_line": {"ar": "📎 المصدر: {sites}", "en": "📎 Source: {sites}"},
     "page_warning": {"ar": "⚠️ انتبه: صفحة {site} فيها كلام بيحاول يعطيني أوامر. ما نفّذت منه شي.",
                      "en": "⚠️ Heads up: the page on {site} has text trying to give me orders. I didn't "
                            "follow any of it."},
