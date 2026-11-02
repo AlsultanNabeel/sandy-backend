@@ -158,6 +158,23 @@ _SLOTS = threading.BoundedSemaphore(max(1, config.SANDY_BROWSER_FILLS))
 _HOLDING = (RUNNING, HELD, APPROVED)
 
 
+# The versions a fill was proven on: its agent leans on browser-use's own insides (its tools'
+# `act`, its events, its element lookup), the gate on cdp-use's. Pinned in requirements.txt.
+PROVEN = {"browser-use": "0.13.14", "cdp-use": "1.4.5"}
+
+
+def _proven() -> bool:
+    import importlib.metadata
+    try:
+        found = {name: importlib.metadata.version(name) for name in PROVEN}
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    if found != PROVEN:
+        logger.error("[browser] no fill: the libraries are %s, proven on %s", found, PROVEN)
+        return False
+    return True
+
+
 def _limits(user_id: str) -> None:
     """Busy when he is at the day's limit, has a fill open already, or the server has as many
     as it runs."""
@@ -196,6 +213,8 @@ def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) 
     from app.integrations import steel_client
     from app.utils.ltm_crypto import encrypt_field
     url = web_page.check_url(str(args.get("url") or ""))
+    if not _proven():
+        raise Busy("unproven")
     _limits(user_id)
     if not _SLOTS.acquire(blocking=False):
         raise Busy("busy_server")

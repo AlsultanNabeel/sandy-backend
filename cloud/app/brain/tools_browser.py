@@ -183,7 +183,8 @@ def page_fill(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         job = browser_job.start({**args, "url": url}, user_id=ctx.user_id, thread_id=ctx.thread_id,
                                 language=lang.current())
     except browser_job.Busy as exc:
-        return _no(lang.say("page_daily_cap" if exc.code == "daily_cap" else f"fill_{exc.code}", site=site))
+        said = {"daily_cap": "page_daily_cap", "unproven": "fill_failed"}.get(exc.code, f"fill_{exc.code}")
+        return _no(lang.say(said, site=site))
     except (SteelError, RuntimeError):
         return _no(lang.say("page_unreachable", site=site))
     return _with_source(ctx, _outcome(browser_job.wait(job, browser_job.WAIT_S) or {}))

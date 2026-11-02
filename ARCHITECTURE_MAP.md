@@ -361,7 +361,8 @@ cookies by `Storage.setCookies` and storage by origin, `integrations/browser_cdp
 read from the page's fields, frames and address (`SNAPSHOT_JS` live, `of_html` from markup).
 *A fill* (`features/browser_job.py`, `sandy_browser_jobs`, scoped, a day): `page_fill` on a site of
 level fill or submit opens a Steel session and runs on a pool of its own (`_POOL`, never the shared
-workers: a held fill keeps its thread). *Its limits*: `MAX_STEPS` counted by us too, a cost in
+workers: a held fill keeps its thread). It runs only on the versions it was proven on (`PROVEN`, browser-use 0.13.14 and cdp-use 1.4.5,
+both pinned; any other and no fill, no session). *Its limits*: `MAX_STEPS` counted by us too, a cost in
 dollars (`SANDY_BROWSER_FILL_USD`, 0.30: its model calls and fees on its trace and its Steel time,
 `_spent`, `Trace.cost`), one open fill per account (`SANDY_BROWSER_FILLS_EACH`) and
 `SANDY_BROWSER_FILLS` (3) across the server (counted in Mongo and by the pool's own slots), and

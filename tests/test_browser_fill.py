@@ -752,3 +752,26 @@ def test_nothing_of_the_held_request_resend_is_left():
         assert not hasattr(browser_job, name)
     for name in ("replay", "allow_one", "held"):
         assert not hasattr(browser_gate.Gate("x.com"), name)
+
+
+# ── The library it was proven on ──
+
+def test_the_pinned_library_is_the_one_the_fill_was_proven_on():
+    import importlib.metadata
+    import re
+    from pathlib import Path
+    pinned = re.search(r"^browser-use==(\S+)", Path("requirements.txt").read_text(), re.M).group(1)
+    assert pinned == browser_job.PROVEN["browser-use"] == importlib.metadata.version("browser-use")
+    assert importlib.metadata.version("cdp-use") == browser_job.PROVEN["cdp-use"]
+    assert re.search(r"^cdp-use==(\S+)", Path("requirements.txt").read_text(), re.M).group(1) == browser_job.PROVEN["cdp-use"]
+
+
+def test_another_version_of_the_library_never_fills(world, monkeypatch):
+    """Its agent leans on browser-use's own insides (its tools, its events): on a version it was
+    not proven on, no fill runs and no Steel session opens."""
+    import importlib.metadata
+    _level("submit")
+    real = importlib.metadata.version
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "0.14.0" if name == "browser-use" else real(name))
+    out = _fill("en")
+    assert out["ok"] is False and world.opened == []
