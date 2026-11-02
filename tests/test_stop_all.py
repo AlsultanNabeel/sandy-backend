@@ -92,11 +92,12 @@ def test_stopped_the_browser_refuses_in_his_language(on, monkeypatch):
     assert out["ok"] is False and "stopped" in out["reply"].lower()
 
 
-def test_stopping_calls_every_stopper_with_the_account(on, monkeypatch):
+def test_stopping_closes_the_accounts_fills_and_nothing_else_is_kept_to_call(on, monkeypatch):
+    from app.features import browser_job
     seen = []
-    monkeypatch.setattr(stop_all, "STOPPERS", [seen.append])
+    monkeypatch.setattr(browser_job, "stop_for", seen.append)
     stop_all.stop("userA")
-    assert seen == ["userA"]
+    assert seen == ["userA"] and not hasattr(stop_all, "STOPPERS")
 
 
 def test_the_app_stops_and_brings_back_with_one_call(on, monkeypatch):

@@ -524,7 +524,7 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     os.environ.setdefault("BROWSER_USE_CLOUD_SYNC", "false")
     from browser_use import Agent, BrowserSession
     from browser_use.agent.views import ActionResult
-    from browser_use.browser.events import ClickCoordinateEvent, ClickElementEvent, SendKeysEvent, TypeTextEvent
+    from browser_use.browser.events import ClickElementEvent, SendKeysEvent, TypeTextEvent
     from browser_use.tools.service import Tools
 
     from app.brain import browser_guard
@@ -568,15 +568,10 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
         gate.acted("enter" if "enter" in str(event.keys).lower() else "keys")
         _note("browser_keys", {"keys": str(event.keys)[:20]})
 
-    def on_point(event):
-        gate.acted("click")
-        _note("browser_click", {"at": [event.coordinate_x, event.coordinate_y]})
-
     # Before browser-use's own handlers: the gate knows what is about to be done.
     session.event_bus.on(ClickElementEvent, on_click)
     session.event_bus.on(TypeTextEvent, on_type)
     session.event_bus.on(SendKeysEvent, on_keys)
-    session.event_bus.on(ClickCoordinateEvent, on_point)
     reason: Dict[str, str] = {}
 
     steps = [0]
@@ -699,7 +694,7 @@ def live_url(job_id: str, control: bool) -> Optional[str]:
 
 def stop_for(user_id: str, site: str = "") -> None:
     """Every open fill of his (on ``site`` alone, when named) stops and its session closes now:
-    the emergency stop (`stop_all.STOPPERS`), the account deleted or reset (`account_delete`),
+    the emergency stop (`stop_all.stop`), the account deleted or reset (`account_delete`),
     «طلّعها» on a site (`browser_sites.sign_out`). A holder that sees it lets the page go."""
     db = get_db()
     if db is None or not user_id:

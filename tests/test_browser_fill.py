@@ -377,8 +377,8 @@ def test_the_real_agent_is_built_on_our_model_the_sites_domains_and_the_gate(mon
     assert isinstance(agent["llm"], SandyLLM) and agent["use_judge"] is False and built["steps"] == browser_job.MAX_STEPS
     excluded = set(agent["tools"].registry.registry.actions)
     assert not excluded & {"evaluate", "navigate", "search", "upload_file"} and {"click", "input"} <= excluded
-    assert {k for k, _ in handlers} == {events.ClickElementEvent, events.TypeTextEvent, events.SendKeysEvent,
-                                        events.ClickCoordinateEvent}
+    # A click by place is refused before it is made: nothing listens for one.
+    assert {k for k, _ in handlers} == {events.ClickElementEvent, events.TypeTextEvent, events.SendKeysEvent}
     # A click the agent is about to make is the gate's to know.
     dict(handlers)[events.ClickElementEvent](NS(node=NS(xpath="//button[1]", attributes={"name": "go"})))
     assert gate.last == "click"
@@ -744,3 +744,11 @@ def test_what_came_of_a_fill_is_told_once_whoever_tells_it(world, monkeypatch, b
         browser_job._tell(browser_job.get(job))
     chat = brain_db["conversations"].find_one({"_id": C8, "user_id": "userA"})
     assert len([m for m in chat["messages"] if m["role"] == "sandy"]) == 1 and len(pushed) == 1
+
+
+def test_nothing_of_the_held_request_resend_is_left():
+    from app.brain import browser_gate
+    for name in ("_resend_js", "_from_send", "_FORM_TYPES", "_send"):
+        assert not hasattr(browser_job, name)
+    for name in ("replay", "allow_one", "held"):
+        assert not hasattr(browser_gate.Gate("x.com"), name)

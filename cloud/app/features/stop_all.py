@@ -3,8 +3,7 @@ switch). Typed in the chat it stops by the code itself (`asks`, `loop`), never l
 
 Stopped (`sandy_users.stopped_at`), an account's tasks do not run and count no failure
 (`task_runner.run`), the browser's tools refuse (`tools_browser`), and every browser job still
-running stops at its next step and closes its session (`browser_job.stop_for`, then any other
-in `STOPPERS`). Reminders still ring: they are his, not work Sandy does on her own. One word or one
+running stops and closes its session (`browser_job.stop_for`). Reminders still ring: they are his, not work Sandy does on her own. One word or one
 tap (`resume`) brings it all back. A reset forgets it (`account_delete.USER_ROW_FORGOTTEN`).
 """
 
@@ -13,7 +12,6 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Callable, List
 
 from pymongo.errors import PyMongoError
 
@@ -23,9 +21,6 @@ logger = logging.getLogger(__name__)
 
 _USERS = "sandy_users"
 FIELD = "stopped_at"
-# Called with the account's id once it is stopped, after the browser's fills: what else still
-# runs for it stops.
-STOPPERS: List[Callable[[str], None]] = []
 
 
 # A chat message that is the stop and nothing else, said to her or not (`asks`).
@@ -72,11 +67,10 @@ def stop(user_id: str) -> bool:
     """Everything of this account's own work stops now; True once it is kept."""
     from app.features import browser_job
     kept = _set(user_id, datetime.now(timezone.utc))
-    for stopper in (browser_job.stop_for, *STOPPERS):
-        try:
-            stopper(str(user_id))
-        except (RuntimeError, OSError, ValueError, PyMongoError):  # the rest still stop
-            logger.exception("[stop] a stopper failed for %s", user_id)
+    try:
+        browser_job.stop_for(str(user_id))
+    except (RuntimeError, OSError, ValueError, PyMongoError):  # the stop itself is still kept
+        logger.exception("[stop] the browser's fills did not stop for %s", user_id)
     return kept
 
 
