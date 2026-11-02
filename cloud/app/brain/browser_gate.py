@@ -8,7 +8,8 @@ on it), has `Fetch.enable` on it, no websocket or peer connection in its scripts
 before the page's own), websockets blocked (`Network.setBlockedURLs`) and watched
 (`Network.webSocketCreated`), and every request stops at the gate first (`decide`):
 
-  * the page's own site: a read goes; a send goes only in the moment after his yes (`approve`),
+  * the page's own site: a read goes; after his yes (`approve`) exactly one send goes, the first
+    from the tab and frame he said yes to once the click is made, and the gate shuts behind it;
     any other is failed and logged; one right after a click or Enter he was not asked about
     stops the fill (`UNASKED`: what sent was not known to send);
   * another site: what a page loads goes (a script, a style, a font, an image, media, by GET);
@@ -25,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote, quote_plus, unquote_plus, urlsplit
 
@@ -38,8 +38,6 @@ READS = ("GET", "HEAD", "OPTIONS")
 LOADS = ("Script", "Stylesheet", "Font", "Image", "Media")
 # What follows these, on the page's own site, is a send he was not asked about.
 SENDING = ("click", "enter")
-# After his yes, the sends of the page he approved go for this long.
-APPROVED_S = 15
 # A typed value shorter than this is too common to tell a leak by («1», «ok»).
 MIN_TYPED = 3
 _NO_NETWORK = ("data:", "blob:", "about:")
@@ -86,7 +84,8 @@ class Gate:
         self.site = _root(site)
         self.last: Optional[str] = None
         self.typed: Set[str] = set()
-        self.approved_until = 0.0
+        # The tab and frame whose one send his yes lets through, until it goes (`approve`).
+        self.armed: Optional[Tuple[str, str]] = None
         self.breach: Optional[str] = None
         self.on_breach: Optional[Callable[[str], None]] = None
         self.blocked: List[Tuple[str, str]] = []
@@ -101,10 +100,15 @@ class Gate:
             if len(value.strip()) >= MIN_TYPED:
                 self.typed.add(value.strip())
 
-    def approve(self) -> None:
-        """His yes: what the page sends to its own site in the next moments goes."""
-        self.approved_until = time.monotonic() + APPROVED_S
+    def approve(self, session: str, frame: str) -> None:
+        """His yes, made as the click is: the first send to its own site from this tab
+        (``session``) and frame goes, and none after it (`shut`)."""
+        self.armed = (str(session or ""), str(frame or ""))
         self.last = None
+
+    def shut(self) -> None:
+        """The moment of his yes is over, whether its send went or not."""
+        self.armed = None
 
     def stop(self, why: str) -> None:
         if self.breach is None:
@@ -119,7 +123,8 @@ class Gate:
         return any(form.lower() in seen for value in self.typed
                    for form in (value, quote(value, safe=""), quote_plus(value)))
 
-    def decide(self, method: str, url: str, resource_type: str = "", *, body: str = "") -> str:
+    def decide(self, method: str, url: str, resource_type: str = "", *, body: str = "",
+               session: str = "", frame: str = "") -> str:
         method, url = str(method or "").upper(), str(url or "")
         if url.startswith(_NO_NETWORK):
             return GO
@@ -131,7 +136,8 @@ class Gate:
         if own:
             if method in READS:
                 return GO
-            if time.monotonic() < self.approved_until:
+            if self.armed is not None and self.armed == (str(session or ""), str(frame or "")):
+                self.armed = None
                 self.sent.append((method, url))
                 return GO
             self.blocked.append((method, url))
@@ -171,7 +177,8 @@ async def install(client, gate: Gate) -> None:
         request = event.get("request") or {}
         rid = event.get("requestId")
         verdict = gate.decide(request.get("method", ""), request.get("url", ""), event.get("resourceType", ""),
-                              body=str(request.get("postData") or ""))
+                              body=str(request.get("postData") or ""), session=str(session or ""),
+                              frame=str(event.get("frameId") or ""))
         if verdict == GO:
             reply = client.send.Fetch.continueRequest(params={"requestId": rid}, session_id=session)
         else:

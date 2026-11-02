@@ -149,10 +149,9 @@ async def gate_checks(session_id: str) -> list:
                                      {"kind": "click", "target": target, "node": node, "label": "submit"})
         answered = await browser_cdp.evaluate(client, tab, ANSWERED_JS)
         results.append(report("his yes is the real click on the same page, sent once",
-                              out.get("status") == browser_job.DONE and bool(answered) and len(gate.sent) >= 1,
+                              out.get("status") == browser_job.DONE and bool(answered) and len(gate.sent) == 1,
                               f"{out.get('status')} {out.get('reason', '')} sent {len(gate.sent)}"))
-        # A send after that moment: blocked again.
-        gate.approved_until = 0
+        # A script's send after his yes, nothing reset: the gate shut behind the one send.
         await browser_cdp.goto(client, tab, FORM)
         await browser_cdp.evaluate(client, tab, FILL_JS)
         before = len(gate.sent)

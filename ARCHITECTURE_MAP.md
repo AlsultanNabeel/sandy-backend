@@ -384,7 +384,9 @@ safety net under it, our own connection: every target, tabs now and every tab, f
 later (`Target.setAutoAttach` with `waitForDebuggerOnStart` on the browser and on each target),
 has `Fetch.enable`, no websocket or peer connection in its scripts (`NO_SOCKETS_JS`, before the
 page's own, `Page.enable` first or it never runs), websockets blocked and watched. The page's own
-site: reads go, a send goes only in the moment after his yes (`APPROVED_S`), one right after a click
+site: reads go, after his yes exactly one send goes, the first from the tab and frame the click
+lands in once it is made (`approve`, the frame from `DOM.getNodeForLocation`), and the gate shuts
+behind it (`shut`, also when nothing went), one right after a click
 or Enter he was not asked about stops the fill (`unasked`), any other is blocked. Another site: what
 a page loads goes (script, style, font, image, media, by GET), anything that sends is blocked and
 logged and the fill goes on. Any site but its own: a request whose address or body carries a value
@@ -421,7 +423,8 @@ on the network alone did not hold: it opened, hence `NO_SOCKETS_JS`); an image t
 carrying what she typed is stopped; his yes is the real click on the same page and sends once, a
 second send is not let through, a new tab's send is blocked; the live view opens; and a whole fill
 on a page that leaks is stopped, its Steel session released, him told; a whole fill on the real
-model asks before its click and his yes clicks it and sends it once. Steel refuses its
+model asks before its click and his yes clicks it and sends it once; a script's send right after
+his yes, nothing reset, is blocked. Steel refuses its
 key in a header on the connect address, so the key is in the address and every log record is
 redacted as it is made (`bootstrap.install_redaction`: any query field named key, token, secret,
 password, signature or auth, from any library). *Slug* (measured the same day, Linux wheels):

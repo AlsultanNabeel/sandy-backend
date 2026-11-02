@@ -73,8 +73,12 @@ def world(monkeypatch, brain_db):  # noqa: F811
             w.pressed.append((params["type"], session))
             if params["type"] == "mouseReleased":
                 # The real click on the send button: the page's own send, through the gate.
-                client.handlers["Fetch.requestPaused"]({"requestId": "r10", "resourceType": "Document", "request": {
-                    "method": "POST", "url": URL, "postData": "name=Nabeel"}}, session)
+                client.handlers["Fetch.requestPaused"]({"requestId": "r10", "resourceType": "Document", "frameId": "f1",
+                                                        "request": {"method": "POST", "url": URL,
+                                                                    "postData": "name=Nabeel"}}, session)
+                # A second send at once, from the same frame: his yes was for one only.
+                client.handlers["Fetch.requestPaused"]({"requestId": "r11", "resourceType": "XHR", "frameId": "f1",
+                                                        "request": {"method": "POST", "url": URL + "/again"}}, session)
             return {}
         return answer
 
@@ -90,6 +94,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
         client.answers["DOM.resolveNode"] = {"object": {"objectId": "o7"}}
         client.answers["Runtime.callFunctionOn"] = spot
         client.answers["Input.dispatchMouseEvent"] = press(client)
+        client.answers["DOM.getNodeForLocation"] = {"backendNodeId": 7, "frameId": "f1"}
         w.clients.append(client)
         return client
 
@@ -168,6 +173,7 @@ def test_the_send_waits_for_his_yes_and_then_goes_once(world, language):
     assert world.pressed == [("mouseMoved", "s1"), ("mousePressed", "s1"), ("mouseReleased", "s1")]
     assert {"backendNodeId": 7} in holder.of("DOM.resolveNode")
     assert {"requestId": "r10"} in holder.of("Fetch.continueRequest")
+    assert {"requestId": "r11", "errorReason": "BlockedByClient"} in holder.of("Fetch.failRequest")
     assert not [p for p in holder.of("Runtime.evaluate") if "submit()" in p["expression"] or "fetch(" in p["expression"]]
     assert _job(job)["status"] == browser_job.DONE and world.released == ["st1"]
 

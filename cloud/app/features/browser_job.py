@@ -456,27 +456,38 @@ async def _act(row, gate, client, session: str, asked: Dict[str, Any]) -> Dict[s
     element = (found.get("object") or {}).get("objectId")
     if not element:
         return {"status": FAILED, "reason": "moved"}
-    gate.approve()
+    spot = ((await within(client.send.Runtime.callFunctionOn(params={
+        "functionDeclaration": _SPOT_JS, "objectId": element, "returnByValue": True},
+        session_id=session))).get("result") or {}).get("value") or {}
+    if not spot.get("here"):
+        # Something else lies over it now: acting there is not what he said yes to.
+        return {"status": FAILED, "reason": "moved"}
+    # The frame it lies in: the one his yes lets a send come from.
+    frame = str((await within(client.send.DOM.getNodeForLocation(params={
+        "x": round(spot["x"]), "y": round(spot["y"]), "includeUserAgentShadowDOM": True,
+        "ignorePointerEventsNone": True}, session_id=session))).get("frameId") or "")
     if asked["kind"] == "click":
-        spot = ((await within(client.send.Runtime.callFunctionOn(params={
-            "functionDeclaration": _SPOT_JS, "objectId": element, "returnByValue": True},
-            session_id=session))).get("result") or {}).get("value") or {}
-        if not spot.get("here"):
-            # Something else lies over it now: clicking there is not what he said yes to.
-            return {"status": FAILED, "reason": "moved"}
-        for kind in ("mouseMoved", "mousePressed", "mouseReleased"):
-            await within(client.send.Input.dispatchMouseEvent(params={
-                "type": kind, "x": spot["x"], "y": spot["y"], "button": "left", "clickCount": 1}, session_id=session))
+        point = {"x": spot["x"], "y": spot["y"], "button": "left", "clickCount": 1}
+        for kind in ("mouseMoved", "mousePressed"):
+            await within(client.send.Input.dispatchMouseEvent(params={"type": kind, **point}, session_id=session))
+        # The one send of his yes, from the moment of the click itself.
+        gate.approve(session, frame)
+        await within(client.send.Input.dispatchMouseEvent(params={"type": "mouseReleased", **point},
+                                                          session_id=session))
     else:
         await within(client.send.Runtime.callFunctionOn(params={
             "functionDeclaration": "function () { this.focus(); }", "objectId": element}, session_id=session))
+        gate.approve(session, frame)
         for kind in ("keyDown", "keyUp"):
             await within(client.send.Input.dispatchKeyEvent(params={
                 "type": kind, "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13,
                 **({"text": "\r"} if kind == "keyDown" else {})}, session_id=session))
     _note("browser_send", {"site": row["site"], "element": asked.get("label", "")})
-    await asyncio.sleep(1)
-    await browser_cdp.settle(client, session, LOAD_S)
+    try:
+        await asyncio.sleep(1)
+        await browser_cdp.settle(client, session, LOAD_S)
+    finally:
+        gate.shut()
     if gate.breach is not None:
         return {"status": FAILED, "reason": gate.breach}
     if not gate.sent:

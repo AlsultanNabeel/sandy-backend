@@ -1,6 +1,7 @@
 """The network gate (`brain/browser_gate.py`), the safety net of a fill under the action's own
 question. On the page's own site a read goes and a send goes only in the moment after his yes;
-one right after a click he was not asked about stops the fill. From another site what a page
+one right after a click he was not asked about stops the fill; his yes lets exactly one send
+through, from the tab and frame he said yes to. From another site what a page
 loads goes (a script, a style, a font, an image, media), and anything that sends is blocked. A
 request to any other site that carries a value Sandy typed stops the fill, a GET for an image
 too. Every target (tabs, frames, workers, old and new) waits until the gate is on it, websockets
@@ -77,21 +78,32 @@ def test_a_send_after_an_action_he_was_not_asked_about_stops_the_fill(kind):
     assert gate.decide("POST", URL_A, "Document") == G.STOP and gate.breach == G.UNASKED
 
 
-def test_after_his_yes_the_sites_own_sends_go_and_never_another_sites():
+def test_after_his_yes_one_send_goes_from_his_tab_and_frame_and_the_gate_shuts():
     gate = _gate()
-    gate.approve()
-    assert gate.decide("POST", URL_A, "Document") == G.GO
-    assert gate.decide("POST", "https://api.forms.example.com/x", "XHR") == G.GO
-    assert gate.decide("POST", f"{OTHER}/x", "XHR") == G.BLOCK
-    assert gate.decide("GET", "https://evil.example.org/?n=Nabeel+Alsultan", "Image") == G.STOP
-    assert gate.sent == [("POST", URL_A), ("POST", "https://api.forms.example.com/x")]
+    assert gate.decide("POST", URL_A, "Document", session="s1", frame="f1") == G.BLOCK
+    gate.approve("s1", "f1")
+    # Another tab or frame of the same page never takes his yes.
+    assert gate.decide("POST", URL_A, "XHR", session="s2", frame="f1") == G.BLOCK
+    assert gate.decide("POST", URL_A, "XHR", session="s1", frame="f2") == G.BLOCK
+    assert gate.decide("POST", f"{OTHER}/x", "XHR", session="s1", frame="f1") == G.BLOCK
+    assert gate.decide("POST", URL_A, "Document", session="s1", frame="f1") == G.GO
+    # The one send went: the next, even at once from the same frame, is blocked.
+    assert gate.decide("POST", "https://api.forms.example.com/x", "XHR", session="s1", frame="f1") == G.BLOCK
+    assert gate.sent == [("POST", URL_A)]
 
 
-def test_his_yes_lasts_a_moment_only(monkeypatch):
+def test_his_yes_left_unused_shuts_with_its_moment():
     gate = _gate()
-    gate.approve()
-    monkeypatch.setattr(G.time, "monotonic", lambda: gate.approved_until + 1)
-    assert gate.decide("POST", URL_A, "Document") == G.BLOCK
+    gate.approve("s1", "f1")
+    gate.shut()
+    assert gate.decide("POST", URL_A, "Document", session="s1", frame="f1") == G.BLOCK and gate.sent == []
+
+
+def test_his_yes_never_lets_a_value_go_to_another_site():
+    gate = _gate()
+    gate.approve("s1", "f1")
+    assert gate.decide("GET", "https://evil.example.org/?n=Nabeel+Alsultan", "Image", session="s1",
+                       frame="f1") == G.STOP
 
 
 def test_what_never_reaches_the_network_goes():
