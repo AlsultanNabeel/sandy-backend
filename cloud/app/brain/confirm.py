@@ -7,6 +7,7 @@ one normalized resolver, below, on chat and voice alike.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -15,6 +16,8 @@ from app.brain import lang, tools
 from app.brain.ctx import TurnCtx
 from app.brain.matching import match_key
 from app.utils.nlp_normalizer import normalize_user_message
+
+logger = logging.getLogger(__name__)
 
 PENDING_TYPE = "brain_confirm"
 
@@ -211,6 +214,19 @@ def run_held(pending: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if any(r.get("broke") for r in results):
         out["broke"] = True
     return out
+
+
+def let_go(held: Optional[Dict[str, Any]]) -> None:
+    """His «no», a new request instead of an answer, or a second unclear one: what the held
+    steps keep open is closed now (`tools.LET_GO`: a fill's browser session)."""
+    for s in (held or {}).get("steps") or []:
+        closer = tools.LET_GO.get(s.get("tool", ""))
+        if closer is None:
+            continue
+        try:
+            closer(s)
+        except (RuntimeError, OSError, ValueError, KeyError):  # the answer stands whatever this does
+            logger.exception("[confirm] could not close what %s held", s.get("tool"))
 
 
 # ── "which one?" — two rows match and the user picks by number ──────────────

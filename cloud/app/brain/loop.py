@@ -212,6 +212,8 @@ def _resolve_pending(pending: Dict[str, Any], message: str,
         return None
     summary = pending.get("summary", "")
     used = [s.get("tool", "") for s in pending.get("steps") or []]
+    if said in ("no", "drop"):
+        confirm.let_go(pending)
     if said == "no":
         outcome = {"text": lang.say("cancelled"), "pending": None, "tools": []}
         settled = f"قال لأ على «{summary}»، فما انعمل"
@@ -423,7 +425,10 @@ def _settle(held, message, ctx, image_state, user_id, thread_id, history, comple
     elif held and not outcome.get("error") and not outcome.get("stopped"):
         # Neither yes nor no: the message was answered, and the question is asked once
         # more; a second unclear answer lets it go, and what waited behind it is asked.
-        waiting = confirm.asked_again(held) or confirm.following(held)
+        again = confirm.asked_again(held)
+        if again is None:
+            confirm.let_go(held)
+        waiting = again or confirm.following(held)
         outcome = _asked_first(waiting, "", outcome)
     return outcome
 

@@ -201,6 +201,10 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
 }
 
 
+# What a held action keeps open, closed when its question is let go (`confirm.let_go`).
+LET_GO: Dict[str, Callable[[Dict[str, Any]], None]] = {"page_fill": BW.page_fill_let_go}
+
+
 def _free_form(schema: Dict[str, Any]) -> bool:
     return schema.get("type") == "object" and not schema.get("properties")
 

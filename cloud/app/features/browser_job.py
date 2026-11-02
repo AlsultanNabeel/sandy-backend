@@ -385,6 +385,17 @@ async def _send(row: Dict[str, Any]) -> str:
         await client.stop()
 
 
+def let_go(job_id: str) -> None:
+    """His «no» (or a question let go): a fill still waiting for his yes stops and its session
+    closes now, not when Steel closes it on its own a quarter of an hour later."""
+    row = get(job_id)
+    if not row or row.get("status") != HELD:
+        return
+    _save(job_id, status=STOPPED)
+    _release(row)
+    _note("browser_let_go", {"site": row.get("site", "")})
+
+
 def open_jobs() -> List[Dict[str, Any]]:
     """His fills still open (running, waiting for his yes, or his to finish), newest first."""
     coll = _coll()

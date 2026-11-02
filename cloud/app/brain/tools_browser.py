@@ -226,3 +226,10 @@ def _send(job: str) -> Dict[str, Any]:
     if row.get("status") == browser_job.DONE:
         return {"ok": True, "reply": browser_job.told(row), "source": row.get("url", "")}
     return _no(browser_job.told(row))
+
+
+def page_fill_let_go(step: Dict[str, Any]) -> None:
+    """The question of a held fill let go: its session closes (`confirm.let_go`)."""
+    from app.features import browser_job
+    for job in step.get("ids") or []:
+        browser_job.let_go(str(job))

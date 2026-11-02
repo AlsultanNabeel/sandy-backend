@@ -82,12 +82,15 @@ def _answer_held(answer: str, chat_id: str) -> Dict[str, Any]:
         # Asked once more, as in chat; a second unclear answer lets it go (C10: say so).
         again = confirm.asked_again(held)
         if again is None:
+            confirm.let_go(held)
             return _ask_next(held, chat_id, {
                 "handled": True, "ok": False,
                 "reply": lang.say("voice_unclear_twice", summary=held["summary"])})
         P.save(VOICE_THREAD, chat_id, db, again)
         return {"handled": True,
                 "reply": lang.say("voice_ask_again", question=confirm.question(held["summary"]))}
+    if said in ("no", "drop"):
+        confirm.let_go(held)
     if said == "no":
         out = {"handled": True, "reply": lang.say("cancelled")}
     elif said == "drop":

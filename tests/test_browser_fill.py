@@ -332,3 +332,47 @@ def test_what_he_filled_is_read_from_the_held_send_when_the_page_cannot_show_it(
 def test_a_json_send_names_its_fields_too():
     held = {"body": '{"name": "Nabeel", "age": 30, "nested": {"x": 1}}', "content_type": "application/json"}
     assert browser_job._from_send(held) == [{"field": "name", "value": "Nabeel"}, {"field": "age", "value": "30"}]
+
+
+# ── A no closes the session at once ──
+
+@pytest.mark.parametrize("language, no", [("ar", "لأ"), ("en", "no")])
+def test_his_no_closes_the_fills_session_at_once(world, language, no):
+    _level("submit")
+    model = ScriptedModel(tools_reply(call("page_fill", **ARGS)), text_reply("..."))
+    with active_user_profile_context(A):
+        first = loop.run_turn("fill " + URL, user_id="userA", chat_id="userA", source="web", complete=model)
+        job = first["pending_state"]["steps"][0]["ids"][0]
+        assert world.released == []
+        loop.run_turn(no, user_id="userA", chat_id="userA", source="web",
+                      pending_state=first["pending_state"], complete=ScriptedModel(text_reply("ok")))
+    assert world.released == ["st1"] and _job(job)["status"] == browser_job.STOPPED
+
+
+def test_a_new_request_instead_of_an_answer_closes_it_too(world):
+    _level("submit")
+    model = ScriptedModel(tools_reply(call("page_fill", **ARGS)), text_reply("..."))
+    with active_user_profile_context(A):
+        first = loop.run_turn("fill " + URL, user_id="userA", chat_id="userA", source="web", complete=model)
+        loop.run_turn("اعملي تذكير بكرا الساعة تسعة", user_id="userA", chat_id="userA", source="web",
+                      pending_state=first["pending_state"], complete=ScriptedModel(text_reply("ok")))
+    assert world.released == ["st1"]
+
+
+def test_on_the_call_a_no_closes_it(world):
+    from app.brain import voice
+    _level("submit")
+    with active_user_profile_context(A), lang.using("en"):
+        voice.dispatch("page_fill", dict(ARGS), "userA")
+        voice.dispatch("confirm", {"answer": "no"}, "userA")
+    assert world.released == ["st1"]
+
+
+def test_closing_a_fill_that_already_went_does_nothing(world):
+    _level("submit")
+    asked = _fill("en")
+    _fill("en", confirmed_job=asked["ids"][0])
+    released = list(world.released)
+    with active_user_profile_context(A):
+        browser_job.let_go(asked["ids"][0])
+    assert world.released == released and _job(asked["ids"][0])["status"] == browser_job.DONE
