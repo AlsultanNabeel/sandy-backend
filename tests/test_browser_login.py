@@ -129,3 +129,16 @@ def test_a_click_finds_its_element_by_path():
     client = FakeCDP({"Runtime.evaluate": {"result": {"value": True}}})
     assert asyncio.run(browser_cdp.click(client, "s1", "//form[1]/button[1]"))
     assert '"//form[1]/button[1]"' in client.of("Runtime.evaluate")[0]["expression"]
+
+
+def test_the_link_reaches_him_whatever_the_model_writes(on, plain):
+    from brain_fakes import ScriptedModel, call, text_reply, tools_reply
+
+    from app.brain import loop
+    plain["https://shop.example/orders"] = LOGIN
+    model = ScriptedModel(tools_reply(call("page_read", url="https://shop.example/orders")),
+                          text_reply("You need to sign in first."))
+    with active_user_profile_context(A):
+        out = loop.run_turn("read https://shop.example/orders", user_id="userA", chat_id="userA",
+                            source="web", complete=model)
+    assert "sandy://browser/login?url=https%3A%2F%2Fshop.example%2Forders" in out["final_response"]

@@ -116,8 +116,12 @@ def page_read(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         # He signs in by hand on his phone; Sandy never sees the password.
         link = login_link(page["url"])
         key = "page_login_expired" if signed_in else "page_needs_login"
-        return {"ok": False, "needs_login": True, "link": link,
-                "reply": lang.say(key, site=web_page.site_of(page["url"]), link=link)}
+        said = lang.say(key, site=web_page.site_of(page["url"]), link=link)
+        # The link reaches him whatever the model writes (`loop`, as a page's warning does).
+        notices = ctx.artifacts.setdefault("notices", [])
+        if said not in notices:
+            notices.append(said)
+        return {"ok": False, "needs_login": True, "link": link, "reply": said}
     _sourced(ctx, page["url"])
     out: Dict[str, Any] = {"ok": True, "note": _NOTE, "source": page["url"], "page": {
         "url": page["url"], "title": page["title"], "text": page["text"][:SHOWN_TEXT],
