@@ -394,6 +394,14 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
     filled = await browser_cdp.evaluate(client, session, _FILLED_JS) or []
     _note("browser_held", {"site": row["site"], "element": asked.get("label", ""),
                            "fields": [f.get("field") for f in filled]})
+    from app.features import browser_sites
+    if browser_sites.level(row["site"]) != browser_sites.SUBMIT:
+        # Her yes could not send here: no question, the page is his.
+        _save(row["_id"], status=HANDED, summary=_summary(filled))
+        now = get(row["_id"]) or {}
+        if now.get("detached"):
+            _tell(now)
+        return {"status": HANDED}
     _save(row["_id"], status=HELD, summary=_summary(filled), action=asked.get("label", ""), beat_at=_now())
     now = get(row["_id"]) or {}
     if now.get("detached"):
@@ -752,6 +760,10 @@ def told(row: Dict[str, Any]) -> str:
         return lang.say("fill_done", site=site, result=row.get("result") or "")
     if status == STOPPED:
         return lang.say("fill_stopped", site=site)
+    if status == HANDED and row.get("summary"):
+        # A fill-only site's page, filled and handed to him.
+        from app.brain.tools_browser import live_link
+        return lang.say("fill_only", site=site, fields=row["summary"], link=live_link(row.get("id") or row["_id"]))
     if status == HANDED:
         return lang.say("fill_handed", site=site)
     reason = row.get("reason") or ""

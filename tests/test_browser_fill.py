@@ -714,3 +714,16 @@ def test_the_sweep_runs_every_minute():
     from app.services import schedule_runner
     import inspect
     assert "browser_job.sweep" in inspect.getsource(schedule_runner.start_schedule_runner)
+
+
+def test_a_fill_only_site_never_asks_a_question_its_yes_cannot_answer(world, monkeypatch, brain_db):  # noqa: F811
+    """In the background too: the page is his, no «are you sure», nothing waits for a yes."""
+    _level("fill")
+    world.mode = "slow"
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
+    out = _fill("en", thread=C9)
+    _wait_for(lambda: (brain_db["conversations"].find_one({"_id": C9}) or {}).get("messages"))
+    chat = brain_db["conversations"].find_one({"_id": C9, "user_id": "userA"})
+    said = chat["messages"][-1]["text"]
+    assert "didn't send it" in said and "sandy://browser/live?job=" in said and "Are you sure" not in said
+    assert pending.load(C9, "userA", brain_db) is None and _job(out["job"])["status"] == browser_job.HANDED

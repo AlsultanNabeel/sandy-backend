@@ -186,7 +186,7 @@ def page_fill(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return _no(lang.say("page_daily_cap" if exc.code == "daily_cap" else f"fill_{exc.code}", site=site))
     except (SteelError, RuntimeError):
         return _no(lang.say("page_unreachable", site=site))
-    return _with_source(ctx, _outcome(browser_job.wait(job, browser_job.WAIT_S) or {}, level))
+    return _with_source(ctx, _outcome(browser_job.wait(job, browser_job.WAIT_S) or {}))
 
 
 def _with_source(ctx: TurnCtx, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -195,8 +195,8 @@ def _with_source(ctx: TurnCtx, result: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def _outcome(row: Dict[str, Any], level: str) -> Dict[str, Any]:
-    from app.features import browser_job, browser_sites
+def _outcome(row: Dict[str, Any]) -> Dict[str, Any]:
+    from app.features import browser_job
     from app.brain.ctx import needs_confirmation
 
     site, job = row.get("site", ""), row.get("id", "")
@@ -204,11 +204,9 @@ def _outcome(row: Dict[str, Any], level: str) -> Dict[str, Any]:
     if status == browser_job.RUNNING:
         browser_job.detach(job)
         return {"ok": True, "reply": lang.say("fill_background", site=site, link=live_link(job)), "job": job}
+    if status == browser_job.HANDED and row.get("summary"):
+        return {"ok": True, "reply": browser_job.told(row), "job": job}
     if status == browser_job.HELD:
-        if level != browser_sites.SUBMIT:
-            browser_job.take_over(job)
-            return {"ok": True, "reply": lang.say("fill_only", site=site, fields=row.get("summary") or "",
-                                                  link=live_link(job)), "job": job}
         return needs_confirmation(lang.say("fill_summary", site=site, fields=row.get("summary") or ""), ids=[job])
     if status == browser_job.DONE:
         return {"ok": True, "reply": browser_job.told(row), "source": row.get("url", "")}
