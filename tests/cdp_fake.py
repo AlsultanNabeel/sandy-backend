@@ -70,5 +70,5 @@ class FakeCDP:
     async def fire(self, event: str, data: Dict[str, Any], session_id: Optional[str] = None) -> None:
         """Fire an event and let what it scheduled run."""
         self.handlers[event](data, session_id)
-        for _ in range(5):
+        for _ in range(20):
             await asyncio.sleep(0)

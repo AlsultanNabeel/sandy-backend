@@ -1,33 +1,59 @@
-"""The network gate of a fill: nothing that sends leaves the browser without his yes, whatever the
-model decided (`decide`).
+"""The network gate of a fill: a safety net under the action's own question
+(`features/browser_job`, which stops before a click or an Enter that sends and asks him first).
 
-It is our own connection to the session, apart from browser-use's (`install`): every tab, the
-ones open now and any opened later (`Target.setAutoAttach` with `waitForDebuggerOnStart`, so a new
-tab waits until the gate is on it), has `Fetch.enable` on it, and every request stops at the gate
-first. A read (GET, HEAD, OPTIONS) goes on. A send (anything else) right after a click or Enter, to
-the page's own site, is his: it is failed, kept as `held` with what was clicked, and the run stops
-there for his yes (`features/browser_job`), its body and type with it. Any other send, an
-analytics ping, an autosave as he types, another site, is failed and logged (`blocked`). A failed
-form send leaves an error page where the form was (tried on Steel, 2 Nov 2026), so his yes does not
-click again: the held send is made again from the form's page (`browser_job._send`), and `replay`
-lets exactly that one through, its method to its address, once. `allow_one` lets one send to the site through. A
-gate that cannot be put on (`GateError`) means no fill at all.
+It is our own connection to the session, apart from browser-use's (`install`): every target, the
+tabs open now and every tab, frame and worker attached later (`Target.setAutoAttach` with
+`waitForDebuggerOnStart` on the browser and on each target, so each one waits until the gate is
+on it), has `Fetch.enable` on it, no websocket or peer connection in its scripts (`NO_SOCKETS_JS`,
+before the page's own), websockets blocked (`Network.setBlockedURLs`) and watched
+(`Network.webSocketCreated`), and every request stops at the gate first (`decide`):
+
+  * the page's own site: a read goes; a send goes only in the moment after his yes (`approve`),
+    any other is failed and logged; one right after a click or Enter he was not asked about
+    stops the fill (`UNASKED`: what sent was not known to send);
+  * another site: what a page loads goes (a script, a style, a font, an image, media, by GET);
+    anything that sends (a fetch, a beacon, a form, a frame, any method but GET) is failed and
+    logged;
+  * any site but the page's own: a request whose address or body carries a value Sandy typed on
+    the page (`typed`) is failed and stops the fill (`LEAK`), a GET for an image too.
+
+A stop (`breach`) is told to the fill at once (`on_breach`), which closes the session and tells
+him. A gate that cannot be put on (`GateError`) means no fill at all.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlsplit
+import time
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from urllib.parse import quote, quote_plus, unquote_plus, urlsplit
 
 logger = logging.getLogger(__name__)
 
-GO, BLOCK, HOLD = "go", "block", "hold"
+GO, BLOCK, STOP = "go", "block", "stop"
+LEAK, UNASKED, SOCKET = "leak", "unasked", "socket"
 READS = ("GET", "HEAD", "OPTIONS")
-# What the page sends right after these is his to approve; typing alone never is.
+# What a page loads from anywhere: never a send.
+LOADS = ("Script", "Stylesheet", "Font", "Image", "Media")
+# What follows these, on the page's own site, is a send he was not asked about.
 SENDING = ("click", "enter")
+# After his yes, the sends of the page he approved go for this long.
+APPROVED_S = 15
+# A typed value shorter than this is too common to tell a leak by («1», «ok»).
+MIN_TYPED = 3
+_NO_NETWORK = ("data:", "blob:", "about:")
 _PATTERNS = [{"urlPattern": "*", "requestStage": "Request"}]
+_SOCKETS = {"urls": ["ws://*", "wss://*"],
+            "urlPatterns": [{"urlPattern": "ws://*:*/*", "block": True}, {"urlPattern": "wss://*:*/*", "block": True}]}
+# Run in every page, frame and worker before its own scripts: no websocket, no peer connection
+# (each a way out the network gate never sees: tried on Steel, 2 Nov 2026, a blocked websocket
+# still opened).
+NO_SOCKETS_JS = """(() => { const no = function () { throw new DOMException("blocked", "SecurityError"); };
+  for (const name of ["WebSocket", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel"]) {
+    try { Object.defineProperty(globalThis, name, {value: no, writable: false, configurable: false}); } catch (e) {} }
+})()"""
+_FRAMES = ("page", "iframe")
 _SECOND_LEVEL = {"co", "com", "org", "net", "gov", "edu", "ac"}
 
 
@@ -51,95 +77,142 @@ def _root(host: str) -> str:
     return ".".join(labels[-take:])
 
 
+def root_of(url: str) -> str:
+    return _root(urlsplit(str(url or "")).hostname or "")
+
+
 class Gate:
     def __init__(self, site: str):
         self.site = _root(site)
-        self.last: Optional[Dict[str, Any]] = None
-        self.held: Optional[Dict[str, Any]] = None
-        self.allowed = 0
-        self.replaying: Optional[Tuple[str, str]] = None
+        self.last: Optional[str] = None
+        self.typed: Set[str] = set()
+        self.approved_until = 0.0
+        self.breach: Optional[str] = None
+        self.on_breach: Optional[Callable[[str], None]] = None
         self.blocked: List[Tuple[str, str]] = []
         self.sent: List[Tuple[str, str]] = []
+        # Each page's own session on our connection, by its target (the real click is made there).
+        self.sessions: Dict[str, str] = {}
 
-    def acted(self, kind: str) -> None:
-        """What the model just did on the page: «click», «enter» or «type»."""
-        self.last = {"kind": kind}
+    def acted(self, kind: str, text: str = "") -> None:
+        """What the model just did on the page: «click», «enter» or «type» (with what it typed)."""
+        self.last = kind
+        for value in (str(text or ""), *str(text or "").split()):
+            if len(value.strip()) >= MIN_TYPED:
+                self.typed.add(value.strip())
 
-    def allow_one(self) -> None:
-        """His yes: one send to the site goes."""
-        self.allowed = 1
+    def approve(self) -> None:
+        """His yes: what the page sends to its own site in the next moments goes."""
+        self.approved_until = time.monotonic() + APPROVED_S
+        self.last = None
 
-    def replay(self, held: Dict[str, Any]) -> None:
-        """His yes: the held send, made again, goes once (its method to its address)."""
-        self.replaying = (str(held.get("method") or "").upper(), str(held.get("url") or ""))
+    def stop(self, why: str) -> None:
+        if self.breach is None:
+            self.breach = why
+            logger.warning("[browser] a fill was stopped by its gate: %s", why)
+            if self.on_breach is not None:
+                self.on_breach(why)
 
-    def _own(self, url: str) -> bool:
-        return _root(urlsplit(url).hostname or "") == self.site
+    def _carries(self, url: str, body: str) -> bool:
+        """Whether a request carries a value Sandy typed, as typed or encoded."""
+        seen = f"{url}\n{unquote_plus(url)}\n{body}\n{unquote_plus(body)}".lower()
+        return any(form.lower() in seen for value in self.typed
+                   for form in (value, quote(value, safe=""), quote_plus(value)))
 
-    def decide(self, method: str, url: str, resource_type: str = "", *, body: str = "",
-               content_type: str = "") -> str:
-        method = str(method or "").upper()
-        if method in READS:
+    def decide(self, method: str, url: str, resource_type: str = "", *, body: str = "") -> str:
+        method, url = str(method or "").upper(), str(url or "")
+        if url.startswith(_NO_NETWORK):
             return GO
-        if self.replaying == (method, url):
-            self.replaying = None
-            self.sent.append((method, url))
+        own = root_of(url) == self.site
+        if not own and self._carries(url, body):
+            self.blocked.append((method, url))
+            self.stop(LEAK)
+            return STOP
+        if own:
+            if method in READS:
+                return GO
+            if time.monotonic() < self.approved_until:
+                self.sent.append((method, url))
+                return GO
+            self.blocked.append((method, url))
+            if self.last in SENDING:
+                self.stop(UNASKED)
+                return STOP
+            return BLOCK
+        if method == "GET" and resource_type in LOADS:
             return GO
-        if self.allowed and self._own(url):
-            self.allowed -= 1
-            self.sent.append((method, url))
-            return GO
-        if self.held is None and self._own(url) and (self.last or {}).get("kind") in SENDING:
-            self.held = {"method": method, "url": url, "body": body, "content_type": content_type}
-            return HOLD
         self.blocked.append((method, url))
         return BLOCK
 
 
-async def _cover(client, session: str) -> None:
+async def _cover(client, gate: Gate, session: str, kind: str = "page") -> None:
+    """The gate on one target, and on whatever it opens next (its frames and workers)."""
     from app.integrations.browser_cdp import within
+    if kind in _FRAMES:
+        # A script for new documents runs only where the page domain is on.
+        await within(client.send.Page.enable(params={}, session_id=session))
+        await within(client.send.Page.addScriptToEvaluateOnNewDocument(
+            params={"source": NO_SOCKETS_JS, "runImmediately": True}, session_id=session))
+    await within(client.send.Runtime.evaluate(params={"expression": NO_SOCKETS_JS}, session_id=session))
     await within(client.send.Fetch.enable(params={"patterns": _PATTERNS}, session_id=session))
+    await within(client.send.Network.enable(params={}, session_id=session))
+    await within(client.send.Network.setBlockedURLs(params=_SOCKETS, session_id=session))
+    await within(client.send.Target.setAutoAttach(
+        params={"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}, session_id=session))
 
 
 async def install(client, gate: Gate) -> None:
-    """The gate on every tab of the session, now and later, once per tab (two gates on one tab
+    """The gate on every target of the session, now and later, once each (two gates on one tab
     would each judge its requests; seen on Steel, 2 Nov 2026); GateError when it cannot be."""
-    covered = set()
+    from app.integrations.browser_cdp import within
+    covered: Set[str] = set()
 
     def on_paused(event: Dict[str, Any], session: Optional[str] = None) -> None:
         request = event.get("request") or {}
         rid = event.get("requestId")
-        headers = {str(k).lower(): v for k, v in (request.get("headers") or {}).items()}
         verdict = gate.decide(request.get("method", ""), request.get("url", ""), event.get("resourceType", ""),
-                              body=str(request.get("postData") or ""), content_type=str(headers.get("content-type") or ""))
+                              body=str(request.get("postData") or ""))
         if verdict == GO:
             reply = client.send.Fetch.continueRequest(params={"requestId": rid}, session_id=session)
         else:
-            if verdict == BLOCK:
-                logger.info("[browser] a send was blocked: %s", urlsplit(request.get("url", "")).hostname)
+            logger.info("[browser] a request was %s: %s", "stopped" if verdict == STOP else "blocked",
+                        urlsplit(request.get("url", "")).hostname)
             reply = client.send.Fetch.failRequest(params={"requestId": rid, "errorReason": "BlockedByClient"},
                                                   session_id=session)
         asyncio.ensure_future(reply)
 
+    def on_socket(event: Dict[str, Any], session: Optional[str] = None) -> None:
+        # Blocked before its handshake; one that was made anyway stops the fill.
+        gate.blocked.append(("WEBSOCKET", str(event.get("url") or "")))
+        gate.stop(SOCKET)
+
     def on_attached(event: Dict[str, Any], session: Optional[str] = None) -> None:
         new = event.get("sessionId")
-        target = (event.get("targetInfo") or {}).get("targetId") or new
+        info = event.get("targetInfo") or {}
+        target = info.get("targetId") or new
         if not new:
             return
         fresh = target not in covered
         covered.add(target)
+        if info.get("type") == "page":
+            gate.sessions.setdefault(target, new)
 
         async def hold_then_go():
-            if fresh:
-                await _cover(client, new)
+            try:
+                if fresh:
+                    await _cover(client, gate, new, str(info.get("type") or ""))
+            except _WIRE_ERRORS:
+                # A target the gate is not on never runs: the fill stops.
+                gate.stop("uncovered")
+                return
             if event.get("waitingForDebugger"):
                 await client.send.Runtime.runIfWaitingForDebugger(session_id=new)
         asyncio.ensure_future(hold_then_go())
 
     try:
         client.register.Fetch.requestPaused(on_paused)
+        client.register.Network.webSocketCreated(on_socket)
         client.register.Target.attachedToTarget(on_attached)
-        from app.integrations.browser_cdp import within
         await within(client.send.Target.setAutoAttach(
             params={"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}))
         targets = (await within(client.send.Target.getTargets())).get("targetInfos") or []
@@ -149,6 +222,7 @@ async def install(client, gate: Gate) -> None:
             covered.add(t["targetId"])
             session = (await within(client.send.Target.attachToTarget(
                 params={"targetId": t["targetId"], "flatten": True})))["sessionId"]
-            await _cover(client, session)
+            gate.sessions[t["targetId"]] = session
+            await _cover(client, gate, session)
     except _WIRE_ERRORS as exc:  # whatever stops the gate stops the fill
         raise GateError(f"the gate could not be put on: {type(exc).__name__}") from exc

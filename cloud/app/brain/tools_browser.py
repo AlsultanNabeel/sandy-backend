@@ -223,6 +223,10 @@ def _send(job: str) -> Dict[str, Any]:
     if browser_sites.level(row["site"]) != browser_sites.SUBMIT:
         return _no(lang.say("fill_level_read", site=row["site"]))
     row = browser_job.submit(job)
+    if row.get("status") == browser_job.APPROVED:
+        # Still answering: it tells him itself once it has.
+        browser_job.detach(job)
+        return {"ok": True, "reply": lang.say("fill_background", site=row["site"], link=live_link(job)), "job": job}
     if row.get("status") == browser_job.DONE:
         return {"ok": True, "reply": browser_job.told(row), "source": row.get("url", "")}
     return _no(browser_job.told(row))

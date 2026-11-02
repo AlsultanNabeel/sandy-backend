@@ -1,9 +1,10 @@
-"""The network gate (`brain/browser_gate.py`): in a fill, nothing that sends leaves the browser
-without his yes, whatever the model decided. Reads go; a send right after a click or Enter on the
-page's own site stops the run and is held, body and all; any other send (analytics, an autosave,
-another site) is blocked and logged; his yes lets the held send, made again, through once. Every tab,
-even one opened later, is held until the gate is on it; and a gate that cannot be put on fails
-the fill closed."""
+"""The network gate (`brain/browser_gate.py`), the safety net of a fill under the action's own
+question. On the page's own site a read goes and a send goes only in the moment after his yes;
+one right after a click he was not asked about stops the fill. From another site what a page
+loads goes (a script, a style, a font, an image, media), and anything that sends is blocked. A
+request to any other site that carries a value Sandy typed stops the fill, a GET for an image
+too. Every target (tabs, frames, workers, old and new) waits until the gate is on it, websockets
+are blocked and one made anyway stops the fill, and a gate that cannot be put on fails closed."""
 from __future__ import annotations
 
 import asyncio
@@ -13,85 +14,147 @@ from cdp_fake import FakeCDP
 
 from app.brain import browser_gate as G
 
-
 URL_A = "https://forms.example.com/apply"
+OTHER = "https://cdn.other.net"
 
 
-def _gate():
-    return G.Gate("forms.example.com")
+def _gate(typed=("Nabeel Alsultan", "n@example.com")):
+    gate = G.Gate("forms.example.com")
+    for value in typed:
+        gate.acted("type", value)
+    gate.last = None
+    return gate
 
 
 @pytest.mark.parametrize("method", ["GET", "HEAD", "OPTIONS"])
-def test_reads_go(method):
-    assert _gate().decide(method, "https://forms.example.com/x", "Document") == G.GO
+def test_the_sites_own_reads_go(method):
+    assert _gate().decide(method, URL_A, "Document") == G.GO
 
 
-def test_a_send_with_nothing_clicked_is_blocked_not_a_stop():
+@pytest.mark.parametrize("kind", ["Script", "Stylesheet", "Font", "Image", "Media"])
+def test_what_a_page_loads_from_another_site_goes(kind):
+    assert _gate().decide("GET", f"{OTHER}/asset", kind) == G.GO
+
+
+@pytest.mark.parametrize("method, kind", [("GET", "XHR"), ("GET", "Fetch"), ("POST", "Ping"), ("GET", "Document"),
+                                          ("POST", "Document"), ("POST", "Image"), ("GET", "EventSource"),
+                                          ("GET", "Other")])
+def test_what_sends_to_another_site_is_blocked_and_the_fill_goes_on(method, kind):
     gate = _gate()
-    assert gate.decide("POST", "https://forms.example.com/autosave", "XHR") == G.BLOCK
-    assert gate.held is None and gate.blocked == [("POST", "https://forms.example.com/autosave")]
+    assert gate.decide(method, f"{OTHER}/collect?v=1", kind) == G.BLOCK
+    assert gate.breach is None and gate.blocked == [(method, f"{OTHER}/collect?v=1")]
 
 
-def test_a_send_after_a_click_on_the_site_stops_the_run_and_is_held():
+@pytest.mark.parametrize("url, body", [
+    ("https://evil.example.org/p.gif?u=Nabeel%20Alsultan", ""),
+    ("https://evil.example.org/p.gif?u=Nabeel+Alsultan", ""),
+    ("https://evil.example.org/n@example.com.png", ""),
+    ("https://evil.example.org/c", "email=n%40example.com"),
+    ("https://evil.example.org/c", '{"name": "NABEEL ALSULTAN"}')])
+def test_a_typed_value_to_another_site_stops_the_fill_even_an_image(url, body):
+    stops = []
     gate = _gate()
-    gate.acted("click")
-    assert gate.decide("POST", "https://forms.example.com/apply", "Document") == G.HOLD
-    assert gate.held == {"method": "POST", "url": "https://forms.example.com/apply",
-                         "body": "", "content_type": ""}
-    # Once held, everything else that sends is blocked until his yes.
-    assert gate.decide("POST", "https://forms.example.com/apply", "XHR") == G.BLOCK
+    gate.on_breach = stops.append
+    assert gate.decide("GET" if not body else "POST", url, "Image", body=body) == G.STOP
+    assert gate.breach == G.LEAK and stops == [G.LEAK]
 
 
-def test_enter_in_a_field_counts_as_a_send():
+def test_a_short_value_is_too_common_to_tell_a_leak_by():
+    gate = _gate(typed=("ok", "Nabeel Alsultan"))
+    assert gate.decide("GET", f"{OTHER}/ok.png", "Image") == G.GO
+
+
+def test_the_sites_own_send_waits_for_his_yes_and_typing_never_makes_it_his():
     gate = _gate()
-    gate.acted("enter")
-    assert gate.decide("POST", "https://www.forms.example.com/search", "Fetch") == G.HOLD
+    gate.acted("type", "Nabeel Alsultan")
+    assert gate.decide("POST", "https://forms.example.com/autosave", "XHR") == G.BLOCK and gate.breach is None
 
 
-def test_typing_alone_never_makes_a_send_his():
+@pytest.mark.parametrize("kind", ["click", "enter"])
+def test_a_send_after_an_action_he_was_not_asked_about_stops_the_fill(kind):
     gate = _gate()
-    gate.acted("type")
-    assert gate.decide("POST", "https://forms.example.com/validate", "XHR") == G.BLOCK
+    gate.acted(kind)
+    assert gate.decide("POST", URL_A, "Document") == G.STOP and gate.breach == G.UNASKED
 
 
-def test_another_sites_send_is_blocked_even_after_a_click():
+def test_after_his_yes_the_sites_own_sends_go_and_never_another_sites():
     gate = _gate()
-    gate.acted("click")
-    assert gate.decide("POST", "https://www.google-analytics.com/collect", "Ping") == G.BLOCK
-    assert gate.held is None
+    gate.approve()
+    assert gate.decide("POST", URL_A, "Document") == G.GO
+    assert gate.decide("POST", "https://api.forms.example.com/x", "XHR") == G.GO
+    assert gate.decide("POST", f"{OTHER}/x", "XHR") == G.BLOCK
+    assert gate.decide("GET", "https://evil.example.org/?n=Nabeel+Alsultan", "Image") == G.STOP
+    assert gate.sent == [("POST", URL_A), ("POST", "https://api.forms.example.com/x")]
 
 
-def test_after_his_yes_exactly_one_send_goes():
+def test_his_yes_lasts_a_moment_only(monkeypatch):
     gate = _gate()
-    gate.allow_one()
-    assert gate.decide("POST", "https://forms.example.com/apply", "Document") == G.GO
-    assert gate.sent == [("POST", "https://forms.example.com/apply")]
-    assert gate.decide("POST", "https://forms.example.com/apply", "Document") == G.BLOCK
+    gate.approve()
+    monkeypatch.setattr(G.time, "monotonic", lambda: gate.approved_until + 1)
+    assert gate.decide("POST", URL_A, "Document") == G.BLOCK
 
 
-def test_the_one_send_he_allowed_is_never_spent_on_another_site():
-    gate = _gate()
-    gate.allow_one()
-    assert gate.decide("POST", "https://evil.example.net/steal", "XHR") == G.BLOCK
-    assert gate.decide("POST", "https://forms.example.com/apply", "Document") == G.GO
+def test_what_never_reaches_the_network_goes():
+    assert _gate().decide("GET", "data:image/png;base64,Nabeel Alsultan", "Image") == G.GO
 
 
 # ── On the wire ──
 
-def test_the_gate_holds_every_tab_old_and_new_until_it_is_on_it():
+def test_every_target_waits_until_the_gate_is_on_it_and_websockets_are_blocked():
     client = FakeCDP()
     gate = _gate()
     asyncio.run(G.install(client, gate))
-    [auto] = client.of("Target.setAutoAttach")
-    assert auto == {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}
+    auto = {"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}
+    assert ("Target.setAutoAttach", auto, None) in client.sent and ("Target.setAutoAttach", auto, "s1") in client.sent
     assert ("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]}, "s1") in client.sent
+    [blocked] = client.of("Network.setBlockedURLs")
+    assert blocked["urls"] == ["ws://*", "wss://*"] and gate.sessions == {"t1": "s1"}
 
-    async def a_new_tab():
-        await client.fire("Target.attachedToTarget",
-                          {"sessionId": "s2", "targetInfo": {"targetId": "t2", "type": "page"}, "waitingForDebugger": True})
-    asyncio.run(a_new_tab())
+    async def more():
+        for sid, kind in (("s2", "page"), ("s3", "iframe"), ("s4", "worker"), ("s5", "service_worker")):
+            await client.fire("Target.attachedToTarget", {
+                "sessionId": sid, "targetInfo": {"targetId": "t" + sid, "type": kind}, "waitingForDebugger": True})
+    asyncio.run(more())
     names = [(n, sid) for n, _, sid in client.sent]
-    assert names.index(("Fetch.enable", "s2")) < names.index(("Runtime.runIfWaitingForDebugger", "s2"))
+    for sid in ("s2", "s3", "s4", "s5"):
+        assert names.index(("Fetch.enable", sid)) < names.index(("Runtime.runIfWaitingForDebugger", sid))
+        assert names.index(("Network.setBlockedURLs", sid)) < names.index(("Runtime.runIfWaitingForDebugger", sid))
+        assert ("Target.setAutoAttach", sid) in names
+        assert names.index(("Runtime.evaluate", sid)) < names.index(("Runtime.runIfWaitingForDebugger", sid))
+    # Pages and frames get it before every new document of theirs, with their page domain on.
+    for sid in ("s2", "s3"):
+        assert names.index(("Page.enable", sid)) < names.index(("Page.addScriptToEvaluateOnNewDocument", sid))
+    assert {"source": G.NO_SOCKETS_JS, "runImmediately": True} in client.of("Page.addScriptToEvaluateOnNewDocument")
+    assert ("Page.addScriptToEvaluateOnNewDocument", "s4") not in names
+    assert gate.sessions == {"t1": "s1", "ts2": "s2"}
+
+
+def test_a_target_the_gate_cannot_cover_stops_the_fill_and_never_runs():
+    def refuse(params, session_id):
+        if session_id == "s3":
+            raise ConnectionError("gone")
+        return {}
+    client = FakeCDP({"Fetch.enable": refuse})
+    gate = _gate()
+
+    async def flow():
+        await G.install(client, gate)
+        await client.fire("Target.attachedToTarget", {"sessionId": "s3", "targetInfo": {"targetId": "t3", "type": "iframe"},
+                                                      "waitingForDebugger": True})
+    asyncio.run(flow())
+    assert gate.breach == "uncovered" and ("Runtime.runIfWaitingForDebugger", "s3") not in [
+        (n, sid) for n, _, sid in client.sent]
+
+
+def test_a_websocket_made_anyway_stops_the_fill():
+    client = FakeCDP()
+    gate = _gate()
+
+    async def flow():
+        await G.install(client, gate)
+        await client.fire("Network.webSocketCreated", {"requestId": "w1", "url": "wss://evil.example.org/s"}, "s1")
+    asyncio.run(flow())
+    assert gate.breach == G.SOCKET
 
 
 def test_a_paused_request_is_answered_as_the_gate_decides():
@@ -100,15 +163,16 @@ def test_a_paused_request_is_answered_as_the_gate_decides():
 
     async def flow():
         await G.install(client, gate)
-        await client.fire("Fetch.requestPaused", {"requestId": "r1", "resourceType": "Document",
-                                                  "request": {"method": "GET", "url": "https://forms.example.com/"}}, "s1")
-        gate.acted("click")
-        await client.fire("Fetch.requestPaused", {"requestId": "r2", "resourceType": "Document",
-                                                  "request": {"method": "POST", "url": "https://forms.example.com/a"}}, "s1")
+        for rid, method, url, kind in (("r1", "GET", URL_A, "Document"), ("r2", "GET", f"{OTHER}/f.woff2", "Font"),
+                                       ("r3", "POST", f"{OTHER}/collect", "Ping"),
+                                       ("r4", "GET", "https://evil.example.org/?e=n@example.com", "Image")):
+            await client.fire("Fetch.requestPaused", {"requestId": rid, "resourceType": kind,
+                                                      "request": {"method": method, "url": url}}, "s1")
     asyncio.run(flow())
-    assert client.of("Fetch.continueRequest") == [{"requestId": "r1"}]
-    assert client.of("Fetch.failRequest") == [{"requestId": "r2", "errorReason": "BlockedByClient"}]
-    assert gate.held["url"] == "https://forms.example.com/a"
+    assert client.of("Fetch.continueRequest") == [{"requestId": "r1"}, {"requestId": "r2"}]
+    assert client.of("Fetch.failRequest") == [{"requestId": "r3", "errorReason": "BlockedByClient"},
+                                              {"requestId": "r4", "errorReason": "BlockedByClient"}]
+    assert gate.breach == G.LEAK
 
 
 def test_a_gate_that_cannot_be_put_on_fails_closed():
@@ -119,51 +183,9 @@ def test_a_gate_that_cannot_be_put_on_fails_closed():
         asyncio.run(G.install(client, _gate()))
 
 
-# ── His yes sends what was held, as it was (a held form leaves an error page behind it) ──
-
-def test_the_held_send_keeps_its_body_and_type():
-    gate = _gate()
-    gate.acted("click")
-    gate.decide("POST", URL_A, "Document", body="name=Nabeel&email=n%40example.com",
-                content_type="application/x-www-form-urlencoded")
-    assert gate.held["body"] == "name=Nabeel&email=n%40example.com"
-    assert gate.held["content_type"] == "application/x-www-form-urlencoded"
-
-
-def test_his_yes_lets_the_held_send_made_again_through_once():
-    gate = _gate()
-    gate.replay({"method": "POST", "url": URL_A, "body": "name=Nabeel"})
-    assert gate.decide("POST", URL_A, "Document") == G.GO
-    assert gate.sent == [("POST", URL_A)]
-    assert gate.decide("POST", URL_A, "Document") == G.BLOCK
-
-
-def test_a_replay_is_only_for_its_own_send():
-    gate = _gate()
-    gate.replay({"method": "POST", "url": URL_A})
-    assert gate.decide("POST", "https://forms.example.com/other", "XHR") == G.BLOCK
-    assert gate.decide("PUT", URL_A, "XHR") == G.BLOCK
-    assert gate.decide("GET", URL_A, "Document") == G.GO
-    assert gate.decide("POST", URL_A, "Document") == G.GO and gate.sent == [("POST", URL_A)]
-
-
-def test_on_the_wire_the_held_sends_body_is_kept():
-    client = FakeCDP()
-    gate = _gate()
-
-    async def flow():
-        await G.install(client, gate)
-        gate.acted("click")
-        await client.fire("Fetch.requestPaused", {"requestId": "r2", "resourceType": "Document", "request": {
-            "method": "POST", "url": URL_A, "postData": "a=1",
-            "headers": {"Content-Type": "application/x-www-form-urlencoded"}}}, "s1")
-    asyncio.run(flow())
-    assert gate.held["body"] == "a=1" and gate.held["content_type"] == "application/x-www-form-urlencoded"
-
-
 def test_a_tab_gets_one_gate_even_when_it_is_attached_twice():
     """Auto-attach also attaches the tabs already open: a second gate on a tab would judge its
-    requests twice, and block the send his yes let through."""
+    requests twice."""
     client = FakeCDP()
 
     async def flow():

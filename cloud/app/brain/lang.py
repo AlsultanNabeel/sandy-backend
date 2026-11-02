@@ -570,6 +570,18 @@ PHRASES = {
     "fill_failed": {"ar": "ما زبطت التعبئة على {site}. جرّب كمان شوي، أو كمّل إنت من «متصفح ساندي».",
                     "en": "Filling the form on {site} didn't work. Try again in a bit, or carry on yourself "
                           "from «Sandy's browser»."},
+    "fill_leak": {"ar": "وقّفت التعبئة على {site} وسكّرت الصفحة: كانت بدها تبعت من معلوماتك لموقع تاني، وما طلع منها شي.",
+                  "en": "I stopped filling the form on {site} and closed the page: it tried to send your details to "
+                        "another site, and nothing left."},
+    "fill_unasked": {"ar": "وقّفت التعبئة على {site} وسكّرت الصفحة: حاولت تبعت إشي بلا ما أسألك، وما انبعت شي.",
+                     "en": "I stopped filling the form on {site} and closed the page: it tried to send something "
+                           "without me asking you, and nothing was sent."},
+    "fill_moved": {"ar": "ما بعتت النموذج على {site}: الزر اللي وافقت عليه ما عاد مكانه، فما ضغطت شي.",
+                   "en": "I didn't send the form on {site}: the button you said yes to isn't where it was, so I "
+                         "clicked nothing."},
+    "fill_unsent": {"ar": "ضغطت إرسال على {site} بس الصفحة ما بعتت شي. بتقدر تكمّل إنت من «متصفح ساندي».",
+                    "en": "I clicked send on {site} but the page sent nothing. You can carry on yourself from "
+                          "«Sandy's browser»."},
     "fill_gone": {"ar": "هالنموذج ما عاد ناطر، الجلسة انتهت. اطلب مني أعبّيه كمان مرة.",
                   "en": "That form isn't waiting any more; its session ended. Ask me to fill it again."},
     # The sites screen (`features/browser_sites`).
