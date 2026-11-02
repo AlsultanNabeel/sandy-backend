@@ -192,8 +192,14 @@ def session(site: str) -> Optional[Dict[str, Any]]:
 
 
 def sign_out(site: str) -> bool:
-    """«طلّعها»: the sign-in forgotten, the level kept."""
-    return _write(site_of(site), drop={"session": "", "session_at": ""})
+    """«طلّعها»: the sign-in forgotten, the level kept, and every fill open on the site closed
+    with its session (it holds the sign-in in its browser)."""
+    from app.features import browser_job
+    name = site_of(site)
+    coll = _coll()
+    if coll is not None:
+        browser_job.stop_for(coll.tenant, name)
+    return _write(name, drop={"session": "", "session_at": ""})
 
 
 def _shown(row: Dict[str, Any]) -> Dict[str, Any]:

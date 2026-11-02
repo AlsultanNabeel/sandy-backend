@@ -186,6 +186,13 @@ def _erase(user_id: str, names: List[str]) -> Dict[str, Any]:
     if db is None:
         return {"ok": False, "error": "no_store"}
 
+    # His browser's sessions close before their rows go (Steel would keep them a quarter hour).
+    from app.features import browser_job
+    try:
+        browser_job.stop_for(user_id)
+    except (PyMongoError, RuntimeError, OSError):
+        logger.warning("[delete] the browser's sessions were not closed for %s", user_id, exc_info=True)
+
     forms = _id_forms(user_id)
     removed: Dict[str, int] = {}
     names = list(names)

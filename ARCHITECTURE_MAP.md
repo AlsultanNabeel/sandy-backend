@@ -389,7 +389,9 @@ logged and the fill goes on. Any site but its own: a request whose address or bo
 Sandy typed (as typed or encoded, `MIN_TYPED` 3) stops the fill (`leak`), an image too. A stop
 cancels the agent at once (`on_breach`), closes the session and tells him (`fill_leak`,
 `fill_unasked`); no gate, no fill. A session is closed once, by whoever gets there first
-(`_release`, `closed_at`). His «no», a new request instead of an answer, or a second unclear one
+(`_release`, `closed_at`); the emergency stop, the account deleted or reset (`account_delete._erase`)
+and «طلّعها» on a site (`browser_sites.sign_out`, that site's fills) close every open fill's
+session at once (`stop_for`), not when Steel would a quarter hour later. His «no», a new request instead of an answer, or a second unclear one
 closes the session at once (`confirm.let_go`, `tools.LET_GO`), in the chat and on the call. Every
 call to the browser has `browser_cdp.CALL_S` (20 s) at most. The tool waits `WAIT_S` (80 s); past
 it the fill is `detached`, and once it is held or stops it tells him in the chat he asked from

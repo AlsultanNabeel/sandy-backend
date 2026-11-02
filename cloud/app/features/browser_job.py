@@ -651,21 +651,22 @@ def live_url(job_id: str, control: bool) -> Optional[str]:
     return f"{row['live']}{joiner}{flags}"
 
 
-def stop_for(user_id: str) -> None:
-    """The emergency stop: every open fill of his stops (`stop_all.STOPPERS`)."""
+def stop_for(user_id: str, site: str = "") -> None:
+    """Every open fill of his (on ``site`` alone, when named) stops and its session closes now:
+    the emergency stop (`stop_all.STOPPERS`), the account deleted or reset (`account_delete`),
+    «طلّعها» on a site (`browser_sites.sign_out`). A holder that sees it lets the page go."""
     db = get_db()
-    if db is None:
+    if db is None or not user_id:
         return
-    # Called by `stop_all.stop` with his id, in his own request: raw, by his id only.
-    rows = list(db[COLLECTION].find({"user_id": str(user_id), "status": {"$in": list(OPEN)}},
-                                    {"steel_id": 1, "created_at": 1, "status": 1}).limit(50))
+    query: Dict[str, Any] = {"user_id": str(user_id), "status": {"$in": list(OPEN)}}
+    if site:
+        query["site"] = str(site)
+    # Called with his own id, in his own request or his account's erasing: raw, by his id only.
+    rows = list(db[COLLECTION].find(query, {"steel_id": 1, "created_at": 1, "status": 1}).limit(50))
     for r in rows:
         db[COLLECTION].update_one({"_id": r["_id"], "user_id": str(user_id)},
                                   {"$set": {"status": STOPPED, "updated_at": _now()}})
-        if r.get("status") == HANDED:
-            # No one holds a page he took over: its session is closed here; a fill still held
-            # closes its own when it sees the stop.
-            _release(r)
+        _release(r)
 
 
 def _tell(row: Dict[str, Any]) -> None:

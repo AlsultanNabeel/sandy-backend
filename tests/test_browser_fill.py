@@ -637,3 +637,38 @@ def test_a_fill_takes_no_more_steps_than_its_own(world, monkeypatch):
     assert stopped and out == {"status": browser_job.FAILED, "reason": "steps"}
     _, stopped = _stops(monkeypatch, steps=browser_job.MAX_STEPS)
     assert not stopped
+
+
+# ── What closes a fill's session at once ──
+
+@pytest.mark.parametrize("how", ["delete", "reset"])
+def test_deleting_the_account_or_a_reset_closes_its_open_sessions(world, how):
+    from app.features import account_delete
+    _level("submit")
+    _fill("en")
+    assert world.released == []
+    if how == "delete":
+        account_delete.delete_account("userA")
+    else:
+        account_delete.wipe_account_data("userA")
+    assert world.released == ["st1"]
+
+
+def test_signing_out_of_a_site_closes_its_open_fills_and_no_other(world, brain_db):  # noqa: F811
+    _level("submit")
+    job = _fill("en")["ids"][0]
+    brain_db[browser_job.COLLECTION].insert_one({"_id": "elsewhere", "user_id": "userA", "site": "shop.example",
+                                                 "status": browser_job.HELD, "steel_id": "st9", "closed_at": None})
+    with active_user_profile_context(A):
+        assert browser_sites.sign_out("forms.example.com")
+    assert world.released == ["st1"] and _job(job)["status"] == browser_job.STOPPED
+    assert _job("elsewhere")["status"] == browser_job.HELD
+
+
+def test_the_emergency_stop_closes_a_held_fills_session_at_once(world):
+    _level("submit")
+    job = _fill("en")["ids"][0]
+    with active_user_profile_context(A):
+        stop_all.stop("userA")
+        stop_all.resume("userA")
+    assert world.released == ["st1"] and _job(job)["status"] == browser_job.STOPPED
