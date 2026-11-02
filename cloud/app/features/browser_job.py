@@ -26,16 +26,20 @@ its result goes out like a task's (`notify.deliver`).
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
 import re
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from pymongo.errors import PyMongoError
 
+from app import config
 from app.db import get_db
 from app.utils.tenant_db import scoped
 
@@ -138,19 +142,73 @@ def _save(job_id: str, **fields: Any) -> None:
         logger.warning("[browser] could not save job %s", job_id, exc_info=True)
 
 
-def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) -> str:
-    """A fill of ``args`` ({url, goal, details}) begun; its id. Raises SteelError when no
-    session could be opened."""
-    from app.blocks import _base
+class Busy(RuntimeError):
+    """No fill now: ``code`` says why (`lang` phrase «fill_<code>», «page_daily_cap»)."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+# Fills run on a pool of their own, never on the shared workers: a held fill keeps its thread
+# while it waits for his yes. Its size is the server's limit for this process.
+_POOL = ThreadPoolExecutor(max_workers=max(1, config.SANDY_BROWSER_FILLS), thread_name_prefix="SandyFill")
+_SLOTS = threading.BoundedSemaphore(max(1, config.SANDY_BROWSER_FILLS))
+# A fill holding a session: running, waiting for his yes, or sending.
+_HOLDING = (RUNNING, HELD, APPROVED)
+
+
+def _limits(user_id: str) -> None:
+    """Busy when he is at the day's limit, has a fill open already, or the server has as many
+    as it runs."""
     from app.features import web_page
+    if web_page._over_cap(user_id):
+        raise Busy("daily_cap")
+    held = {"status": {"$in": list(_HOLDING)}, "closed_at": None}
+    coll, db = _coll(), get_db()
+    try:
+        if coll is not None and coll.count_documents(held) >= config.SANDY_BROWSER_FILLS_EACH:
+            raise Busy("busy")
+        # Across every account and every process of the server.
+        if db is not None and db[COLLECTION].count_documents(held) >= config.SANDY_BROWSER_FILLS:
+            raise Busy("busy_server")
+    except PyMongoError:
+        logger.warning("[browser] could not count the open fills", exc_info=True)
+        raise Busy("busy_server") from None
+
+
+def _on_pool(job_id: str, user_id: str) -> None:
+    def run():
+        try:
+            _run(job_id, user_id)
+        except Exception:  # noqa: BLE001 — a fill never takes its pool down
+            logger.exception("[browser] a fill broke")
+        finally:
+            _SLOTS.release()
+    _POOL.submit(contextvars.copy_context().run, run)
+
+
+def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) -> str:
+    """A fill of ``args`` ({url, goal, details}) begun; its id. Raises Busy past a limit and
+    SteelError when no session could be opened. It counts on the day's browser calls."""
+    from app.blocks import _base
+    from app.features import usage_store, web_page
     from app.integrations import steel_client
     from app.utils.ltm_crypto import encrypt_field
-    from app.utils.thread_pool import submit_background
     url = web_page.check_url(str(args.get("url") or ""))
-    session = steel_client.create_session()
+    _limits(user_id)
+    if not _SLOTS.acquire(blocking=False):
+        raise Busy("busy_server")
+    try:
+        session = steel_client.create_session()
+    except BaseException:
+        _SLOTS.release()
+        raise
+    usage_store.add_browser_call(user_id)
     job_id = _base.new_id()
     coll = _coll()
     if coll is None:
+        _SLOTS.release()
         steel_client.release(session["id"])
         raise RuntimeError("no tenant")
     now = _now()
@@ -158,8 +216,8 @@ def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) 
                      "args": {k: args[k] for k in ("url", "goal", "details") if k in args},
                      "status": RUNNING, "steel_id": session["id"], "live": encrypt_field(session["debug_url"]),
                      "thread_id": thread_id, "lang": language, "detached": False, "beat_at": now,
-                     "created_at": now, "updated_at": now, "expire_at": now + KEEP})
-    submit_background(_run, job_id, user_id, _label="browser_fill")
+                     "closed_at": None, "created_at": now, "updated_at": now, "expire_at": now + KEEP})
+    _on_pool(job_id, user_id)
     return job_id
 
 
@@ -475,8 +533,18 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     session.event_bus.on(ClickCoordinateEvent, on_point)
     reason: Dict[str, str] = {}
 
+    steps = [0]
+
     async def should_stop() -> bool:
         if asked or gate.breach is not None:
+            return True
+        steps[0] += 1
+        if steps[0] > MAX_STEPS:
+            reason.update(status=FAILED, reason="steps")
+            return True
+        if _spent(row) >= config.SANDY_BROWSER_FILL_USD:
+            reason.update(status=FAILED, reason="cost")
+            _note("browser_cost", {"site": site}, ok=False)
             return True
         now = get(row["_id"]) or {}
         if now.get("status") in (STOPPED, HANDED) or stop_all.stopped(user_id):
@@ -502,6 +570,17 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     if reason:
         return {"status": reason.pop("status"), **reason}
     return {"status": DONE, "result": str(history.final_result() or "")}
+
+
+def _spent(row: Dict[str, Any]) -> float:
+    """What the fill has cost so far: its model calls and fees on its trace, and its Steel time."""
+    from app.features import pricing, trace_store
+    trace = trace_store.current()
+    began = row.get("created_at")
+    if isinstance(began, datetime) and began.tzinfo is None:
+        began = began.replace(tzinfo=timezone.utc)
+    hours = (_now() - began).total_seconds() / 3600 if isinstance(began, datetime) else 0.0
+    return (trace.cost() if trace is not None else 0.0) + pricing.fee("steel_hour") * hours
 
 
 # The fill itself, a seam the tests replace.
@@ -622,7 +701,8 @@ def _push(uid: str, body: str) -> None:
 
 # Why a fill stopped, by the gate or at his yes, as told to him.
 _TOLD = {"leak": "fill_leak", "socket": "fill_leak", "uncovered": "fill_leak", "unasked": "fill_unasked",
-         "moved": "fill_moved", "unsent": "fill_unsent", "orders": "fill_orders"}
+         "moved": "fill_moved", "unsent": "fill_unsent", "orders": "fill_orders", "cost": "fill_cost",
+         "steps": "fill_steps"}
 
 
 def told(row: Dict[str, Any]) -> str:

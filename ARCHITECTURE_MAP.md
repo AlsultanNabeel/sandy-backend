@@ -360,7 +360,12 @@ cookies by `Storage.setCookies` and storage by origin, `integrations/browser_cdp
 (`brain/browser_guard.py`, `forbidden`): a password field, a card field, a captcha, a payment page,
 read from the page's fields, frames and address (`SNAPSHOT_JS` live, `of_html` from markup).
 *A fill* (`features/browser_job.py`, `sandy_browser_jobs`, scoped, a day): `page_fill` on a site of
-level fill or submit opens a Steel session and runs on the shared pool. *The question is on the
+level fill or submit opens a Steel session and runs on a pool of its own (`_POOL`, never the shared
+workers: a held fill keeps its thread). *Its limits*: `MAX_STEPS` counted by us too, a cost in
+dollars (`SANDY_BROWSER_FILL_USD`, 0.30: its model calls and fees on its trace and its Steel time,
+`_spent`, `Trace.cost`), one open fill per account (`SANDY_BROWSER_FILLS_EACH`) and
+`SANDY_BROWSER_FILLS` (3) across the server (counted in Mongo and by the pool's own slots), and
+each fill counts on the day's browser calls (`SANDY_BROWSER_DAILY`). *The question is on the
 action*: browser-use's agent (our model, `brain/browser_llm.SandyLLM`, every step through
 `background.call("browser_step")`; the site's domains only, no frame of another site
 (`cross_origin_iframes` off), `EXCLUDED` actions off, `MAX_STEPS` 15, its telemetry off) has each

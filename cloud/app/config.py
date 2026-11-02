@@ -74,6 +74,11 @@ STEEL_API_KEY = os.getenv("STEEL_API_KEY", "").strip()
 SANDY_BROWSER_BLOCKED = os.getenv("SANDY_BROWSER_BLOCKED", "").strip()
 # Calls to Steel a day per account.
 SANDY_BROWSER_DAILY = int(os.getenv("SANDY_BROWSER_DAILY", "100") or 100)
+# A fill's own limits (`features/browser_job`): what one may cost in dollars (its model and its
+# Steel time), and how many may be open at once, for one account and for the whole server.
+SANDY_BROWSER_FILL_USD = float(os.getenv("SANDY_BROWSER_FILL_USD", "0.30") or 0.30)
+SANDY_BROWSER_FILLS_EACH = int(os.getenv("SANDY_BROWSER_FILLS_EACH", "1") or 1)
+SANDY_BROWSER_FILLS = int(os.getenv("SANDY_BROWSER_FILLS", "3") or 3)
 
 # Database
 MONGODB_URI = os.getenv("MONGODB_URI", "").strip()

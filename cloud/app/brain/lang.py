@@ -587,6 +587,15 @@ PHRASES = {
     "fill_orders": {"ar": "⚠️ وقّفت التعبئة على {site}: الصفحة فيها كلام بيحاول يعطيني أوامر. ما نفّذت منه شي.",
                     "en": "⚠️ I stopped filling the form on {site}: the page has words that try to give me orders. "
                           "I did none of it."},
+    "fill_busy": {"ar": "في تعبئة إلك لسا مفتوحة. خلّصها أو وقّفها، وبعدين بعبّي هاي.",
+                  "en": "You already have a form fill open. Finish or stop it, then I'll fill this one."},
+    "fill_busy_server": {"ar": "المتصفح مشغول هلّق، جرّب كمان شوي.",
+                         "en": "The browser is busy right now; try again in a bit."},
+    "fill_cost": {"ar": "وقّفت التعبئة على {site}: وصلت حدّها من الكلفة، وما انبعت شي.",
+                  "en": "I stopped filling the form on {site}: it reached its cost limit, and nothing was sent."},
+    "fill_steps": {"ar": "وقّفت التعبئة على {site}: خلصت الخطوات المسموحة، وما انبعت شي.",
+                   "en": "I stopped filling the form on {site}: it used all the steps it may take, and nothing "
+                         "was sent."},
     "fill_gone": {"ar": "هالنموذج ما عاد ناطر، الجلسة انتهت. اطلب مني أعبّيه كمان مرة.",
                   "en": "That form isn't waiting any more; its session ended. Ask me to fill it again."},
     # The sites screen (`features/browser_sites`).

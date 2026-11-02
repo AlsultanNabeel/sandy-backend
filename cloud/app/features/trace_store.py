@@ -139,14 +139,20 @@ class Trace:
         with self._lock:
             self.fees.append({"what": str(what), "usd": float(usd or 0)})
 
+    def cost(self) -> float:
+        """What it has cost so far, in dollars: its model calls and its fees."""
+        with self._lock:
+            calls, fees = list(self.model_calls), list(self.fees)
+        return sum(f["usd"] for f in fees) + sum(
+            pricing.cost(c["model"], tokens_in=c["tokens_in"], tokens_out=c["tokens_out"],
+                         tokens_cached=c["tokens_cached"]) for c in calls)
+
     def _row(self, request: str, reply: str, routed_by: str, error: Optional[str]) -> Dict[str, Any]:
         with self._lock:
             calls = list(self.model_calls)
             used = list(self.tools)
             fees = list(self.fees)
-        cost = sum(f["usd"] for f in fees) + sum(
-            pricing.cost(c["model"], tokens_in=c["tokens_in"], tokens_out=c["tokens_out"],
-                         tokens_cached=c["tokens_cached"]) for c in calls)
+        cost = self.cost()
         return {
             "_id": self.id, "at": self.at, "source": self.source, "thread_id": self.thread_id,
             "routed_by": routed_by,

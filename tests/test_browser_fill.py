@@ -547,3 +547,93 @@ def test_a_form_page_with_hidden_orders_is_never_filled(world, monkeypatch):
     monkeypatch.setattr(browser_job, "AGENT", lambda *a: pytest.fail("the agent ran"))
     out = _fill("en")
     assert out["ok"] is False and "try to give me orders" in out["reply"] and world.released == ["st1"]
+
+
+# ── Its limits ──
+
+def test_one_fill_open_at_a_time_for_him(world):
+    _level("submit")
+    _fill("en")                                                        # held, waiting for his yes
+    out = _fill("en")
+    assert out["ok"] is False and "already have a form fill open" in out["reply"] and world.opened == [1]
+
+
+def test_the_server_runs_as_many_as_it_may_across_every_account(world, brain_db, monkeypatch):  # noqa: F811
+    _level("submit")
+    monkeypatch.setattr(browser_job.config, "SANDY_BROWSER_FILLS", 1)
+    brain_db[browser_job.COLLECTION].insert_one({"_id": "other", "user_id": "userB", "status": browser_job.HELD,
+                                                 "closed_at": None})
+    out = _fill("en")
+    assert out["ok"] is False and "busy" in out["reply"] and world.opened == []
+
+
+def test_a_fill_counts_on_the_days_browser_calls_and_stops_at_its_limit(world, monkeypatch):
+    from app.features import usage_store
+    _level("submit")
+    _fill("en")
+    assert usage_store.browser_calls_today("userA") == 1
+    monkeypatch.setattr(browser_job.config, "SANDY_BROWSER_DAILY", 1)
+    with active_user_profile_context(A):
+        browser_job.let_go(browser_job.open_jobs()[0]["id"])
+    out = _fill("en")
+    assert out["ok"] is False and "limit" in out["reply"] and world.opened == [1]
+
+
+def test_fills_run_on_their_own_pool_never_the_shared_workers(world, monkeypatch):
+    import threading
+    _level("submit")
+    names = []
+
+    async def agent(row, gate, client, tab, user_id, asked):
+        names.append(threading.current_thread().name)
+        return {"status": browser_job.DONE, "result": "ok"}
+    monkeypatch.setattr(browser_job, "AGENT", agent)
+    _fill("en")
+    assert names and names[0].startswith("SandyFill")
+
+
+def _stops(monkeypatch, cost=0.0, steps=1):
+    """`should_stop` as the real agent is built with it, asked ``steps`` times on a trace that cost ``cost``."""
+    import browser_use
+
+    from app.brain import browser_gate
+    from app.features import trace_store
+    built = {}
+
+    class Session:
+        def __init__(self, **kw):
+            self.event_bus = NS(on=lambda kind, fn: None)
+
+        async def stop(self):
+            pass
+
+    class Agent:
+        def __init__(self, **kw):
+            built.update(kw)
+
+        async def run(self, max_steps):
+            built["stopped"] = [await built["register_should_stop_callback"]() for _ in range(steps)][-1]
+            return NS(final_result=lambda: "")
+    monkeypatch.setattr(browser_use, "Agent", Agent)
+    monkeypatch.setattr(browser_use, "BrowserSession", Session)
+    monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
+    client = FakeCDP({"Runtime.evaluate": {"result": {"value": json.dumps(FORM)}}})
+    row = {"_id": "j1", "site": "forms.example.com", "steel_id": "st1", "args": {},
+           "created_at": browser_job._now()}
+    with trace_store.background("userA", "browser_fill") as trace:
+        trace.add_fee("x", cost)
+        out = asyncio.run(browser_job._agent(row, browser_gate.Gate("forms.example.com"), client, "s1", "userA", {}))
+    return out, built["stopped"]
+
+
+def test_a_fill_that_reaches_its_cost_stops(world, monkeypatch):
+    out, stopped = _stops(monkeypatch, cost=browser_job.config.SANDY_BROWSER_FILL_USD)
+    assert stopped and out == {"status": browser_job.FAILED, "reason": "cost"}
+    assert "الكلفة" in browser_job.told({"status": browser_job.FAILED, "reason": "cost", "site": "x"})
+
+
+def test_a_fill_takes_no_more_steps_than_its_own(world, monkeypatch):
+    out, stopped = _stops(monkeypatch, steps=browser_job.MAX_STEPS + 1)
+    assert stopped and out == {"status": browser_job.FAILED, "reason": "steps"}
+    _, stopped = _stops(monkeypatch, steps=browser_job.MAX_STEPS)
+    assert not stopped
