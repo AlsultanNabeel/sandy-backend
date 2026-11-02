@@ -111,3 +111,26 @@ def test_the_app_stops_and_brings_back_with_one_call(on, monkeypatch):
     assert client.delete("/api/stop", headers=auth).get_json() == {"stopped": False}
     other = {"Authorization": f"Bearer {make_token('user', user_id='userC')}"}
     assert client.post("/api/stop", headers=other).status_code == 404
+
+
+@pytest.mark.parametrize("said", ["وقّفي كل شي", "ساندي وقفي كل شي!", "وقفي كلشي", "Stop everything", "sandy, stop everything."])
+def test_the_stop_in_a_chat_message_stops_everything_whatever_the_model_does(on, said):
+    """The emergency stop by text never waits on the model choosing the tool."""
+    from brain_fakes import ScriptedModel, text_reply
+
+    from app.brain import loop
+    model = ScriptedModel(text_reply("حاضر"))
+    with active_user_profile_context(A):
+        out = loop.run_turn(said, user_id="userA", chat_id="userA", source="web", complete=model)
+    assert stop_all.stopped("userA") and not stop_all.stopped("userB") and model.seen == []
+    assert ("وقّفت" if lang.of(said) == "ar" else "stopped") in out["final_response"].lower()
+
+
+@pytest.mark.parametrize("said", ["وقّفي كل شي بالمطبخ", "how do I stop everything from syncing?", "شو بصير لو وقفت كل شي"])
+def test_a_message_that_only_mentions_stopping_goes_to_the_model(on, said):
+    from brain_fakes import ScriptedModel, text_reply
+
+    from app.brain import loop
+    with active_user_profile_context(A):
+        loop.run_turn(said, user_id="userA", chat_id="userA", source="web", complete=ScriptedModel(text_reply("ok")))
+    assert not stop_all.stopped("userA")

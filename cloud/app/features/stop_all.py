@@ -1,5 +1,5 @@
 """The emergency stop: «وقّفي كل شي», by talk, on the call, or from the app (behind the `browser`
-switch).
+switch). Typed in the chat it stops by the code itself (`asks`, `loop`), never left to the model.
 
 Stopped (`sandy_users.stopped_at`), an account's tasks do not run and count no failure
 (`task_runner.run`), the browser's tools refuse (`tools_browser`), and every browser job still
@@ -11,6 +11,7 @@ tap (`resume`) brings it all back. A reset forgets it (`account_delete.USER_ROW_
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Callable, List
 
@@ -25,6 +26,21 @@ FIELD = "stopped_at"
 # Called with the account's id once it is stopped, after the browser's fills: what else still
 # runs for it stops.
 STOPPERS: List[Callable[[str], None]] = []
+
+
+# A chat message that is the stop and nothing else, said to her or not (`asks`).
+_ASKS = re.compile(r"^(?:(?:يا\s+)?ساندي\s+)?(?:وقفي|وقف|اوقفي|وقفو)\s+(?:كل\s*شي|كل\s*اشي|كل\s*شيء)(?:\s+ساندي)?$"
+                   r"|^(?:sandy\s+)?stop\s+(?:everything|it\s+all|all)(?:\s+now)?(?:\s+sandy)?$", re.I)
+_DIACRITICS = re.compile(r"[\u064b-\u0652\u0640]")
+_MARKS = re.compile(r"[!?.,،؟؛:\s]+")
+
+
+def asks(message: str) -> bool:
+    """Whether a chat message is the emergency stop itself (the loop stops at once, whatever the
+    model would do); a message that only mentions stopping is not."""
+    words = _MARKS.sub(" ", _DIACRITICS.sub("", str(message or ""))).strip()
+    words = words.replace("أ", "ا").replace("إ", "ا")
+    return bool(_ASKS.match(words))
 
 
 def stopped(user_id: str) -> bool:

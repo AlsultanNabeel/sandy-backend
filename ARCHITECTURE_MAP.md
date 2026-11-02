@@ -401,7 +401,9 @@ fill's owner alone, `…/takeover` stops the agent and gives it with `interactiv
 sealed and never logged. *Emergency stop* (`features/stop_all.py`, `sandy_users.stopped_at`, forgotten
 by a reset): «وقّفي كل شي» by talk, the call or the app (`/api/stop`) stops every task (no run, no
 failure) and every fill (`browser_job.stop_for`), the browser's tools refuse, reminders still ring;
-one word or tap resumes. The app's Profile › Browser (`Features/Browser/`) holds the stop, the open
+one word or tap resumes. Typed in the chat as a message of its own (`stop_all.asks`: the stop and
+nothing else, either language, with or without her name), the loop stops it by the code before
+any held question or model, and lets the question go. The app's Profile › Browser (`Features/Browser/`) holds the stop, the open
 fills and the sites; links in Sandy's replies are tappable (`DesignSystem/Linked.swift`), and
 `sandy://browser/login` and `/live` open their sheets (`DeepLinkRouter`). *Proven on Steel* (2 Nov 2026, `scripts/steel_live_check.py`, 14/14): what the browser draws
 hidden (rules put in by script, off the page, near white on white, of no size, in a transparent

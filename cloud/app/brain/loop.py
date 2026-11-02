@@ -403,7 +403,16 @@ def _undo_offer(turn: str) -> Optional[Dict[str, Any]]:
 
 def _settle(held, message, ctx, image_state, user_id, thread_id, history, complete,
             attachments, began) -> Dict[str, Any]:
-    """The turn's outcome: the held question's answer first, then the rest of the message."""
+    """The turn's outcome: the held question's answer first, then the rest of the message.
+    The emergency stop typed is done by the code at once, whatever was held (`stop_all.asks`)."""
+    from app.brain import tools_browser
+    from app.features import stop_all
+    if stop_all.asks(message) and tools_browser.offered(user_id):
+        if held:
+            confirm.let_go(held)
+        result = tools.execute("stop_everything", {}, ctx)
+        return {"text": result.get("reply") or lang.say("stop_failed"), "pending": None,
+                "tools": ["stop_everything"]}
     resolved = _resolve_pending(held, message, ctx) if held else None
     settled = resolved if resolved is not None and resolved.get("rest") else None
     outcome = _answer(None if settled else resolved, message, ctx, image_state, user_id,
