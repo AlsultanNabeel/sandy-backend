@@ -7,6 +7,7 @@ credentials; the entrypoints call `init_runtime()` then `bootstrap()`.
 
 import logging
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,10 @@ _QUIET_LOGGERS = (
     "httpx",
     "httpcore",
     "urllib3",
+    # The browser's libraries: their INFO lines carry Steel's connect address (`browser_cdp`).
+    "cdp_use",
+    "browser_use",
+    "bubus",
     # Logs every audio frame at DEBUG; pinned to WARNING.
     "websockets",
     "websockets.client",
@@ -35,6 +40,41 @@ _QUIET_LOGGERS = (
 
 _initialized = False
 
+# A secret in an address: a query field whose name says key, token, secret, password or signature.
+_SECRET_IN_ADDRESS = re.compile(
+    r"([?&;][\w.-]*(?:key|token|secret|password|passwd|pwd|sig|signature|auth)[\w.-]*=)[^&\s'\"<>]+", re.I)
+
+
+def redact(text: str) -> str:
+    return _SECRET_IN_ADDRESS.sub(r"\1***", text)
+
+
+def _redacting_factory(make):
+    """Every log record, from any library to any handler (the console, Sentry), made without a
+    secret an address carries: Steel's connect address has its key in it (`browser_cdp`)."""
+    def factory(*args, **kwargs):
+        record = make(*args, **kwargs)
+        if getattr(record, "redacted", False):
+            return record
+        try:
+            text = record.getMessage()
+        except (TypeError, ValueError):
+            return record
+        clean = redact(text)
+        if clean != text:
+            record.msg, record.args = clean, ()
+        record.redacted = True
+        return record
+    factory.redacting = True
+    return factory
+
+
+def install_redaction() -> None:
+    """Once per process: every log record made from now on is redacted (`_redacting_factory`)."""
+    if not getattr(logging.getLogRecordFactory(), "redacting", False):
+        logging.setLogRecordFactory(_redacting_factory(logging.getLogRecordFactory()))
+
+
 def configure_logging(log_level: str = "INFO") -> None:
     """Set up root logger. Safe to call multiple times."""
     logging.basicConfig(
@@ -44,6 +84,7 @@ def configure_logging(log_level: str = "INFO") -> None:
     )
     for name in _QUIET_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
+    install_redaction()
     logger.debug("[Bootstrap] Logging configured at %s level", log_level)
 
 

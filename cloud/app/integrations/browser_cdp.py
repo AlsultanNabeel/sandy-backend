@@ -21,7 +21,11 @@ _SAME_SITE = {"strict": "Strict", "lax": "Lax", "none": "None"}
 
 
 async def connect(url: str):
+    """A connection to ``url``, whose key no log ever shows (cdp-use logs the address)."""
     from cdp_use.client import CDPClient
+
+    from app.bootstrap import install_redaction
+    install_redaction()
     client = CDPClient(url)
     await client.start()
     return client
