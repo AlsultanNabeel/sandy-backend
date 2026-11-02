@@ -248,7 +248,7 @@ async def _first(work, stopped: asyncio.Event, seconds: float):
 
 async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from app.brain import browser_gate, browser_guard
-    from app.features import browser_sites
+    from app.features import browser_sites, web_page
     from app.integrations import browser_cdp, steel_client
     client = await browser_cdp.connect(steel_client.connect_url(row["steel_id"]))
     try:
@@ -267,6 +267,11 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         if why:
             _note("browser_forbidden", {"site": row["site"], "why": why}, ok=False)
             return {"status": FAILED, "reason": why}
+        # Read as the browser drew it: hidden words that give orders stop the fill before any step.
+        seen = web_page.extract(str(await browser_cdp.evaluate(client, tab, web_page.MARK_HIDDEN_JS) or ""), row["url"])
+        if web_page.warned(seen):
+            _note("browser_orders", {"site": row["site"]}, ok=False)
+            return {"status": FAILED, "reason": "orders"}
         asked: Dict[str, Any] = {}
         outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped, RUN_S)
         if gate.breach is None and asked:
@@ -617,7 +622,7 @@ def _push(uid: str, body: str) -> None:
 
 # Why a fill stopped, by the gate or at his yes, as told to him.
 _TOLD = {"leak": "fill_leak", "socket": "fill_leak", "uncovered": "fill_leak", "unasked": "fill_unasked",
-         "moved": "fill_moved", "unsent": "fill_unsent"}
+         "moved": "fill_moved", "unsent": "fill_unsent", "orders": "fill_orders"}
 
 
 def told(row: Dict[str, Any]) -> str:

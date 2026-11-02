@@ -14,7 +14,7 @@ internal address (`_public`). A name that resolves to a public address when chec
 another when the request connects (DNS rebinding) is the risk left; the check is made before
 every request.
 
-What the page hides (`display:none`, `hidden`, a font of size zero) never reaches the model.
+What the page hides never reaches the model: its own styles read from its markup (`_styled`), or as a live browser drew it (`MARK_HIDDEN_JS`).
 When it speaks to an assistant, or the visible words give one orders (`_ORDERS`), the read
 carries `warning`: the caller tells the user, and nothing in it is ever followed.
 
@@ -66,9 +66,32 @@ _DROPPED = ("script", "style", "noscript", "template", "svg", "canvas", "iframe"
 _AROUND = ("nav", "header", "footer", "aside")
 _BLOCKS = ("p", "div", "section", "article", "main", "li", "ul", "ol", "tr", "table", "br",
            "h1", "h2", "h3", "h4", "h5", "h6", "pre", "blockquote", "dd", "dt", "figcaption")
-_HIDDEN_STYLE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?![.\d])"
-                           r"|opacity\s*:\s*0(?![.\d])", re.I)
 _HIDDEN_CLASSES = {"hidden", "sr-only", "visually-hidden", "d-none", "screen-reader-text"}
+# Marked by the live browser from how the page is drawn (`MARK_HIDDEN_JS`).
+RENDERED_HIDDEN = "data-sandy-hidden"
+_RULE = re.compile(r"([^{}@]+)\{([^{}]*)\}")
+_COLORS = {"white": (255, 255, 255), "black": (0, 0, 0), "transparent": None}
+# Run in the live browser: every element whose own words are not drawn where an eye can see them
+# (not rendered, transparent, of no size, off the page, or the colour of what is behind them) is
+# marked, and the page is given back marked.
+MARK_HIDDEN_JS = """(() => {
+  for (const el of document.querySelectorAll("[%(mark)s]")) el.removeAttribute("%(mark)s");
+  const W = document.documentElement.scrollWidth, H = document.documentElement.scrollHeight;
+  const rgb = (c) => { const m = String(c || "").match(/[\\d.]+/g); return m ? m.map(Number) : null; };
+  const behind = (el) => { for (let e = el; e; e = e.parentElement) { const v = rgb(getComputedStyle(e).backgroundColor);
+      if (v && (v.length < 4 || v[3] > 0)) return v; } return [255, 255, 255]; };
+  const near = (a, b) => !!a && !!b && Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 30;
+  for (const el of document.body ? document.body.querySelectorAll("*") : []) {
+    if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+    const s = getComputedStyle(el), r = el.getBoundingClientRect(), c = rgb(s.color);
+    const shown = el.checkVisibility ? el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true})
+      : s.display !== "none" && s.visibility === "visible" && Number(s.opacity) > 0;
+    if (!shown || parseFloat(s.fontSize) < 1 || r.width < 1 || r.height < 1 || r.right <= 0 || r.bottom <= 0
+        || r.left >= W || r.top >= H || (c && c.length > 3 && c[3] === 0) || near(c, behind(el)))
+      el.setAttribute("%(mark)s", "1");
+  }
+  return document.documentElement.outerHTML;
+})()""" % {"mark": RENDERED_HIDDEN}
 
 # Words that give an assistant orders, in either language: never followed, always told.
 _ORDERS = re.compile(
@@ -182,13 +205,110 @@ def _fetch_html(url: str) -> Tuple[str, str, bytes]:
     raise PageError("unreachable", site_of(url))
 
 
+def _declarations(style: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for part in str(style or "").split(";"):
+        name, _, value = part.partition(":")
+        if value.strip():
+            out[name.strip().lower()] = value.strip().lower().replace("!important", "").strip()
+    return out
+
+
+def _color(value: str) -> Optional[Tuple[int, int, int]]:
+    value = str(value or "").strip().lower()
+    if value in _COLORS:
+        return _COLORS[value]
+    if value.startswith("#") and len(value) in (4, 7):
+        digits = value[1:] if len(value) == 7 else "".join(ch * 2 for ch in value[1:])
+        try:
+            return int(digits[0:2], 16), int(digits[2:4], 16), int(digits[4:6], 16)
+        except ValueError:
+            return None
+    found = re.match(r"rgba?\(\s*(\d+)\D+(\d+)\D+(\d+)(?:\D+([\d.]+))?", value)
+    if found:
+        if found.group(4) is not None and float(found.group(4)) == 0:
+            return None
+        return int(found.group(1)), int(found.group(2)), int(found.group(3))
+    return None
+
+
+def _near(a, b) -> bool:
+    return a is not None and b is not None and sum(abs(x - y) for x, y in zip(a, b)) < 30
+
+
+def _px(value: str) -> Optional[float]:
+    found = re.match(r"(-?[\d.]+)(px|em|rem|%|pt)?$", str(value or "").strip())
+    return float(found.group(1)) if found else None
+
+
+def _hides(d: Dict[str, str]) -> bool:
+    """Whether these declarations keep what they style from the eye."""
+    if d.get("display") == "none" or d.get("visibility") in ("hidden", "collapse"):
+        return True
+    if _px(d.get("opacity", "")) == 0 or _px(d.get("font-size", "")) == 0:
+        return True
+    if "scale(0" in d.get("transform", "") or "inset(50%" in d.get("clip-path", "") \
+            or re.search(r"rect\(\s*0(px)?[\s,]+0", d.get("clip", "")):
+        return True
+    if (_px(d.get("width", "")) == 0 or _px(d.get("height", "")) == 0) and d.get("overflow") == "hidden":
+        return True
+    # Off the page: placed far out, or its words pushed out of their box.
+    if d.get("position") in ("absolute", "fixed") and any(
+            (_px(d.get(side, "")) or 0) <= -500 for side in ("left", "top", "right")):
+        return True
+    if (_px(d.get("text-indent", "")) or 0) <= -500:
+        return True
+    background = d.get("background-color") or d.get("background", "").split(" ")[0]
+    return bool(background) and _near(_color(d.get("color", "")), _color(background))
+
+
+def _sheet(soup: Any) -> List[Tuple[str, Dict[str, str]]]:
+    """The page's own style rules, each selector with its declarations."""
+    rules = []
+    for style in soup.find_all("style"):
+        css = re.sub(r"/\*.*?\*/", "", style.get_text(" "), flags=re.S)
+        for selectors, body in _RULE.findall(css):
+            decls = _declarations(body)
+            for selector in selectors.split(","):
+                if selector.strip():
+                    rules.append((selector.strip(), decls))
+    return rules
+
+
+def _styled(soup: Any) -> None:
+    """Everything the page's own styles hide (its rules, its inline styles, its colours on its
+    backgrounds), marked as the live browser would mark it."""
+    styles: Dict[int, Dict[str, str]] = {}
+    for selector, decls in _sheet(soup):
+        try:
+            found = soup.select(selector)
+        except Exception:  # noqa: BLE001 — a selector soupsieve cannot read hides nothing
+            continue
+        for el in found:
+            styles.setdefault(id(el), {}).update(decls)
+    for el in soup.find_all(True):
+        d = {**styles.get(id(el), {}), **_declarations(el.get("style", ""))}
+        styles[id(el)] = d
+        hidden = _hides(d)
+        if not hidden and _color(d.get("color", "")) is not None:
+            # The colour of what is behind it: its nearest background, or the page's white.
+            behind = (255, 255, 255)
+            for up in [el, *el.parents]:
+                ud = styles.get(id(up)) or {}
+                b = _color(ud.get("background-color") or ud.get("background", "").split(" ")[0])
+                if b is not None:
+                    behind = b
+                    break
+            hidden = _near(_color(d.get("color", "")), behind)
+        if hidden:
+            el[RENDERED_HIDDEN] = "1"
+
+
 def _hidden(tag: Any) -> bool:
     attrs = getattr(tag, "attrs", None) or {}
-    if "hidden" in attrs or str(attrs.get("aria-hidden", "")).lower() == "true":
+    if "hidden" in attrs or str(attrs.get("aria-hidden", "")).lower() == "true" or RENDERED_HIDDEN in attrs:
         return True
     if str(attrs.get("type", "")).lower() == "hidden":
-        return True
-    if _HIDDEN_STYLE.search(str(attrs.get("style", ""))):
         return True
     classes = attrs.get("class") or []
     return bool(_HIDDEN_CLASSES & {str(c).lower() for c in classes})
@@ -208,6 +328,7 @@ def extract(markup: Any, base_url: str) -> Dict[str, Any]:
     content (none from its navigation), and what it hides from the eye."""
     soup = BeautifulSoup(markup or "", "html.parser")
     title = re.sub(r"\s+", " ", soup.title.get_text()).strip() if soup.title else ""
+    _styled(soup)
     for tag in soup.find_all(_DROPPED):
         tag.decompose()
     hidden: List[str] = []
@@ -399,7 +520,9 @@ async def _live_read(url: str, state: Dict[str, Any]) -> Dict[str, Any]:
         tab = await browser_cdp.first_page(client)
         await browser_cdp.apply_state(client, tab, state)
         await browser_cdp.goto(client, tab, url)
-        markup, final = await browser_cdp.html(client, tab), await browser_cdp.where(client, tab) or url
+        # Marked by how the browser drew it: what the eye cannot see never reaches the model.
+        markup = str(await browser_cdp.evaluate(client, tab, MARK_HIDDEN_JS) or "")
+        final = await browser_cdp.where(client, tab) or url
         page = extract(markup, final)
         page["login"] = _wants_login(markup, final, page["text"])
         page["via"] = "session"

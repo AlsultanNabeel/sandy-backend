@@ -328,7 +328,12 @@ connection, Gmail, Google accounts, GitHub, Facebook, Messenger, Instagram, and 
 from `SANDY_BROWSER_BLOCKED`), never an address that is not public (`_public`; DNS rebinding between
 the check and the connect is the risk left). A page is `{url, title, text, links, via, warning}`:
 its words in paragraphs and its content's links (navigation, header, footer and aside dropped).
-What it hides (`display:none`, `hidden`, a font of size zero, `sr-only`) never reaches the model;
+What it hides never reaches the model: read from its markup for a plain request or Steel's
+scrape (`_styled`: its `<style>` rules and inline styles, not drawn, transparent, of no size,
+placed far off the page or its words pushed out, clipped, scaled to nothing, or its colour on the
+background behind it, the page's white by default; `hidden`, `sr-only`), and read as the browser
+drew it in a page opened in a live browser, a signed-in read or a fill (`MARK_HIDDEN_JS`, marking
+`data-sandy-hidden`; a fill whose page hides orders stops before any step, `fill_orders`);
 when the hidden words speak to an assistant, or the visible ones give one orders (`_ORDERS`, both
 languages), `warning` is set: in the chat the code adds `page_warning` at the end of the reply,
 before a held question (`loop`, `ctx.artifacts["notices"]`), whatever the model wrote; on the call
@@ -393,7 +398,9 @@ by a reset): «وقّفي كل شي» by talk, the call or the app (`/api/stop`)
 failure) and every fill (`browser_job.stop_for`), the browser's tools refuse, reminders still ring;
 one word or tap resumes. The app's Profile › Browser (`Features/Browser/`) holds the stop, the open
 fills and the sites; links in Sandy's replies are tappable (`DesignSystem/Linked.swift`), and
-`sandy://browser/login` and `/live` open their sheets (`DeepLinkRouter`). *Proven on Steel* (2 Nov 2026, `scripts/steel_live_check.py`, 13/13): a script's form submit is
+`sandy://browser/login` and `/live` open their sheets (`DeepLinkRouter`). *Proven on Steel* (2 Nov 2026, `scripts/steel_live_check.py`, 14/14): what the browser draws
+hidden (rules put in by script, off the page, near white on white, of no size, in a transparent
+box) is never read; a script's form submit is
 blocked; a font and a style from Google's sites load; a send to another site is blocked; a frame
 of another site never loads; a websocket never opens, nor one taken from a fresh frame (blocking it
 on the network alone did not hold: it opened, hence `NO_SOCKETS_JS`); an image to another site

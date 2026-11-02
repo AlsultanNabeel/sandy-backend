@@ -15,6 +15,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -48,6 +49,13 @@ FRAME_JS = """new Promise((done) => { const f = document.createElement("iframe")
 POST_OTHER_JS = """fetch("https://httpbingo.org/post", {method: "POST", body: "x=1", mode: "no-cors"})
   .then(() => "sent").catch(() => "blocked")"""
 BUTTON_JS = "document.querySelector('form button')"
+# Hidden only as drawn: rules put in by script (the markup shows an empty style), off the page,
+# white on white, of no size, inside a transparent box; and words that are shown.
+HIDE_JS = """(() => { const st = document.createElement("style"); document.head.appendChild(st);
+  st.sheet.insertRule(".gone { position: absolute; left: -5000px }"); st.sheet.insertRule(".pale { color: #fefefe }");
+  document.body.insertAdjacentHTML("beforeend", "<p class='gone'>HIDDEN-A</p><p class='pale'>HIDDEN-B</p>"
+    + "<p style='font-size:0'>HIDDEN-C</p><div style='opacity:0'><p>HIDDEN-D</p></div><p>SHOWN-E</p>");
+  return true; })()"""
 
 
 def report(name: str, ok: bool, detail: str = "") -> bool:
@@ -77,6 +85,14 @@ async def gate_checks(session_id: str) -> list:
     try:
         results.append(report("the form page opens behind the gate",
                               "forms/post" in await browser_cdp.where(client, tab)))
+        from app.features import web_page
+        await browser_cdp.evaluate(client, tab, HIDE_JS)
+        plain = web_page.extract(await browser_cdp.html(client, tab), FORM)
+        drawn = web_page.extract(await browser_cdp.evaluate(client, tab, web_page.MARK_HIDDEN_JS), FORM)
+        results.append(report("what the browser draws hidden is never read", "SHOWN-E" in drawn["text"]
+                              and "HIDDEN" not in drawn["text"],
+                              f"hidden by its markup alone: {sorted(set(re.findall('HIDDEN-.', plain['hidden'])))}"))
+        await browser_cdp.goto(client, tab, FORM)
         # 1. A script's own submit, nothing approved: blocked, never answered.
         await browser_cdp.evaluate(client, tab, FILL_JS)
         await browser_cdp.evaluate(client, tab, "document.forms[0].submit(); true")

@@ -584,6 +584,9 @@ PHRASES = {
                           "«Sandy's browser»."},
     "fill_taken": {"ar": "النموذج على {site} عم ينبعت هلّق من موافقة قبلها، فما عملت شي تاني.",
                    "en": "The form on {site} is already being sent on an earlier yes, so I did nothing more."},
+    "fill_orders": {"ar": "⚠️ وقّفت التعبئة على {site}: الصفحة فيها كلام بيحاول يعطيني أوامر. ما نفّذت منه شي.",
+                    "en": "⚠️ I stopped filling the form on {site}: the page has words that try to give me orders. "
+                          "I did none of it."},
     "fill_gone": {"ar": "هالنموذج ما عاد ناطر، الجلسة انتهت. اطلب مني أعبّيه كمان مرة.",
                   "en": "That form isn't waiting any more; its session ended. Ask me to fill it again."},
     # The sites screen (`features/browser_sites`).
