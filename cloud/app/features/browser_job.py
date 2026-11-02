@@ -258,7 +258,47 @@ def _release(row: Dict[str, Any]) -> None:
     if isinstance(began, datetime) and began.tzinfo is None:
         began = began.replace(tzinfo=timezone.utc)
     seconds = max(0.0, (_now() - began).total_seconds()) if isinstance(began, datetime) else 0.0
-    steel_client.release(str(row.get("steel_id") or ""), seconds)
+    # Steel closes a session itself after `SESSION_MS`: never billed past that.
+    steel_client.release(str(row.get("steel_id") or ""), min(seconds, steel_client.SESSION_MS / 1000))
+
+
+# A fill that has not beaten for this long has no holder any more (its worker died).
+STALE_S = 120
+
+
+def sweep() -> int:
+    """Every session no one holds any more, closed and billed on its account (every minute,
+    `schedule_runner`): a fill whose holder stopped beating, a page he took over once Steel's own
+    time is up, a fill that ended without closing. How many were closed."""
+    from app.features import trace_store
+    from app.integrations import steel_client
+    db = get_db()
+    if db is None:
+        return 0
+    now = _now()
+    stale, ended = now - timedelta(seconds=STALE_S), now - timedelta(milliseconds=steel_client.SESSION_MS)
+    try:
+        rows = list(db[COLLECTION].find({"closed_at": None, "$or": [
+            {"status": {"$in": list(_HOLDING)}, "beat_at": {"$lt": stale}},
+            {"status": HANDED, "created_at": {"$lt": ended}},
+            {"status": {"$in": [DONE, FAILED, STOPPED]}, "updated_at": {"$lt": stale}}]}).limit(100))
+    except PyMongoError:
+        logger.warning("[browser] the sweep could not read", exc_info=True)
+        return 0
+    for r in rows:
+        if r.get("status") in _HOLDING:
+            db[COLLECTION].update_one({"_id": r["_id"], "status": r["status"]},
+                                      {"$set": {"status": FAILED, "reason": "lost", "updated_at": now}})
+        with trace_store.background(str(r.get("user_id") or ""), "browser_sweep", keep=True):
+            _release(r)
+    return len(rows)
+
+
+async def _beating(job_id: str) -> None:
+    """While a fill holds its session: it beats (`beat_at`), so `sweep` leaves it be."""
+    while True:
+        await asyncio.sleep(BEAT_S)
+        _save(job_id, beat_at=_now())
 
 
 def _run(job_id: str, user_id: str) -> None:
@@ -309,6 +349,7 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from app.features import browser_sites, web_page
     from app.integrations import browser_cdp, steel_client
     client = await browser_cdp.connect(steel_client.connect_url(row["steel_id"]))
+    beat = asyncio.ensure_future(_beating(row["_id"]))
     try:
         gate = browser_gate.Gate(row["site"])
         stopped = asyncio.Event()
@@ -341,6 +382,7 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             return {"status": FAILED, "reason": gate.breach}
         return outcome
     finally:
+        beat.cancel()
         await client.stop()
 
 
@@ -365,19 +407,15 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
 
 async def _answered(job_id: str, user_id: str) -> Optional[str]:
     """What became of a held fill: his yes (`APPROVED`), his no or another stop; None when no
-    answer came in time. It beats meanwhile (`beat_at`): a fill whose holder is gone is closed
-    (`sweep`)."""
+    answer came in time."""
     from app.features import stop_all
-    deadline, beat = time.monotonic() + HOLD_S, time.monotonic()
+    deadline = time.monotonic() + HOLD_S
     while time.monotonic() < deadline:
         status = (get(job_id) or {}).get("status")
         if status != HELD:
             return status
         if stop_all.stopped(user_id):
             return STOPPED
-        if time.monotonic() - beat >= BEAT_S:
-            _save(job_id, beat_at=_now())
-            beat = time.monotonic()
         await asyncio.sleep(0.5)
     return None
 

@@ -371,6 +371,12 @@ def start_schedule_runner(mongo_db) -> bool:
             id="block_schedules", replace_existing=True,
             max_instances=1, coalesce=True, misfire_grace_time=120,
         )
+        # The browser's sessions no one holds any more, closed and billed.
+        from app.features import browser_job
+        _scheduler.add_job(
+            browser_job.sweep, "interval", minutes=1, id="browser_sweep", replace_existing=True,
+            max_instances=1, coalesce=True, misfire_grace_time=120,
+        )
         _scheduler.start()
         _started = True
         logger.info("[schedules] started — checking sandy_schedules every minute")

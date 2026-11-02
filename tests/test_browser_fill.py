@@ -672,3 +672,45 @@ def test_the_emergency_stop_closes_a_held_fills_session_at_once(world):
         stop_all.stop("userA")
         stop_all.resume("userA")
     assert world.released == ["st1"] and _job(job)["status"] == browser_job.STOPPED
+
+
+# ── A session no one holds is closed and billed ──
+
+def test_a_fill_whose_holder_is_gone_is_closed_and_billed(world, brain_db, monkeypatch):  # noqa: F811
+    from datetime import timedelta
+    billed = []
+    from app.features import trace_store
+    monkeypatch.setattr(steel_client, "release", lambda sid, seconds=0: (
+        world.released.append(sid), billed.append(seconds), trace_store.note_fee("steel_hour", seconds / 3600)))
+    now = browser_job._now()
+    old = now - timedelta(minutes=5)
+    rows = [{"_id": "lost", "status": browser_job.HELD, "steel_id": "st7", "beat_at": old, "created_at": old},
+            {"_id": "alive", "status": browser_job.HELD, "steel_id": "st8", "beat_at": now, "created_at": old},
+            {"_id": "his", "status": browser_job.HANDED, "steel_id": "st9", "beat_at": old,
+             "created_at": now - timedelta(hours=2)}]
+    for r in rows:
+        brain_db[browser_job.COLLECTION].insert_one({**r, "user_id": "userA", "site": "forms.example.com",
+                                                     "closed_at": None})
+    browser_job.sweep()
+    assert sorted(world.released) == ["st7", "st9"] and _job("lost")["status"] == browser_job.FAILED
+    assert _job("alive")["status"] == browser_job.HELD
+    # Billed from when it opened, never past the time Steel itself closes a session.
+    assert 290 < billed[world.released.index("st7")] < 320
+    assert billed[world.released.index("st9")] == steel_client.SESSION_MS / 1000
+    fees = [f["what"] for r in brain_db["sandy_traces"].find({"user_id": "userA"}) for f in r.get("fees", [])]
+    assert fees.count("steel_hour") == 2
+
+
+def test_a_fill_beats_while_it_holds_its_page(world, monkeypatch):
+    monkeypatch.setattr(browser_job, "BEAT_S", 0.1)
+    _level("submit")
+    job = _fill("en")["ids"][0]
+    first = _job(job)["beat_at"]
+    time.sleep(0.6)
+    assert _job(job)["beat_at"] > first
+
+
+def test_the_sweep_runs_every_minute():
+    from app.services import schedule_runner
+    import inspect
+    assert "browser_job.sweep" in inspect.getsource(schedule_runner.start_schedule_runner)
