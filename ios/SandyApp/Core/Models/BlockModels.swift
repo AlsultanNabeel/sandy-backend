@@ -171,17 +171,7 @@ struct ListItem: Codable, Identifiable, Hashable {
 
     /// The notes as shown under the task, with any web address a tappable link.
     var notesShown: AttributedString? {
-        guard let notes else { return nil }
-        var shown = AttributedString(notes)
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
-        let whole = NSRange(notes.startIndex..., in: notes)
-        for match in detector?.matches(in: notes, range: whole) ?? [] {
-            guard let url = match.url, let range = Range(match.range, in: notes),
-                  let lower = AttributedString.Index(range.lowerBound, within: shown),
-                  let upper = AttributedString.Index(range.upperBound, within: shown) else { continue }
-            shown[lower..<upper].link = url
-        }
-        return shown
+        notes.map(Linked.text)
     }
 
     /// The lists whose rows carry notes (the kinds table declares `notes` as text on tasks).

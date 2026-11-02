@@ -477,7 +477,8 @@ private struct ChatBubbleRow: View, Equatable {
     }
 
     private var bubble: some View {
-        Text(text)
+        // Sandy's links tappable: a site to sign in to, «Sandy's browser», a source.
+        Text(isUser ? AttributedString(text) : Linked.text(text))
             .font(Theme.Typography.body)
             .foregroundColor(Theme.Colors.primaryText)
             .multilineTextAlignment(.leading)
