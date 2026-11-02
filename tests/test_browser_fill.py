@@ -38,6 +38,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
     brain_db["sandy_users"].insert_one({"_id": "userA"})
     browser_sites.init_browser_sites(brain_db)
     w = NS(snapshot=FORM, clients=[], opened=[], released=[], mode="submit", sent_notes=[],
+           filled=[{"field": "Name", "value": "Nabeel"}, {"field": "Email", "value": "n@example.com"}],
            result="<html><body><main><p>Thanks Nabeel, your application 77 was received.</p></main></body></html>")
 
     def evaluate(client):
@@ -48,7 +49,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
             elif e == browser_guard.SNAPSHOT_JS:
                 value = json.dumps(w.snapshot)
             elif e == browser_job._FILLED_JS:
-                value = [{"field": "Name", "value": "Nabeel"}, {"field": "Email", "value": "n@example.com"}]
+                value = w.filled
             elif "outerHTML" in e:
                 value = w.result
             elif e == "location.href":
@@ -309,3 +310,25 @@ def test_the_held_send_is_sealed_at_rest(world, brain_db):  # noqa: F811
 def test_a_send_that_is_not_a_plain_form_is_made_again_as_a_fetch_with_its_own_body():
     js = browser_job._resend_js({"method": "POST", "url": URL, "body": '{"a": 1}', "content_type": "application/json"})
     assert js.startswith("fetch(") and '"application/json"' in js and '"{\\"a\\": 1}"' in js
+
+
+def test_what_he_filled_is_read_from_the_held_send_when_the_page_cannot_show_it(world, monkeypatch):
+    """On a real page the held send leaves an error page behind (Steel, 2 Nov 2026): the question
+    names what he filled from the send itself, never a password."""
+    _level("submit")
+    world.filled = []                                                  # the page shows nothing now
+
+    async def agent(row, gate, client, tab, user_id):
+        gate.acted("click")
+        gate.decide("POST", URL, "Document", body="custname=Sandy+Test&custemail=t%40example.com&password=x&empty=",
+                    content_type="application/x-www-form-urlencoded")
+        return {"status": browser_job.DONE, "result": ""}
+    monkeypatch.setattr(browser_job, "AGENT", agent)
+    asked = _fill("en")
+    assert "custname: Sandy Test" in asked["summary"] and "custemail: t@example.com" in asked["summary"]
+    assert "password" not in asked["summary"] and "empty" not in asked["summary"]
+
+
+def test_a_json_send_names_its_fields_too():
+    held = {"body": '{"name": "Nabeel", "age": 30, "nested": {"x": 1}}', "content_type": "application/json"}
+    assert browser_job._from_send(held) == [{"field": "name", "value": "Nabeel"}, {"field": "age", "value": "30"}]

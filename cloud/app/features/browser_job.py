@@ -27,6 +27,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -216,12 +217,34 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             _note("browser_blocked", {"method": method, "site": browser_gate._root(url.split("/")[2] if "//" in url else url)},
                   ok=False)
         if gate.held is not None:
-            filled = await browser_cdp.evaluate(client, tab, _FILLED_JS) or []
+            # The page, or when the held send left an error page there, the send itself.
+            filled = await browser_cdp.evaluate(client, tab, _FILLED_JS) or _from_send(gate.held)
             _note("browser_held", {"site": row["site"], "fields": [f.get("field") for f in filled]})
             return {"status": HELD, "held": gate.held, "summary": _summary(filled)}
         return outcome
     finally:
         await client.stop()
+
+
+_SECRET_FIELD = re.compile(r"pass(word|code|wd)?|pwd|card|cvv|cvc|token|secret", re.I)
+
+
+def _from_send(held: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """What he filled, read from the held send: a form's fields, or a JSON object's plain
+    values; never a field named like a password, a card or a secret, never an empty one."""
+    from urllib.parse import parse_qsl
+    body, kind = str(held.get("body") or ""), str(held.get("content_type") or "").lower()
+    if "json" in kind:
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return []
+        pairs = [(k, v) for k, v in data.items() if isinstance(v, (str, int, float)) and not isinstance(v, bool)] \
+            if isinstance(data, dict) else []
+    else:
+        pairs = parse_qsl(body, keep_blank_values=False)
+    return [{"field": str(k), "value": str(v)[:200]} for k, v in pairs
+            if str(v).strip() and not _SECRET_FIELD.search(str(k))]
 
 
 def _summary(filled: List[Dict[str, Any]]) -> str:
