@@ -179,18 +179,48 @@ def test_no_gate_no_fill(world, monkeypatch):
     assert out["ok"] is False and world.released == ["st1"]
 
 
-def test_a_slow_fill_goes_on_in_the_background_and_leaves_its_question_on_his_chat(world, monkeypatch, brain_db):  # noqa: F811
+C9, C8 = "c9" * 16, "c8" * 16          # conversation ids as the app makes them
+
+
+def _wait_for(check, seconds=8):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline and not check():
+        time.sleep(0.1)
+
+
+def test_a_slow_fill_goes_on_in_the_background_and_asks_in_his_chat(world, monkeypatch, brain_db):  # noqa: F811
+    """Its question is a message of Sandy's in the chat it was asked from, and the yes the next
+    message gives works; a push tells him; nothing shows as the result of a task."""
+    from app.services import apns
+    pushed = []
+    monkeypatch.setattr(apns, "is_configured", lambda: True)
+    monkeypatch.setattr(apns, "send", lambda token, title, body, **kw: pushed.append(body) or (True, "ok"))
+    brain_db["sandy_push_tokens"].insert_one({"_id": "tok-1", "user_id": "userA", "token": "tok-1"})
     _level("submit")
     world.mode = "slow"
     monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
-    out = _fill("en", thread="t9")
+    out = _fill("en", thread=C9)
     assert out["ok"] and "in the background" in out["reply"] and "sandy://browser/live?job=" in out["reply"]
-    deadline = time.monotonic() + 8
-    while time.monotonic() < deadline and not world.sent_notes:
-        time.sleep(0.1)
-    assert world.sent_notes and "Are you sure you want to send the form" in world.sent_notes[0]
-    held = pending.load("t9", "userA", brain_db)
+    _wait_for(lambda: pending.load(C9, "userA", brain_db))
+    held = pending.load(C9, "userA", brain_db)
     assert held["steps"][0]["tool"] == "page_fill" and held["steps"][0]["ids"] == [out["job"]]
+    chat = brain_db["conversations"].find_one({"_id": C9, "user_id": "userA"})
+    assert chat["messages"][-1]["role"] == "sandy"
+    assert "Are you sure you want to send the form" in chat["messages"][-1]["text"]
+    assert pushed and "send the form" in pushed[0]
+    assert brain_db["sandy_task_results"].count_documents({}) == 0 and world.sent_notes == []
+
+
+def test_a_slow_fill_that_ends_tells_its_result_in_his_chat(world, monkeypatch, brain_db):  # noqa: F811
+    _level("submit")
+    world.mode = "slow"
+    world.snapshot = {**FORM, "fields": [{"type": "password"}]}
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.0)
+    out = _fill("en", thread=C8)
+    _wait_for(lambda: (brain_db["conversations"].find_one({"_id": C8}) or {}).get("messages"))
+    chat = brain_db["conversations"].find_one({"_id": C8, "user_id": "userA"})
+    assert "asks for a password" in chat["messages"][-1]["text"] and out["ok"]
+    assert brain_db["sandy_task_results"].count_documents({}) == 0
 
 
 def test_the_emergency_stop_stops_a_running_fill(world, monkeypatch):

@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
 
 from flask import jsonify, request
-from pymongo.errors import DuplicateKeyError, OperationFailure
+from pymongo.errors import DuplicateKeyError, OperationFailure, PyMongoError
 
 from app.api.auth_handlers import require_auth
 from app.utils.tenant_db import ScopedCollection, scoped
@@ -104,6 +104,22 @@ def ensure_conversation(mongo_db, uid: str, cid: str) -> bool:
     except DuplicateKeyError:
         # A concurrent create of our own, or someone else's id.
         return coll.find_one({"_id": cid}, {"_id": 1}) is not None
+
+
+def say_in(mongo_db, uid: str, cid: str, text: str) -> bool:
+    """A message of Sandy's in one of his conversations, said on her own (a fill that went on in
+    the background tells what came of it where he asked for it); False when it cannot be."""
+    if not text or not ensure_conversation(mongo_db, uid, cid):
+        return False
+    coll = _conversations(mongo_db, uid)
+    try:
+        coll.update_one({"_id": cid}, {"$push": {"messages": {"role": "sandy", "text": text[:_MAX_MESSAGE_CHARS],
+                                                             "ts": _now()}},
+                                       "$set": {"updated_at": _now()}})
+        return True
+    except PyMongoError:
+        logger.warning("[conversations] a message of Sandy's was not kept", exc_info=True)
+        return False
 
 
 def _turns(mongo_db, uid: str) -> ScopedCollection:

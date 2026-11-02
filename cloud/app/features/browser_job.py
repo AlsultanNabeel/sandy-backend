@@ -464,18 +464,34 @@ def stop_for(user_id: str) -> None:
 
 
 def _tell(row: Dict[str, Any]) -> None:
-    """A detached fill tells him what came of it: its question on his chat, or its result."""
-    from app import notify
+    """A detached fill tells him what came of it in the chat he asked from (its question there,
+    which his next message answers, or its result) and on his phone; never as a task's result."""
+    from app.api.conversations_api import say_in
     from app.brain import confirm, lang, pending
+    uid, thread = str(row.get("user_id") or ""), str(row.get("thread_id") or "")
     with lang.using(row.get("lang") or lang.AR):
         if row["status"] == HELD:
             summary = lang.say("fill_summary", site=row["site"], fields=row.get("summary") or "")
             held = confirm.with_step(None, "page_fill", row.get("args") or {}, summary, ids=[row["id"]])
-            pending.save(str(row.get("thread_id") or ""), str(row.get("user_id") or ""), get_db(), held)
+            pending.save(thread, uid, get_db(), held)
             body = confirm.ask(held)
         else:
             body = told(row)
-        notify.deliver(f"browser:{row['id']}", row["site"], body, lang.current())
+        if thread:
+            say_in(get_db(), uid, thread, body)
+        _push(uid, body)
+
+
+def _push(uid: str, body: str) -> None:
+    from app.brain import lang
+    from app.features import push_tokens_store
+    from app.services import apns
+    if not apns.is_configured():
+        return
+    for token in push_tokens_store.tokens_for_user(uid):
+        ok, status = apns.send(token, lang.say("push_title"), body[:180], data={"kind": "browser"})
+        if not ok and status == "gone":
+            push_tokens_store.unregister_token(token)
 
 
 def told(row: Dict[str, Any]) -> str:
