@@ -508,3 +508,32 @@ def test_a_line_break_typed_or_a_click_by_place_is_refused(monkeypatch, action):
 def test_the_sends_check_knows_a_forms_submit_and_a_button_that_names_a_send():
     js = browser_job._SENDS_JS
     assert '["submit", "image"]' in js and "c.form" in js and "إرسال" in js and "submit" in js
+
+
+# ── One yes acts ──
+
+def test_two_yeses_at_once_click_once_and_the_second_says_so(world):
+    """A second «اه», or one from another device, finds the yes already taken: one click, one send."""
+    import threading
+    _level("submit")
+    job = _fill("en")["ids"][0]
+    outs = []
+    yeses = [threading.Thread(target=lambda: outs.append(_fill("en", confirmed_job=job))) for _ in range(2)]
+    for t in yeses:
+        t.start()
+    for t in yeses:
+        t.join(20)
+    sent = [o for o in outs if o.get("ok")]
+    assert len(sent) == 1 and "application 77" in sent[0]["reply"]
+    [other] = [o for o in outs if not o.get("ok")]
+    assert "already" in other["reply"]
+    assert [p for p, _ in world.pressed] == ["mouseMoved", "mousePressed", "mouseReleased"]
+
+
+def test_the_yes_is_taken_once_whoever_asks(world, monkeypatch):
+    _level("submit")
+    job = _fill("en")["ids"][0]
+    monkeypatch.setattr(browser_job, "wait", lambda job_id, seconds, waiting=(): {"status": "approved"})
+    with active_user_profile_context(A):
+        assert browser_job.submit(job) == {"status": "approved"}
+        assert browser_job.submit(job) is None

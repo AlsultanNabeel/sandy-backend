@@ -218,11 +218,17 @@ def _send(job: str) -> Dict[str, Any]:
     from app.features import browser_job, browser_sites
 
     row = browser_job.get(job)
+    if row and row.get("status") == browser_job.APPROVED:
+        return _no(lang.say("fill_taken", site=row["site"]))
     if not row or row.get("status") != browser_job.HELD:
         return _no(lang.say("fill_gone"))
-    if browser_sites.level(row["site"]) != browser_sites.SUBMIT:
-        return _no(lang.say("fill_level_read", site=row["site"]))
+    site = row["site"]
+    if browser_sites.level(site) != browser_sites.SUBMIT:
+        return _no(lang.say("fill_level_read", site=site))
     row = browser_job.submit(job)
+    if row is None:
+        # Another yes took it first: it is that one's to tell.
+        return _no(lang.say("fill_taken", site=site))
     if row.get("status") == browser_job.APPROVED:
         # Still answering: it tells him itself once it has.
         browser_job.detach(job)

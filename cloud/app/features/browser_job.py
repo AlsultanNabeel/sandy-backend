@@ -503,14 +503,22 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
 AGENT = _agent
 
 
-def submit(job_id: str) -> Dict[str, Any]:
+def submit(job_id: str) -> Optional[Dict[str, Any]]:
     """His yes: the held fill makes its action on its page, and the page it answers with is the
-    result (as it is after `WAIT_S`, still `APPROVED`, when it is slow)."""
-    row = get(job_id) or {}
-    if row.get("status") != HELD:
-        return row
-    # This yes waits for the answer itself: the fill does not tell it again.
-    _save(job_id, status=APPROVED, detached=False)
+    result (as it is after `WAIT_S`, still `APPROVED`, when it is slow). Taken once: a second
+    yes, or one from another device, finds it taken and is None."""
+    coll = _coll()
+    if coll is None:
+        return None
+    try:
+        # This yes waits for the answer itself: the fill does not tell it again.
+        taken = coll.find_one_and_update({"_id": str(job_id), "status": HELD},
+                                         {"$set": {"status": APPROVED, "detached": False, "updated_at": _now()}})
+    except PyMongoError:
+        logger.warning("[browser] could not take the yes of %s", job_id, exc_info=True)
+        return None
+    if taken is None:
+        return None
     return wait(job_id, WAIT_S, waiting=(APPROVED,)) or {}
 
 
