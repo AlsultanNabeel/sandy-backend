@@ -612,7 +612,12 @@ def _stops(monkeypatch, cost=0.0, steps=1):
             built.update(kw)
 
         async def run(self, max_steps):
-            built["stopped"] = [await built["register_should_stop_callback"]() for _ in range(steps)][-1]
+            # Asked twice a step, as browser-use asks: only its own step count counts.
+            answers = []
+            for n in range(1, steps + 1):
+                built["register_new_step_callback"](None, None, n)
+                answers += [await built["register_should_stop_callback"](), await built["register_should_stop_callback"]()]
+            built["stopped"] = answers[-1]
             return NS(final_result=lambda: "")
     monkeypatch.setattr(browser_use, "Agent", Agent)
     monkeypatch.setattr(browser_use, "BrowserSession", Session)

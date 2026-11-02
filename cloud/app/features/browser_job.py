@@ -196,10 +196,9 @@ def _limits(user_id: str) -> None:
 
 def _on_pool(job_id: str, user_id: str) -> None:
     def run():
+        # `_run` tells every failure of its own; its slot is given back whatever happened.
         try:
             _run(job_id, user_id)
-        except Exception:  # noqa: BLE001 — a fill never takes its pool down
-            logger.exception("[browser] a fill broke")
         finally:
             _SLOTS.release()
     _POOL.submit(contextvars.copy_context().run, run)
@@ -595,10 +594,13 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
 
     steps = [0]
 
+    def on_step(state, output, n):
+        # The agent's own count of its steps (it asks whether to stop more than once a step).
+        steps[0] = int(n or 0)
+
     async def should_stop() -> bool:
         if asked or gate.breach is not None:
             return True
-        steps[0] += 1
         if steps[0] > MAX_STEPS:
             reason.update(status=FAILED, reason="steps")
             return True
@@ -621,6 +623,7 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     agent = Agent(task=_TASK.format(goal=row.get("goal") or "", details=details), llm=SandyLLM(user_id),
                   browser_session=session, tools=_Asking(exclude_actions=list(EXCLUDED)), use_vision="auto",
                   use_judge=False, enable_planning=False, register_should_stop_callback=should_stop,
+                  register_new_step_callback=on_step,
                   max_failures=3, directly_open_url=False)
     try:
         history = await agent.run(max_steps=MAX_STEPS)

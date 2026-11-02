@@ -235,8 +235,11 @@ def leaking_fill() -> bool:
             job = get_db()[browser_job.COLLECTION].find_one({}) or {}
     finally:
         browser_job.AGENT = real
-    time.sleep(2)
-    status = _status(job.get("steel_id", ""))
+    # Its release goes after its answer: Steel is asked until it says (twenty seconds at most).
+    deadline, status = time.monotonic() + 20, ""
+    while time.monotonic() < deadline and status != "released":
+        time.sleep(2)
+        status = _status(job.get("steel_id", ""))
     return report("a page that leaks stops the whole fill and closes its session",
                   out.get("ok") is False and job.get("reason") == "leak" and status == "released" and not row,
                   f"{job.get('status')} {job.get('reason')}, Steel {status}: {(out.get('reply') or '')[:80]}")
@@ -250,6 +253,9 @@ def whole_fill() -> bool:
     from app.features import browser_job, browser_sites
     from app.utils.user_profiles import active_user_profile_context
 
+    # A whole fill takes about eighty seconds, the tool's own wait: waited longer here, so the
+    # check reads its question rather than its going on in the background.
+    browser_job.WAIT_S = 240
     with active_user_profile_context(_world()):
         browser_sites.set_level("httpbin.org", browser_sites.SUBMIT)
         began = time.monotonic()

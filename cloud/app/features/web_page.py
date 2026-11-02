@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
 
 import requests
+from soupsieve import SelectorSyntaxError
 from bs4 import BeautifulSoup
 
 from app import config
@@ -282,7 +283,7 @@ def _styled(soup: Any) -> None:
     for selector, decls in _sheet(soup):
         try:
             found = soup.select(selector)
-        except Exception:  # noqa: BLE001 — a selector soupsieve cannot read hides nothing
+        except (SelectorSyntaxError, NotImplementedError, ValueError):  # one it cannot read hides nothing
             continue
         for el in found:
             styles.setdefault(id(el), {}).update(decls)

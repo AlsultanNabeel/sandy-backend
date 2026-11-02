@@ -179,7 +179,8 @@ async def install(client, gate: Gate) -> None:
                         urlsplit(request.get("url", "")).hostname)
             reply = client.send.Fetch.failRequest(params={"requestId": rid, "errorReason": "BlockedByClient"},
                                                   session_id=session)
-        asyncio.ensure_future(reply)
+        # An answer the closing connection never sends is no error of the page's.
+        asyncio.ensure_future(reply).add_done_callback(lambda done: done.cancelled() or done.exception())
 
     def on_socket(event: Dict[str, Any], session: Optional[str] = None) -> None:
         # Blocked before its handshake; one that was made anyway stops the fill.

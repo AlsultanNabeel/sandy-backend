@@ -253,6 +253,8 @@ _PROMPTS = {
     "brain/stm.py": {"_SUMMARY_PROMPT"},
     "brain/stops.py": {"CUT_NOTE"},
     "brain/tools_blocks.py": {"_ASK_TIME"},
+    # Not said at all: the words a page's send button may carry, matched in the page.
+    "features/browser_job.py": {"_SENDS_JS"},
     "features/research.py": {"_SUMMARY_SYSTEM"},
     "features/vision.py": {"_VISION_CONTEXT"},
     "utils/user_profiles.py": {"HAS_NO_NAME"},

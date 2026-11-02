@@ -412,7 +412,7 @@ one word or tap resumes. Typed in the chat as a message of its own (`stop_all.as
 nothing else, either language, with or without her name), the loop stops it by the code before
 any held question or model, and lets the question go. The app's Profile › Browser (`Features/Browser/`) holds the stop, the open
 fills and the sites; links in Sandy's replies are tappable (`DesignSystem/Linked.swift`), and
-`sandy://browser/login` and `/live` open their sheets (`DeepLinkRouter`). *Proven on Steel* (2 Nov 2026, `scripts/steel_live_check.py`, 14/14): what the browser draws
+`sandy://browser/login` and `/live` open their sheets (`DeepLinkRouter`). *Proven on Steel* (2 Nov 2026, `scripts/steel_live_check.py --fill`, 17/17): what the browser draws
 hidden (rules put in by script, off the page, near white on white, of no size, in a transparent
 box) is never read; a script's form submit is
 blocked; a font and a style from Google's sites load; a send to another site is blocked; a frame
@@ -420,7 +420,8 @@ of another site never loads; a websocket never opens, nor one taken from a fresh
 on the network alone did not hold: it opened, hence `NO_SOCKETS_JS`); an image to another site
 carrying what she typed is stopped; his yes is the real click on the same page and sends once, a
 second send is not let through, a new tab's send is blocked; the live view opens; and a whole fill
-on a page that leaks is stopped, its Steel session released, him told. Steel refuses its
+on a page that leaks is stopped, its Steel session released, him told; a whole fill on the real
+model asks before its click and his yes clicks it and sends it once. Steel refuses its
 key in a header on the connect address, so the key is in the address and every log record is
 redacted as it is made (`bootstrap.install_redaction`: any query field named key, token, secret,
 password, signature or auth, from any library). *Slug* (measured the same day, Linux wheels):
@@ -1901,7 +1902,7 @@ languages. A first version of `BROWSER_RULE`, eight lines, sent «شو اشتر�
 `summarize` (what he bought is `recall`) brought it to five of five. The run after it
 (`2026-11-02T0008`): ar 53/57, en 55/58, six fell («delete one item», «no put it back», «shopping
 bought», «device later»), each of them swinging the same way on the commit before when run three
-times each.
+times each. After the browser review's fixes (`2026-11-02T1835`, one run, 123 cases): ar 59/61, en 61/62, $0.24, 2.4 s, the baseline now; every page, fill and stop case passed in both languages; «an edit that changes nothing», «delete one item» and «shopping implied · en» fell, none touched by the browser.
 
 The app's unit tests run from the terminal with `scripts/run_ios_tests.sh`, which keeps every
 run's log, result bundle and failed tests by name in `ios/test-results/` (not in git). The test
