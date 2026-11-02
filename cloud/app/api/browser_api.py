@@ -7,6 +7,12 @@
   PATCH  /api/browser/sites/<site>                {level: read | fill | submit}: {site}
   POST   /api/browser/sites/<site>/session        {cookies, storage}: his sign-in, sealed: {site}
   DELETE /api/browser/sites/<site>/session        «طلّعها»: the sign-in forgotten: {site}
+  GET    /api/browser/jobs                        {jobs: [{id, site, status, created_at}]}: his open fills
+  GET    /api/browser/jobs/<id>/live              {url}: «متصفح ساندي», to watch only
+  POST   /api/browser/jobs/<id>/takeover          {url}: «خليني أكمّل أنا»: the agent stops, the view drives
+
+Steel's view has no protection of its own: it reaches only the fill's owner (another account's
+fill is 404) and is never logged or traced.
 
 Every route is the caller's own tenant.
 """
@@ -20,7 +26,7 @@ from flask import jsonify, request
 
 from app.api.auth_handlers import require_tenant
 from app.brain import lang
-from app.features import browser_sites, stop_all
+from app.features import browser_job, browser_sites, stop_all
 
 logger = logging.getLogger(__name__)
 
@@ -94,3 +100,24 @@ def register_browser_api(app) -> None:
         if not browser_sites.sign_out(site):
             return jsonify({"error": "unavailable", "message": lang.say("stop_failed")}), 503
         return jsonify({"site": browser_sites.shown(site)})
+
+    @app.route("/api/browser/jobs", methods=["GET"])
+    @_switched
+    def browser_jobs(claims):
+        return jsonify({"jobs": browser_job.open_jobs()})
+
+    @app.route("/api/browser/jobs/<job_id>/live", methods=["GET"])
+    @_switched
+    def browser_job_live(job_id, claims):
+        row = browser_job.get(job_id) or {}
+        url = browser_job.live_url(job_id, control=row.get("status") == browser_job.HANDED)
+        if not url:
+            return jsonify({"error": "not_found", "message": lang.say("fill_gone")}), 404
+        return jsonify({"url": url, "control": row.get("status") == browser_job.HANDED})
+
+    @app.route("/api/browser/jobs/<job_id>/takeover", methods=["POST"])
+    @_switched
+    def browser_job_takeover(job_id, claims):
+        if not browser_job.take_over(job_id):
+            return jsonify({"error": "not_found", "message": lang.say("fill_gone")}), 404
+        return jsonify({"url": browser_job.live_url(job_id, control=True), "control": True})

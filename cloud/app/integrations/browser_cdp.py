@@ -45,6 +45,11 @@ async def evaluate(client, session: str, expression: str) -> Any:
 async def goto(client, session: str, url: str, wait_s: float = LOAD_S) -> None:
     """Open ``url`` and wait for it to load (`wait_s` at most; a slow page is read as it is)."""
     await client.send.Page.navigate(params={"url": url}, session_id=session)
+    await settle(client, session, wait_s)
+
+
+async def settle(client, session: str, wait_s: float = LOAD_S) -> None:
+    """Wait for the page now opening to load (`wait_s` at most)."""
     deadline = time.monotonic() + wait_s
     while time.monotonic() < deadline:
         await asyncio.sleep(0.3)

@@ -3,8 +3,8 @@ switch).
 
 Stopped (`sandy_users.stopped_at`), an account's tasks do not run and count no failure
 (`task_runner.run`), the browser's tools refuse (`tools_browser`), and every browser job still
-running stops at its next step and closes its session (`STOPPERS`, which the browser job adds
-itself to). Reminders still ring: they are his, not work Sandy does on her own. One word or one
+running stops at its next step and closes its session (`browser_job.stop_for`, then any other
+in `STOPPERS`). Reminders still ring: they are his, not work Sandy does on her own. One word or one
 tap (`resume`) brings it all back. A reset forgets it (`account_delete.USER_ROW_FORGOTTEN`).
 """
 
@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 _USERS = "sandy_users"
 FIELD = "stopped_at"
-# Called with the account's id once it is stopped: what still runs for it stops.
+# Called with the account's id once it is stopped, after the browser's fills: what else still
+# runs for it stops.
 STOPPERS: List[Callable[[str], None]] = []
 
 
@@ -53,8 +54,9 @@ def _set(user_id: str, value) -> bool:
 
 def stop(user_id: str) -> bool:
     """Everything of this account's own work stops now; True once it is kept."""
+    from app.features import browser_job
     kept = _set(user_id, datetime.now(timezone.utc))
-    for stopper in STOPPERS:
+    for stopper in (browser_job.stop_for, *STOPPERS):
         try:
             stopper(str(user_id))
         except (RuntimeError, OSError, ValueError, PyMongoError):  # the rest still stop

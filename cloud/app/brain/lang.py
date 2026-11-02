@@ -550,6 +550,28 @@ PHRASES = {
                                         "can carry on yourself from «Sandy's browser»."},
     "browser_forbidden_payment": {"ar": "وقفت: صفحة {site} صفحة دفع، وأنا ما بدفع أبداً.",
                                   "en": "I stopped: the page on {site} is a payment page, and I never pay."},
+    # A fill (`features/browser_job`, `tools_browser.page_fill`).
+    "fill_summary": {"ar": "أبعت النموذج على {site} بهالمعلومات: {fields}",
+                     "en": "send the form on {site} with these details: {fields}"},
+    "fill_done": {"ar": "انبعت النموذج على {site} ✅ والصفحة بتقول: {result}",
+                  "en": "The form on {site} was sent ✅ and the page says: {result}"},
+    "fill_only": {"ar": "عبّيت النموذج على {site} ({fields}) وما بعتته، لأنه مسموحلي أعبّي بس بهالموقع. "
+                        "بتقدر تبعته إنت من «متصفح ساندي»: {link}",
+                  "en": "I filled the form on {site} ({fields}) and didn't send it: on this site I may only "
+                        "fill. You can send it yourself from «Sandy's browser»: {link}"},
+    "fill_level_read": {"ar": "على {site} مسموحلي أقرا بس. إذا بدك أعبّي، غيّرها من «المواقع» بالإعدادات.",
+                        "en": "On {site} I may only read. If you want me to fill, change it in «Sites» in settings."},
+    "fill_background": {"ar": "التعبئة على {site} طوّلت، فبكمّلها بالخلفية وببعتلك لما أخلص أو لما بدها موافقتك. "
+                              "بتقدر تتفرّج من هون: {link}",
+                        "en": "The form on {site} is taking a while, so I'll carry on in the background and tell "
+                              "you when I'm done or need your yes. You can watch here: {link}"},
+    "fill_stopped": {"ar": "وقّفت التعبئة على {site}.", "en": "I stopped filling the form on {site}."},
+    "fill_handed": {"ar": "صفحة {site} صارت إلك، كمّل إنت.", "en": "The page on {site} is yours now; carry on."},
+    "fill_failed": {"ar": "ما زبطت التعبئة على {site}. جرّب كمان شوي، أو كمّل إنت من «متصفح ساندي».",
+                    "en": "Filling the form on {site} didn't work. Try again in a bit, or carry on yourself "
+                          "from «Sandy's browser»."},
+    "fill_gone": {"ar": "هالنموذج ما عاد ناطر، الجلسة انتهت. اطلب مني أعبّيه كمان مرة.",
+                  "en": "That form isn't waiting any more; its session ended. Ask me to fill it again."},
     # The sites screen (`features/browser_sites`).
     "browser_bad_level": {"ar": "المستوى لازم يكون قراءة بس، أو تعبئة، أو إرسال.",
                           "en": "The level has to be read only, fill, or send."},

@@ -74,6 +74,8 @@ _BY_USER: List[str] = [
     "sandy_task_results",
     # The sites Sandy may open, his level and sealed sign-in on each (`features/browser_sites.py`).
     "sandy_browser_sites",
+    # His fills, a day each (`features/browser_job.py`).
+    "sandy_browser_jobs",
     # What was deleted or changed in the blocks, kept seven days for undo.
     "sandy_changes",
     # The log of what happened to his data, and his count in it (`blocks/events.py`).

@@ -16,6 +16,9 @@ google-auth>=2.0.0  # google-genai's own dependency
 Pillow>=10.0.0
 pypdf>=4.0  # text out of PDF chat attachments (features/attachments)
 beautifulsoup4>=4.12  # a page's words and links (features/web_page)
+# A fill's agent (features/browser_job); its own telemetry is turned off in code, and cdp-use with it
+# drives Steel sessions (integrations/browser_cdp).
+browser-use==0.13.14
 urllib3==2.7.0
 cryptography>=42.0.0
 websockets>=13.0

@@ -275,13 +275,15 @@ def note_error(error: str) -> None:
 
 
 @contextmanager
-def background(user_id: str, what: str, task_id: Optional[str] = None) -> Iterator[Trace]:
+def background(user_id: str, what: str, task_id: Optional[str] = None,
+               keep: bool = False) -> Iterator[Trace]:
     """Model calls made for a user outside a turn (a summary, a title, a task's run, which
-    names its task): a row of numbers, written when a model call was made or an error noted."""
+    names its task): a row of numbers, written when a model call was made or an error noted,
+    or always with ``keep`` (a fill, whose every action on a page is on it)."""
     trace = Trace(user_id, "background", task_id=task_id)
     with using(trace):
         yield trace
-    if trace.model_calls or trace.error:
+    if keep or trace.model_calls or trace.error:
         trace.finish(routed_by=what, error=trace.error)
 
 
