@@ -13,6 +13,7 @@ conversation. A step checks any of:
   args                           {tool: {arg: value}}: one call of that tool carries these
                                  values (a word of text is found inside the call's text)
   timer                          a timed device command he asked for: {device, value} as saved
+  stopped                        True / False: the account is stopped (`stop_all`)
   task / no_task                 a running task (`check`: its check tool; `every`; `paused`;
                                  `delivery`: how its results are emailed, as saved),
                                  or none at all (the setup may hold one: {"task": {...}})
@@ -415,5 +416,38 @@ EN_CASES += [
         {"say": "read https://github.com/sandy/app", "tools": ["page_read"], "not_tools": ["web_search"]}]),
     _en("page: no link is a search", [
         {"say": "what's the latest news on gold prices?", "tools": ["web_search"], "not_tools": ["page_read"]}]),
+]
+# Phase seven, session two: a fill waits for his yes, a read-only site is never filled, a sign-in
+# page hands him the link, and «وقّفي كل شي» stops it all (the fills are `eval_brain._offline_fills`).
+_SUBMIT = [{"site": {"site": "forms.example", "level": "submit"}}]
+CASES += [
+    {"name": "fill: waits for his yes, then sends", "setup": _SUBMIT, "steps": [
+        {"say": "عبّيلي النموذج على https://forms.example/apply، اسمي نبيل وإيميلي n@example.com",
+         "tools": ["page_fill"], "pending": True},
+        {"say": "اه", "pending": False, "reply_has": ["77"]}]},
+    {"name": "fill: a read-only site is never filled", "steps": [
+        {"say": "عبّيلي النموذج على https://forms.example/apply، اسمي نبيل", "tools": ["page_fill"],
+         "pending": False}]},
+    {"name": "page: a sign-in page hands him the link", "steps": [
+        {"say": "اقريلي طلباتي https://shop.example/orders", "tools": ["page_read"],
+         "reply_has": ["sandy://browser/login"]}]},
+    {"name": "stop everything, then back", "steps": [
+        {"say": "وقّفي كل شي", "tools": ["stop_everything"], "stopped": True},
+        {"say": "رجّعي كل شي", "tools": ["resume_everything"], "stopped": False}]},
+]
+EN_CASES += [
+    _en("fill: waits for his yes, then sends", [
+        {"say": "fill the form at https://forms.example/apply, my name is Nabeel and my email is n@example.com",
+         "tools": ["page_fill"], "pending": True},
+        {"say": "yes", "pending": False, "reply_has": ["77"]}], _SUBMIT),
+    _en("fill: a read-only site is never filled", [
+        {"say": "fill the form at https://forms.example/apply, my name is Nabeel", "tools": ["page_fill"],
+         "pending": False}]),
+    _en("page: a sign-in page hands him the link", [
+        {"say": "read my orders at https://shop.example/orders", "tools": ["page_read"],
+         "reply_has": ["sandy://browser/login"]}]),
+    _en("stop everything, then back", [
+        {"say": "stop everything", "tools": ["stop_everything"], "stopped": True},
+        {"say": "resume everything", "tools": ["resume_everything"], "stopped": False}]),
 ]
 CASES += EN_CASES

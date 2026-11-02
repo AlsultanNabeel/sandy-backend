@@ -172,6 +172,8 @@ PAGES = {
             ("App for a restaurant", "Logo design", "Shop website", "Translate a book", "Data entry")))),
     "https://orders.example/en": _html("Sea notes", _SEA["en"] + _ORDERS),
     "https://orders.example/ar": _html("عن البحر", _SEA["ar"] + _ORDERS),
+    "https://shop.example/orders": _html("Sign in", "<form><input name='email'><input type='password' name='pw'>"
+                                                    "<button>Sign in</button></form>"),
 }
 
 
@@ -185,12 +187,36 @@ def _offline_web() -> None:
         return url, "text/html", PAGES[url].encode("utf-8")
     web_page._fetch_html = fetch
     web_page.config.STEEL_API_KEY = ""
+    _offline_fills()
+
+
+def _offline_fills() -> None:
+    """A fill with no Steel: its send is held at once with what he gave, and his yes sends it."""
+    from app.features import browser_job
+    jobs: Dict[str, Dict[str, Any]] = {}
+
+    def start(args, *, user_id, thread_id, language):
+        from app.features import web_page
+        job = f"j{len(jobs) + 1}"
+        jobs[job] = {"id": job, "site": web_page.site_of(args["url"]), "url": args["url"], "args": args,
+                     "status": browser_job.HELD, "summary": str(args.get("details") or "")}
+        return job
+
+    def submit(job):
+        jobs[job].update(status=browser_job.DONE, result="Application 77 received.")
+        return jobs[job]
+    browser_job.start = start
+    browser_job.wait = lambda job, seconds: jobs.get(job)
+    browser_job.get = lambda job: jobs.get(job)
+    browser_job.submit = submit
+    browser_job.take_over = lambda job: jobs[job].update(status=browser_job.HANDED) or True
 
 
 def _fresh_db() -> None:
     d = mongomock.MongoClient().db
     appdb.configure(d)
     init_blocks(d)
+    d["sandy_users"].insert_one({"_id": "eval"})        # the run's account: what a stop marks
 
 
 def _setup(steps: List[Dict[str, Any]]) -> None:
@@ -213,6 +239,9 @@ def _setup(steps: List[Dict[str, Any]]) -> None:
             from app import notify
             notify.CHANNELS = []                # a run never emails
             notify.deliver("eval-task", s["result"]["title"], s["result"]["body"], "ar")
+        elif "site" in s:
+            from app.features import browser_sites
+            browser_sites.set_level(s["site"]["site"], s["site"]["level"])
         elif "reminder" in s:
             from datetime import datetime, timedelta, timezone
             at = datetime.now(timezone.utc) + timedelta(hours=s["reminder"].get("in_hours", 3))
@@ -296,6 +325,10 @@ def _check(step: Dict[str, Any], state: Dict[str, Any], used: List[str]) -> List
         bad.append("ما استنّت تأكيد")
     if step.get("pending") is False and state.get("pending_state"):
         bad.append("لسا مستنية تأكيد")
+    if "stopped" in step:
+        from app.features import stop_all
+        if stop_all.stopped("eval") != step["stopped"]:
+            bad.append(f"الإيقاف {stop_all.stopped('eval')} مش {step['stopped']}")
     if step.get("reply_has") and not any(w in reply for w in step["reply_has"]):
         bad.append(f"الرد ما فيه أي من {step['reply_has']}")
     said = [w for w in step.get("reply_lacks", []) if w in reply]
