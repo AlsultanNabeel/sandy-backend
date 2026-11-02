@@ -285,7 +285,7 @@ embeddings are not counted yet.
 
 ### 2.4 Tools
 
-Nineteen (`tools.py`); `page_read` for an account with the `browser` switch on (`tools_browser.py`, §2.4b); and four more for an account with the `tasks` switch on (`tools_tasks.py`: `task_create`, which shows the task and waits for a yes, one question only (a turn where only tasks wait and nothing else was done answers with our question alone, the model's own words dropped, `loop._only_tasks`; how often said as people say it, «كل دقيقة», «كل ساعتين», «كل 3 ساعات», «every minute», `tools_tasks._span`), refusing a check that does not read and a tool outside `tasks.ALLOWED` (reads only: that list is the guard); words that ask to pay, transfer, send in his name, publish or delete (`_asks_to_act`) do not refuse, they make the yes it waits for say a task never does them (`task_confirm_reads_only`); `task_list`, `task_update` for pause, resume, a new interval and a new way of telling (`notify_how`, `notify_hours`, `notify_at`, on `task_create` too, set only from his words), all at once, and new words (`title`, `instructions`, a new `check_tool`/`check_args` that must read), which wait for a yes on the same question the Tasks screen shows (`edit_summary`), all through `tasks.edit`, the one change of a task (new words or a new check forget what it saw); the robot's call has them as the app's, `task_cancel`, which deletes only when his own words ask for it (`_DELETE`: on the real model «وقّفيها» once went to it; refused and sent back to `task_update` pause); `openai_tools(user_id)`, and on the call too, `declarations(user_id)` from the session's caller, the check's free-form arguments spelled out as the read tools' own fields since Gemini refuses an object with none (`tools._spoken_task`), the yes held and answered by `confirm` as any other, and the tasks' rule in the call's per-session context, not the cached instruction, since the switch moves no tenant version; for those accounts the prompt carries `context.TASKS_RULE`: «track…», «every hour check…», «tell me if…» is a task made at once on a best guess, a list named for what is tracked («المخزون», «Inventory») its check, and one clear question only when nothing can be checked), voice adds `confirm`, and the robot's call `end_call` (`brain/voice.END_CALL`, handled by the session, not the brain: the call closes once her goodbye has played, `_GOODBYE_MAX_S` at most, and the board reads the clean close as the end; the app has its own end button and is told to point to it; the per-call channel line says only the tool ends a call, «سكّري» alone means it, with a list item it is the list's, unclear she asks). The extra fields are named (`LOG_DATA`,
+Nineteen (`tools.py`); `page_read`, `page_fill`, `stop_everything` and `resume_everything` for an account with the `browser` switch on (`tools_browser.py`, §2.4b); and four more for an account with the `tasks` switch on (`tools_tasks.py`: `task_create`, which shows the task and waits for a yes, one question only (a turn where only tasks wait and nothing else was done answers with our question alone, the model's own words dropped, `loop._only_tasks`; how often said as people say it, «كل دقيقة», «كل ساعتين», «كل 3 ساعات», «every minute», `tools_tasks._span`), refusing a check that does not read and a tool outside `tasks.ALLOWED` (reads only: that list is the guard); words that ask to pay, transfer, send in his name, publish or delete (`_asks_to_act`) do not refuse, they make the yes it waits for say a task never does them (`task_confirm_reads_only`); `task_list`, `task_update` for pause, resume, a new interval and a new way of telling (`notify_how`, `notify_hours`, `notify_at`, on `task_create` too, set only from his words), all at once, and new words (`title`, `instructions`, a new `check_tool`/`check_args` that must read), which wait for a yes on the same question the Tasks screen shows (`edit_summary`), all through `tasks.edit`, the one change of a task (new words or a new check forget what it saw); the robot's call has them as the app's, `task_cancel`, which deletes only when his own words ask for it (`_DELETE`: on the real model «وقّفيها» once went to it; refused and sent back to `task_update` pause); `openai_tools(user_id)`, and on the call too, `declarations(user_id)` from the session's caller, the check's free-form arguments spelled out as the read tools' own fields since Gemini refuses an object with none (`tools._spoken_task`), the yes held and answered by `confirm` as any other, and the tasks' rule in the call's per-session context, not the cached instruction, since the switch moves no tenant version; for those accounts the prompt carries `context.TASKS_RULE`: «track…», «every hour check…», «tell me if…» is a task made at once on a best guess, a list named for what is tracked («المخزون», «Inventory») its check, and one clear question only when nothing can be checked), voice adds `confirm`, and the robot's call `end_call` (`brain/voice.END_CALL`, handled by the session, not the brain: the call closes once her goodbye has played, `_GOODBYE_MAX_S` at most, and the board reads the clean close as the end; the app has its own end button and is told to point to it; the per-call channel line says only the tool ends a call, «سكّري» alone means it, with a list item it is the list's, unclear she asks). The extra fields are named (`LOG_DATA`,
 `LIST_DATA`: amount, category, mood, habit days and time, repeat, qty…), never a
 free-form object, which the voice model drops. Enums come from `kinds.KINDS`, so a new
 kind needs no tool change. A field the kind does not have («time» on a task) is set aside quietly
@@ -338,7 +338,47 @@ trace. A task may check a page (`tasks.READ_TOOLS` has `page_read`; only with th
 `tools_tasks._check_allowed`, and a run with it off fails its check): a listing (five content links
 or more) is compared by its links, else by its words, both without the time that moves by itself
 («منذ دقيقتين», «2 hours ago», `web_page.for_compare`), and a result from a page that gives orders
-carries the warning line. Signing in, forms and «متصفح ساندي» are session two (`docs/AGENT_PLAN.md`).
+carries the warning line, and every page read or fill names its source at the end of the reply
+(`sources_line`, by the code, unless the reply already names it; a watched page's result too).
+
+**Session two (2 Nov 2026).** *Sites* (`features/browser_sites.py`, `sandy_browser_sites`, scoped):
+per site his `level`, `read` by default, `fill` (never sends) or `submit` (sends on his yes), and
+his sign-in: what the app sent after he signed in by hand in a web view on a store of its own
+(`BrowserLoginView`), only that site's cookies and storage (`clean_state`: known fields, the
+site's own domains, nothing named like a password), sealed with Fernet on a key derived by HKDF
+from `SANDY_LTM_KEY`, the account and the site, never kept without the key; «طلّعها» drops it.
+A sign-in page (a password field and under `LOGIN_TEXT` of text) answers with
+`sandy://browser/login?url=…`, put at the end of the reply by the code; a site with a sign-in is
+read in a Steel session of his own (`web_page.read_signed_in`: `steel_client.create_session`, his
+cookies by `Storage.setCookies` and storage by origin, `integrations/browser_cdp.py` on
+`cdp-use`), released and billed by the hour (`pricing.FEES["steel_hour"]`). *What stops it*
+(`brain/browser_guard.py`, `forbidden`): a password field, a card field, a captcha, a payment page,
+read from the page's fields, frames and address (`SNAPSHOT_JS` live, `of_html` from markup).
+*A fill* (`features/browser_job.py`, `sandy_browser_jobs`, scoped, a day): `page_fill` on a site of
+level fill or submit opens a Steel session and runs on the shared pool; our own connection puts
+the *gate* on first (`brain/browser_gate.py`: `Target.setAutoAttach` with `waitForDebuggerOnStart`
+and `Fetch.enable` on every tab; a read goes, a send right after a click or Enter to the page's own
+site is failed and kept as `held` with what was clicked, any other send is failed and logged;
+`allow_one` after his yes; no gate, no fill), then browser-use's agent with our model
+(`brain/browser_llm.SandyLLM`, every step through `background.call("browser_step")`), the site's
+domains only, `EXCLUDED` actions off (scripts, navigation, search, files), `MAX_STEPS` 15, its
+telemetry off; before each step it stops for the emergency stop, «خليني أكمّل أنا», a held send or
+a forbidden field. A held send is a `needs_confirmation` naming what he filled (read back from the
+page, never a password); his yes replays `page_fill` with the job's id (`ctx.held_ids`), sends once
+on a `submit` site (the same element clicked by its path) and reads the next page as the result; a
+`fill` site hands him the page. The tool waits `WAIT_S` (80 s); past it the fill is `detached`, and
+once it stops it leaves its question on his chat (`pending.save` on the turn's thread) and its
+result through `notify.deliver` (task id `browser:<job>`). Each action on the page is a tool on the
+fill's own background trace row (`trace_store.background(…, keep=True)`). *Live view*:
+`/api/browser/jobs/<id>/live` gives Steel's `debugUrl` with `interactive=false` (watch only) to the
+fill's owner alone, `…/takeover` stops the agent and gives it with `interactive=true`; it is kept
+sealed and never logged. *Emergency stop* (`features/stop_all.py`, `sandy_users.stopped_at`, forgotten
+by a reset): «وقّفي كل شي» by talk, the call or the app (`/api/stop`) stops every task (no run, no
+failure) and every fill (`browser_job.stop_for`), the browser's tools refuse, reminders still ring;
+one word or tap resumes. The app's Profile › Browser (`Features/Browser/`) holds the stop, the open
+fills and the sites; links in Sandy's replies are tappable (`DesignSystem/Linked.swift`), and
+`sandy://browser/login` and `/live` open their sheets (`DeepLinkRouter`). Nothing of Steel ran
+here: there is no local key, so the first real session is the acceptance test.
 
 **A result says whether it happened** (`CONVENTIONS.md` C10): `ok`, `error`,
 `reply`; `broke` when the tool raised (`tools.execute` catches it — one tool never
@@ -901,6 +941,8 @@ pending reminders) and the last STM turn ("was up late").
 | `batch.py` | Azure's batch jobs at about half the price: off unless `SANDY_BATCH_DEPLOYMENT` names a Global Batch deployment, for SCHEDULED work only; a task that is not urgent submits its model step and a later run collects it before the review, both through `background` (`call(as_batch=True)`, `collect`; `tests/test_background_callers.py` refuses a call to this module from anywhere else); a job that failed, or a submit that did, goes the ordinary way in the same run and is no failure of the task |
 | `background.py` | `call`: every model call outside a reply's own loop, the one place a limit or cost cap goes; the deployment per kind of work from `SANDY_BACKGROUND_MODELS` (the chat's own by default); every call names its `priority`: DIRECT (a time read, a web summary, an image's answer: in the caller's thread, never behind the shared pool, never a batch), BACKGROUND (summary, title, tags, category, daily nudge), SCHEDULED (a task's steps, the only kind `may_batch`); a batch is submitted by `call(as_batch=True)` while `batching` allows it and read by `collect`, its tokens in the run's trace; each call is marked with its kind of work (`trace_store.doing`) |
 | `takeback.py` | a call that would take back what the same turn did (3d), refused to the model |
+| `tools_browser.py` | the browser's tools behind its switch: `page_read`, `page_fill`, the emergency stop (§2.4b) |
+| `browser_guard.py`, `browser_gate.py`, `browser_llm.py` | what stops the browser on a page; the network gate of a fill; the model browser-use drives with (§2.4b) |
 
 The speaker gate (`SANDY_REQUIRE_SPEAKER_AUTH`, §3.2) guards the brain's
 destructive voice calls (`speaker._is_sensitive_call`).
@@ -1705,6 +1747,8 @@ Written today, and what reads it:
 - **Hardware** — `sandy_devices`, `sandy_nodes`, `sandy_device_keys`,
   `sandy_scenes`, `sandy_voiceprints`, `sandy_voice_enroll`, `sandy_firmware`, `sandy_firmware_chunks`,
   `node_pair_challenges`, `node_sightings`.
+- **The browser** — `sandy_browser_sites` (his level and sealed sign-in per site) and
+  `sandy_browser_jobs` (his fills, a day), both scoped and erased with the account (§2.4b).
 - **Everything else** — `sandy_focus`, `sandy_photos` + the `sandy_photo_files`
   GridFS bucket, `sandy_push_tokens`, `sandy_daily_nudge`, `sandy_nudge_locks`.
 
