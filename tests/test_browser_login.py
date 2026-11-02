@@ -5,7 +5,6 @@ closed and billed once read; a sign-in that ran out sends him back to sign in ag
 languages."""
 from __future__ import annotations
 
-import asyncio
 import base64
 
 import pytest
@@ -123,12 +122,6 @@ def test_a_session_is_opened_with_steels_own_time_limit(monkeypatch):
     assert steel_client.create_session() == {"id": "abc", "debug_url": "https://api.steel.dev/v1/sessions/abc/player"}
     assert sent == [("/sessions", {"timeout": steel_client.SESSION_MS})]
     assert steel_client.connect_url("abc") == "wss://connect.steel.dev?apiKey=k&sessionId=abc"
-
-
-def test_a_click_finds_its_element_by_path():
-    client = FakeCDP({"Runtime.evaluate": {"result": {"value": True}}})
-    assert asyncio.run(browser_cdp.click(client, "s1", "//form[1]/button[1]"))
-    assert '"//form[1]/button[1]"' in client.of("Runtime.evaluate")[0]["expression"]
 
 
 def test_the_link_reaches_him_whatever_the_model_writes(on, plain):

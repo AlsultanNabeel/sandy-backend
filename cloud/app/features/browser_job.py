@@ -13,9 +13,10 @@ in (`browser_sites`), the page opens, and browser-use's agent works on it with o
 (`brain/browser_llm`), the site's own domains only, at most `MAX_STEPS` steps. Before each step
 it stops for the emergency stop, his taking over, a send the gate held, or a field it must never
 touch (`brain/browser_guard`). Every action on the page is a tool on the run's trace (its own
-background row). A held send is `held`, with what he filled read back from the page, the session
-left open for his yes (`submit`: one send through the gate, the same element clicked again, the
-next page read as the result). The caller waits `WAIT_S` at most; a fill still running then is
+background row). A held send is `held` (its address, method, body and type, sealed: the body is
+his details), with what he filled read back from the page, the session left open for his yes
+(`submit`: the held send itself, once, through the gate's `replay`, and the page it answers with
+read as the result; clicking again cannot work, the failed send left an error page there). The caller waits `WAIT_S` at most; a fill still running then is
 `detached`, and once it stops its question is left on his chat (`pending`) and its result goes
 out like a task's (`notify.deliver`).
 """
@@ -48,7 +49,7 @@ LOAD_S = 20
 # The agent's actions a fill never needs: scripts of its own, files, other sites, searches.
 EXCLUDED = ("evaluate", "navigate", "search", "read_file", "replace_file", "write_file", "save_as_pdf",
             "upload_file", "close")
-_SEALED = ("summary", "result", "live")
+_SEALED = ("summary", "result", "live", "held")
 # What he filled, read back from the page: never a password or a hidden field.
 _FILLED_JS = """(() => [...document.querySelectorAll("input, select, textarea")]
   .filter((el) => !["password", "hidden", "submit", "button"].includes((el.type || "").toLowerCase()) && el.value)
@@ -93,7 +94,13 @@ def get(job_id: str) -> Optional[Dict[str, Any]]:
         return None
     if not row:
         return None
-    return {**row, "id": row["_id"], **{k: decrypt_field(row[k]) for k in _SEALED if row.get(k)}}
+    opened = {k: decrypt_field(row[k]) for k in _SEALED if row.get(k)}
+    if isinstance(opened.get("held"), str):
+        try:
+            opened["held"] = json.loads(opened["held"])
+        except ValueError:
+            opened["held"] = None
+    return {**row, "id": row["_id"], **opened}
 
 
 def _save(job_id: str, **fields: Any) -> None:
@@ -101,7 +108,8 @@ def _save(job_id: str, **fields: Any) -> None:
     coll = _coll()
     if coll is None:
         return
-    sealed = {k: encrypt_field(v) if k in _SEALED and v else v for k, v in fields.items()}
+    sealed = {k: encrypt_field(json.dumps(v) if k == "held" else v) if k in _SEALED and v else v
+              for k, v in fields.items()}
     try:
         coll.update_one({"_id": str(job_id)}, {"$set": {**sealed, "updated_at": _now()}})
     except PyMongoError:
@@ -250,11 +258,11 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str) -> D
         return str(attrs.get("name") or attrs.get("id") or attrs.get("aria-label") or getattr(node, "tag_name", ""))
 
     def on_click(event):
-        gate.acted("click", xpath=getattr(event.node, "xpath", ""))
+        gate.acted("click")
         _note("browser_click", {"element": label(event.node)})
 
     def on_type(event):
-        gate.acted("type", xpath=getattr(event.node, "xpath", ""))
+        gate.acted("type")
         _note("browser_type", {"field": label(event.node)})
 
     def on_keys(event):
@@ -263,7 +271,7 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str) -> D
         _note("browser_keys", {"keys": str(event.keys)[:20]})
 
     def on_point(event):
-        gate.acted("click", x=event.coordinate_x, y=event.coordinate_y)
+        gate.acted("click")
         _note("browser_click", {"at": [event.coordinate_x, event.coordinate_y]})
 
     # Before browser-use's own handlers: the gate knows what is about to be done.
@@ -329,19 +337,22 @@ async def _send(row: Dict[str, Any]) -> str:
     from app.integrations import browser_cdp, steel_client
     client = await browser_cdp.connect(steel_client.connect_url(row["steel_id"]))
     try:
+        held = row.get("held") or {}
+        if not held.get("url"):
+            raise RuntimeError("nothing was held")
         gate = browser_gate.Gate(row["site"])
         await browser_gate.install(client, gate)
-        gate.allow_one()
+        gate.replay(held)
         tab = await browser_cdp.first_page(client)
-        action = (row.get("held") or {}).get("action") or {}
-        if action.get("xpath") and action.get("kind") == "click":
-            if not await browser_cdp.click(client, tab, action["xpath"]):
-                raise RuntimeError("the send button is gone")
-        elif "x" in action:
-            await browser_cdp.click_at(client, tab, action["x"], action["y"])
-        else:
-            await browser_cdp.press_enter(client, tab)
+        # Back on the form's page (the failed send left an error page), the held send made again.
+        await browser_cdp.goto(client, tab, row["url"], LOAD_S)
+        answer = await browser_cdp.evaluate(client, tab, _resend_js(held))
         _note("browser_send", {"site": row["site"]})
+        if isinstance(answer, str):
+            if not gate.sent:
+                raise RuntimeError("nothing was sent")
+            return answer[:600]
+        await asyncio.sleep(1)
         await browser_cdp.settle(client, tab, LOAD_S)
         page = web_page.extract(await browser_cdp.html(client, tab), await browser_cdp.where(client, tab))
         if not gate.sent:
@@ -364,6 +375,24 @@ def open_jobs() -> List[Dict[str, Any]]:
     return [{"id": r["_id"], "site": r.get("site", ""), "status": r.get("status"),
              "created_at": r["created_at"].replace(tzinfo=r["created_at"].tzinfo or timezone.utc).isoformat()}
             for r in rows]
+
+
+_FORM_TYPES = ("", "application/x-www-form-urlencoded")
+
+
+def _resend_js(held: Dict[str, Any]) -> str:
+    """The held send made again from the form's page: a plain form as a form (the page that
+    answers it opens), anything else as a fetch with its own body and type (its answer is the
+    script's value)."""
+    url, method = json.dumps(held["url"]), json.dumps(held.get("method") or "POST")
+    body, kind = json.dumps(held.get("body") or ""), str(held.get("content_type") or "").split(";")[0].strip()
+    if kind.lower() in _FORM_TYPES:
+        return ("(() => { const f = document.createElement('form'); f.method = " + method + "; f.action = " + url
+                + "; for (const [k, v] of new URLSearchParams(" + body + ")) { const i = document.createElement('input');"
+                " i.type = 'hidden'; i.name = k; i.value = v; f.appendChild(i); } document.body.appendChild(f);"
+                " f.submit(); return true; })()")
+    return ("fetch(" + url + ", {method: " + method + ", body: " + body + ", credentials: 'include', headers: "
+            "{'Content-Type': " + json.dumps(held.get("content_type") or "") + "}}).then((r) => r.text())")
 
 
 def take_over(job_id: str) -> bool:

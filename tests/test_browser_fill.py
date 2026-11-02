@@ -53,19 +53,29 @@ def world(monkeypatch, brain_db):  # noqa: F811
                 value = w.result
             elif e == "location.href":
                 value = URL + "/thanks"
-            elif "el.click()" in e:
-                # The click sends the form: the gate sees it.
-                client.handlers["Fetch.requestPaused"]({"requestId": "r9", "resourceType": "Document",
-                                                        "request": {"method": "POST", "url": URL}}, "s1")
+            elif "f.submit()" in e:
+                # The held send made again from the form's page: through the gate.
+                client.handlers["Fetch.requestPaused"]({"requestId": "r10", "resourceType": "Document", "request": {
+                    "method": "POST", "url": URL, "postData": "name=Nabeel"}}, session)
                 value = True
             else:
                 value = True
             return {"result": {"value": value}}
         return answer
 
+    def navigate(client):
+        def answer(params, session):
+            # Opening a page goes through the gate first, as on the wire.
+            if "Fetch.requestPaused" in client.handlers:
+                client.handlers["Fetch.requestPaused"]({"requestId": "r9", "resourceType": "Document",
+                                                        "request": {"method": "GET", "url": params["url"]}}, session)
+            return {}
+        return answer
+
     async def connect(url):
         client = FakeCDP()
         client.answers["Runtime.evaluate"] = evaluate(client)
+        client.answers["Page.navigate"] = navigate(client)
         w.clients.append(client)
         return client
 
@@ -76,10 +86,10 @@ def world(monkeypatch, brain_db):  # noqa: F811
             if now.get("status") in (browser_job.STOPPED, browser_job.HANDED):
                 return {"status": now["status"]}
             await asyncio.sleep(0.05)
-        gate.acted("type", xpath="//input[1]")
+        gate.acted("type")
         gate.decide("POST", "https://forms.example.com/validate", "XHR")
-        gate.acted("click", xpath="//form/button[1]")
-        gate.decide("POST", URL, "Document")
+        gate.acted("click")
+        gate.decide("POST", URL, "Document", body="name=Nabeel", content_type="application/x-www-form-urlencoded")
         return {"status": browser_job.DONE, "result": ""}
 
     monkeypatch.setattr(browser_cdp, "connect", connect)
@@ -125,7 +135,10 @@ def test_the_send_waits_for_his_yes_and_then_goes_once(world, language):
     done = _fill(language, confirmed_job=job)
     assert done["ok"] and "application 77 was received" in done["reply"]
     sender = world.clients[-1]
-    assert sender.of("Fetch.continueRequest") == [{"requestId": "r9"}]
+    # His yes is the held send made again from the form's page, let through once.
+    resent = [p["expression"] for p in sender.of("Runtime.evaluate") if "f.submit()" in p["expression"]]
+    assert len(resent) == 1 and '"name=Nabeel"' in resent[0]
+    assert {"requestId": "r10"} in sender.of("Fetch.continueRequest")
     assert _job(job)["status"] == browser_job.DONE and world.released == ["st1"]
 
 
@@ -283,4 +296,16 @@ def test_the_real_agent_is_built_on_our_model_the_sites_domains_and_the_gate(mon
                                         events.ClickCoordinateEvent}
     # A click the agent is about to make is the gate's to know.
     dict(handlers)[events.ClickElementEvent](NS(node=NS(xpath="//button[1]", attributes={"name": "go"})))
-    assert gate.last == {"kind": "click", "xpath": "//button[1]"}
+    assert gate.last == {"kind": "click"}
+
+
+def test_the_held_send_is_sealed_at_rest(world, brain_db):  # noqa: F811
+    _level("submit")
+    asked = _fill("en")
+    row = brain_db[browser_job.COLLECTION].find_one({"_id": asked["ids"][0]})
+    assert "Nabeel" not in str(row["held"]) and _job(asked["ids"][0])["held"]["body"] == "name=Nabeel"
+
+
+def test_a_send_that_is_not_a_plain_form_is_made_again_as_a_fetch_with_its_own_body():
+    js = browser_job._resend_js({"method": "POST", "url": URL, "body": '{"a": 1}', "content_type": "application/json"})
+    assert js.startswith("fetch(") and '"application/json"' in js and '"{\\"a\\": 1}"' in js
