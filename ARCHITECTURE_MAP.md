@@ -357,18 +357,25 @@ read from the page's fields, frames and address (`SNAPSHOT_JS` live, `of_html` f
 *A fill* (`features/browser_job.py`, `sandy_browser_jobs`, scoped, a day): `page_fill` on a site of
 level fill or submit opens a Steel session and runs on the shared pool; our own connection puts
 the *gate* on first (`brain/browser_gate.py`: `Target.setAutoAttach` with `waitForDebuggerOnStart`
-and `Fetch.enable` on every tab; a read goes, a send right after a click or Enter to the page's own
-site is failed and kept as `held` with what was clicked, any other send is failed and logged;
-`allow_one` after his yes; no gate, no fill), then browser-use's agent with our model
+and `Fetch.enable` on every tab, once per tab: two gates on one tab judged each request twice; a
+read goes, a send right after a click or Enter to the page's own site is failed and kept as `held`,
+its address, method, body and type, sealed on the job row; any other send is failed and logged;
+no gate, no fill), then browser-use's agent with our model
 (`brain/browser_llm.SandyLLM`, every step through `background.call("browser_step")`), the site's
 domains only, `EXCLUDED` actions off (scripts, navigation, search, files), `MAX_STEPS` 15, its
 telemetry off; before each step it stops for the emergency stop, «خليني أكمّل أنا», a held send or
 a forbidden field. A held send is a `needs_confirmation` naming what he filled (read back from the
-page, never a password); his yes replays `page_fill` with the job's id (`ctx.held_ids`), sends once
-on a `submit` site (the same element clicked by its path) and reads the next page as the result; a
-`fill` site hands him the page. The tool waits `WAIT_S` (80 s); past it the fill is `detached`, and
-once it stops it leaves its question on his chat (`pending.save` on the turn's thread) and its
-result through `notify.deliver` (task id `browser:<job>`). Each action on the page is a tool on the
+page, or from the held send itself when the failed send left an error page there; never a field
+named like a password, a card or a secret); his yes replays `page_fill` with the job's id
+(`ctx.held_ids`) and, on a `submit` site, opens the form's page again and makes the held send from
+it (`_resend_js`: a plain form rebuilt from its fields and submitted, anything else a fetch with
+its own body and type), which the gate's `replay` lets through once; the page that answers is the
+result. A `fill` site hands him the page. His «no», a new request instead of an answer, or a second
+unclear one closes the session at once (`confirm.let_go`, `tools.LET_GO`), in the chat and on the
+call. Every call to the browser has `browser_cdp.CALL_S` (20 s) at most. The tool waits `WAIT_S` (80 s); past it the fill is `detached`, and
+once it stops it tells him in the chat he asked from (`conversations_api.say_in`: its question,
+kept as the thread's `pending` so his next message answers it, or its result) and on his phone;
+never as a task's result. Each action on the page is a tool on the
 fill's own background trace row (`trace_store.background(…, keep=True)`). *Live view*:
 `/api/browser/jobs/<id>/live` gives Steel's `debugUrl` with `interactive=false` (watch only) to the
 fill's owner alone, `…/takeover` stops the agent and gives it with `interactive=true`; it is kept
@@ -377,8 +384,16 @@ by a reset): «وقّفي كل شي» by talk, the call or the app (`/api/stop`)
 failure) and every fill (`browser_job.stop_for`), the browser's tools refuse, reminders still ring;
 one word or tap resumes. The app's Profile › Browser (`Features/Browser/`) holds the stop, the open
 fills and the sites; links in Sandy's replies are tappable (`DesignSystem/Linked.swift`), and
-`sandy://browser/login` and `/live` open their sheets (`DeepLinkRouter`). Nothing of Steel ran
-here: there is no local key, so the first real session is the acceptance test.
+`sandy://browser/login` and `/live` open their sheets (`DeepLinkRouter`). *Proven on Steel* (2 Nov 2026, `scripts/steel_live_check.py --fill`, 9/9): a script's form submit,
+a script's fetch and a new tab's send are blocked; a click on send is held with its body; his yes
+sends it once and the page answers; a second send is held; the live view opens; a whole fill on the
+real model is held and then sent once (eighty seconds, at the edge of `WAIT_S`). Steel refuses its
+key in a header on the connect address, so the key is in the address and every log record is
+redacted as it is made (`bootstrap.install_redaction`: any query field named key, token, secret,
+password, signature or auth, from any library). *Slug* (measured the same day, Linux wheels):
+browser-use adds about 44 MB compressed (97 MB of dependencies against 53), the whole near 130 MB of
+Heroku's 500; no browser comes with it, and the agent is only ever given Steel's session
+(`tests/test_no_local_browser.py`).
 
 **A result says whether it happened** (`CONVENTIONS.md` C10): `ok`, `error`,
 `reply`; `broke` when the tool raised (`tools.execute` catches it — one tool never
