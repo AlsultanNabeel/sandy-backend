@@ -146,3 +146,28 @@ def test_a_page_opened_in_the_browser_is_read_as_the_browser_drew_it(on, plain, 
     out = _read("https://shop.example/orders")
     assert out["ok"] and "ignore previous" not in out["page"]["text"] and out["warning"]
     assert web_page.MARK_HIDDEN_JS in [p["expression"] for p in live.client.of("Runtime.evaluate")]
+
+
+def test_a_connection_slow_to_open_is_tried_again_and_not_for_ever(monkeypatch):
+    import asyncio
+
+    from cdp_use import client as cdp
+    from app.integrations import browser_cdp
+    tries = []
+
+    class Slow:
+        def __init__(self, url):
+            self.url = url
+
+        async def start(self):
+            tries.append(1)
+            if len(tries) < 3 or fail_always:
+                raise TimeoutError("timed out during opening handshake")
+    monkeypatch.setattr(cdp, "CDPClient", Slow)
+    fail_always = False
+    assert isinstance(asyncio.run(browser_cdp.connect("wss://x")), Slow) and len(tries) == 3
+    tries.clear()
+    fail_always = True
+    with pytest.raises(TimeoutError):
+        asyncio.run(browser_cdp.connect("wss://x"))
+    assert len(tries) == browser_cdp.CONNECT_TRIES

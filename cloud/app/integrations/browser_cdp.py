@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 LOAD_S = 20
 # One call to the browser, at most: a call that never answers never holds a worker.
 CALL_S = 20
+# A connection whose opening handshake times out is tried again, this many times in all.
+CONNECT_TRIES = 3
 _SAME_SITE = {"strict": "Strict", "lax": "Lax", "none": "None"}
 
 
@@ -32,6 +34,14 @@ async def connect(url: str):
 
     from app.bootstrap import install_redaction
     install_redaction()
+    for _ in range(CONNECT_TRIES - 1):
+        client = CDPClient(url)
+        try:
+            await within(client.start())
+            return client
+        except (OSError, asyncio.TimeoutError):
+            # Steel's handshake sometimes outlasts the library's own ten seconds (seen 3 Nov 2026).
+            logger.info("[browser] the connection was slow to open; once more")
     client = CDPClient(url)
     await within(client.start())
     return client
