@@ -242,7 +242,10 @@ async def frame_checks(session_id: str) -> list:
             found = await client.send.Runtime.evaluate(params={"expression": FRAME_BUTTON_JS}, session_id=tab)
             node = (await client.send.DOM.describeNode(params={"objectId": found["result"]["objectId"]},
                                                        session_id=tab))["node"]["backendNodeId"]
-            out = await browser_job._act({"_id": "live", "site": "httpbin.org"}, gate, client, tab,
+            # On the gate's own session of the tab, as a fill does (`_hold`).
+            target = next(t["targetId"] for t in (await client.send.Target.getTargets())["targetInfos"]
+                          if t.get("type") == "page")
+            out = await browser_job._act({"_id": "live", "site": "httpbin.org"}, gate, client, gate.sessions[target],
                                          {"kind": "click", "node": node, "label": "submit"})
             where = await browser_cdp.evaluate(client, tab, FRAME_ANSWERED_JS)
             if covered:
