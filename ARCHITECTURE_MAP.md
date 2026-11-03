@@ -391,8 +391,9 @@ once closed (`open_jobs`, `live_url`). *The gate* (`brain/browser_gate.py`) is t
 safety net under it, our own connection: every target, tabs now and every tab, frame and worker
 later (`Target.setAutoAttach` with `waitForDebuggerOnStart` on the browser and on each target),
 has `Fetch.enable`, no websocket or peer connection in its scripts (`NO_SOCKETS_JS`, before the
-page's own, `Page.enable` first or it never runs), websockets blocked and watched. The page's own
-site: reads go, after his yes exactly one send goes, the first from the tab and frame the click
+page's own, `Page.enable` first or it never runs), websockets blocked and watched. The page's own site (told by the public suffix list,
+`publicsuffixlist` bundled and its private part too, so `a.netlify.app`, `b.github.io` and
+`c.herokuapp.com` are each a site of their own): reads go, after his yes exactly one send goes, the first from the tab and frame the click
 lands in once it is made (`approve`, the frame from `DOM.getNodeForLocation`), and the gate shuts
 behind it (`shut`, also when nothing went); a request right after a click or a key the agent made
 (`acted`, `SENDING`: a click, an Enter, any key) is held (`HOLD`, kept paused and never answered,

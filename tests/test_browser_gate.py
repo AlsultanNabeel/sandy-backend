@@ -138,6 +138,17 @@ def test_his_yes_never_lets_a_value_go_to_another_site():
                        frame="f1") == G.STOP
 
 
+@pytest.mark.parametrize("site, other, same", [
+    ("forms.example.com", "https://api.example.com/x", True),
+    ("shop.example.co.uk", "https://pay.example.co.uk/x", True),
+    ("mine.netlify.app", "https://theirs.netlify.app/x", False),
+    ("me.github.io", "https://you.github.io/x", False),
+    ("app-1.herokuapp.com", "https://app-2.herokuapp.com/x", False),
+    ("example.co.uk", "https://other.co.uk/x", False)])
+def test_the_same_site_is_told_by_the_public_suffix_list(site, other, same):
+    assert (G.root_of(other) == G.Gate(site).site) is same
+
+
 def test_what_never_reaches_the_network_goes():
     assert _gate().decide("GET", "data:image/png;base64,Nabeel Alsultan", "Image") == G.GO
 

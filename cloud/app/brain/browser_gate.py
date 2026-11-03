@@ -27,6 +27,8 @@ him. A gate that cannot be put on (`GateError`) means no fill at all.
 from __future__ import annotations
 
 import asyncio
+import functools
+import ipaddress
 import logging
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import quote, quote_plus, unquote_plus, urlsplit
@@ -54,7 +56,6 @@ NO_SOCKETS_JS = """(() => { const no = function () { throw new DOMException("blo
     try { Object.defineProperty(globalThis, name, {value: no, writable: false, configurable: false}); } catch (e) {} }
 })()"""
 _FRAMES = ("page", "iframe")
-_SECOND_LEVEL = {"co", "com", "org", "net", "gov", "edu", "ac"}
 
 
 def _wire_errors() -> Tuple[type, ...]:
@@ -69,12 +70,23 @@ class GateError(RuntimeError):
     """The gate could not be put on the session: the fill does not run."""
 
 
+@functools.lru_cache(maxsize=1)
+def _suffixes():
+    from publicsuffixlist import PublicSuffixList
+    # The list's private part too: «a.netlify.app» and «b.netlify.app» are two sites.
+    return PublicSuffixList()
+
+
 def _root(host: str) -> str:
-    """The site a host belongs to, near enough: «forms.example.com» → «example.com»,
-    «shop.example.co.uk» → «example.co.uk»."""
-    labels = (host or "").lower().rstrip(".").split(".")
-    take = 3 if len(labels) >= 3 and len(labels[-1]) == 2 and labels[-2] in _SECOND_LEVEL else 2
-    return ".".join(labels[-take:])
+    """The site a host belongs to, by the public suffix list: «forms.example.com» → «example.com»,
+    «shop.example.co.uk» → «example.co.uk», «a.netlify.app» → itself; an address is its own."""
+    host = (host or "").lower().rstrip(".")
+    try:
+        ipaddress.ip_address(host.strip("[]"))
+        return host
+    except ValueError:
+        pass
+    return _suffixes().privatesuffix(host) or host
 
 
 def root_of(url: str) -> str:
