@@ -155,9 +155,10 @@ def opened(event: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def seq_at(at) -> int:
-    """Where his log was at ``at`` (0 before his first event)."""
+    """Where his log was just before ``at`` (0 before his first event): what is written in that
+    same millisecond is after it."""
     coll = _base.coll(EVENTS)
-    row = coll.find_one({"at": {"$lte": at}}, sort=[("seq", -1)]) if coll is not None else None
+    row = coll.find_one({"at": {"$lt": at}}, sort=[("seq", -1)]) if coll is not None else None
     return int((row or {}).get("seq") or 0)
 
 

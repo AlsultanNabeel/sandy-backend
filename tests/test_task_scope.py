@@ -288,3 +288,15 @@ def test_a_task_paused_past_the_logs_days_starts_afresh_and_says_so(world, langu
     _run(doc)
     assert world.sent[-1] == ("انضاف «خبز» لـ«قائمة التسوق»" if language == "ar"
                               else "«خبز» was added to «Shopping list»")
+
+
+def test_what_he_adds_in_the_same_moment_the_task_is_made_is_news(world):
+    # A fast machine writes both in one millisecond (CI, 3 Nov 2026): it is after the task, not before.
+    doc = _task({"tool": "recall", "args": {"list": "shopping"}})
+    with active_user_profile_context(A):
+        tasks.save_state(doc["id"], {"last_seen": {"rows": []}, "fingerprint": "x"})
+        items.add("shopping", "رمان")
+        at = world.db["sandy_events"].find_one(sort=[("seq", -1)])["at"]
+        world.db["sandy_schedules"].update_one({"_id": doc["id"]}, {"$set": {"created_at": at}})
+    _run(schedules_get(doc["id"]))
+    assert world.sent == ["انضاف «رمان» لـ«قائمة التسوق»"]
