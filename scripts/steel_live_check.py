@@ -51,6 +51,8 @@ FRAME_JS = """new Promise((done) => { const f = document.createElement("iframe")
 POST_OTHER_JS = """fetch("https://httpbingo.org/post", {method: "POST", body: "x=1", mode: "no-cors"})
   .then(() => "sent").catch(() => "blocked")"""
 BUTTON_JS = "document.querySelector('form button')"
+LINK_JS = """(() => { const a = document.createElement("a"); a.id = "go"; a.href = "/get?name=Sandy+Test";
+  a.textContent = "next"; document.body.prepend(a); return true; })()"""
 # Hidden only as drawn: rules put in by script (the markup shows an empty style), off the page,
 # white on white, of no size, inside a transparent box; and words that are shown.
 HIDE_JS = """(() => { const st = document.createElement("style"); document.head.appendChild(st);
@@ -169,30 +171,34 @@ async def gate_checks(session_id: str) -> list:
         results.append(report("a second send is not let through", len(gate.sent) == before
                               and not await browser_cdp.evaluate(client, tab, ANSWERED_JS)))
 
-        # 9. Once she typed, a read a click makes (a link with its query) is held, kept paused (the
-        # page frozen meanwhile); his yes lets that very request go, twenty seconds later; on a
-        # fill-only site it is answered with nothing and the page stays as it was.
+        # 9. Once she typed, a read a click makes (a link with its query) is held: answered at once
+        # with nothing, so the page stays as it was and can be read at once; on a fill-only site
+        # that is all; his yes makes that same click again, and that read goes.
         for fill_only in (True, False):
             await browser_cdp.goto(client, tab, FORM)
-            await browser_cdp.evaluate(client, tab, FILL_JS)
+            await browser_cdp.evaluate(client, tab, FILL_JS + " && " + LINK_JS)
+            found = await client.send.Runtime.evaluate(params={"expression": "document.getElementById('go')"},
+                                                       session_id=tab)
+            link = (await client.send.DOM.describeNode(params={"objectId": found["result"]["objectId"]},
+                                                       session_id=tab))["node"]["backendNodeId"]
+            gate.asked = None
             gate.acted("type", "Sandy Test")
-            gate.acted("click")
-            await browser_cdp.evaluate(client, tab, "location.href = '/get?name=Sandy+Test'; true")
-            await asyncio.sleep(20 if not fill_only else 3)
-            paused = dict(gate.paused or {})
-            results.append(report("a read a click made once she typed is held", "/get?name=" in paused.get("url", "")))
-            if fill_only:
-                await browser_job._nothing(client, gate.drop_paused())
-                await asyncio.sleep(1)
-                kept = await browser_cdp.evaluate(client, tab, "location.pathname + ' ' + document.forms[0].custname.value")
-                results.append(report("on a fill-only site it goes nowhere and the page stays, filled",
-                                      kept == "/forms/post Sandy Test", str(kept)))
-            else:
-                out = await browser_job._act(row, gate, client, paused.get("session") or tab,
-                                             {"kind": "request", "label": "get"})
+            gate.acted("click", target=target, node=link)
+            await browser_cdp.evaluate(client, tab, "document.getElementById('go').click(); true")
+            await asyncio.sleep(3)
+            held = dict(gate.asked or {})
+            results.append(report("a read a click made once she typed is held", "/get?name=" in held.get("url", "")))
+            began = time.monotonic()
+            kept = await browser_cdp.evaluate(client, tab, "location.pathname + ' ' + document.forms[0].custname.value")
+            results.append(report("answered with nothing at once, the page stays, filled, and is read at once",
+                                  kept == "/forms/post Sandy Test" and time.monotonic() - began < 5, str(kept)))
+            if not fill_only:
+                out = await browser_job._act(row, gate, client, gate.sessions[target],
+                                             {"kind": "click", "target": target, "node": link, "label": "get"})
                 now = await browser_cdp.where(client, tab)
-                results.append(report("his yes lets that very request go", out.get("status") == browser_job.DONE
-                                      and "/get?name=" in now, f"{out.get('status')} {out.get('reason', '')} {now[-20:]}"))
+                results.append(report("his yes makes that click again and that read goes",
+                                      out.get("status") == browser_job.DONE and "/get?name=" in now,
+                                      f"{out.get('status')} {out.get('reason', '')} {now[-20:]}"))
             gate.last = None
 
         # 8. A tab opened later: the gate is on it before it loads.

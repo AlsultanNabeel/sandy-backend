@@ -100,9 +100,10 @@ def test_a_send_after_a_click_or_a_key_is_held_for_him_and_the_next_blocked(kind
     held = []
     gate = _gate()
     gate.on_hold = held.append
-    gate.acted(kind)
+    gate.acted(kind, target="t1", node=7)
     assert gate.decide("POST", URL_A, "Document", session="s1", request="r1") == G.HOLD
-    assert held == [{"session": "s1", "request": "r1", "method": "POST", "url": URL_A}] and gate.breach is None
+    assert held == [{"session": "s1", "request": "r1", "method": "POST", "url": URL_A,
+                     "action": {"kind": kind, "target": "t1", "node": 7}}] and gate.breach is None
     assert gate.decide("POST", URL_A + "/2", "XHR", session="s1", request="r2") == G.BLOCK
 
 
@@ -113,7 +114,7 @@ def test_once_she_typed_even_a_read_after_a_click_is_held(method, url, kind):
     gate = _gate()
     gate.acted("type", "Nabeel")
     gate.acted("click")
-    assert gate.decide(method, url, kind, request="r1") == G.HOLD and gate.paused["url"] == url
+    assert gate.decide(method, url, kind, request="r1") == G.HOLD and gate.asked["url"] == url
 
 
 def test_what_a_page_loads_after_a_click_goes_and_a_read_before_she_typed_goes():
@@ -123,15 +124,7 @@ def test_what_a_page_loads_after_a_click_goes_and_a_read_before_she_typed_goes()
     gate.acted("type", "Nabeel")
     gate.acted("click")
     assert gate.decide("GET", "https://forms.example.com/logo.png", "Image", request="r2") == G.GO
-    assert gate.paused is None
-
-
-def test_his_yes_on_the_held_request_lets_it_go_once():
-    gate = _gate()
-    gate.acted("click")
-    gate.decide("POST", URL_A, "Document", session="s1", request="r1")
-    assert gate.let_paused()["request"] == "r1" and gate.sent == [("POST", URL_A)]
-    assert gate.let_paused() is None
+    assert gate.asked is None
 
 
 def test_after_his_yes_one_send_goes_from_his_tab_and_frame_and_the_gate_shuts():
@@ -254,17 +247,20 @@ def test_a_paused_request_is_answered_as_the_gate_decides():
     assert gate.breach == G.LEAK
 
 
-def test_a_held_request_is_kept_paused_never_answered():
+def test_a_held_request_is_answered_at_once_with_nothing_never_kept_waiting():
+    """A request kept waiting in the browser freezes its page, and goes the moment our connection
+    drops: it is answered with nothing at once, and he is asked about the action that made it."""
     client = FakeCDP()
     gate = _gate()
 
     async def flow():
         await G.install(client, gate)
-        gate.acted("click")
+        gate.acted("click", target="t1", node=7)
         await client.fire("Fetch.requestPaused", {"requestId": "r1", "resourceType": "Document",
                                                   "request": {"method": "POST", "url": URL_A}}, "s1")
     asyncio.run(flow())
-    assert gate.paused["request"] == "r1"
+    assert gate.asked["request"] == "r1" and gate.asked["action"] == {"kind": "click", "target": "t1", "node": 7}
+    assert client.of("Fetch.fulfillRequest") == [{"requestId": "r1", "responseCode": 204, "responseHeaders": []}]
     assert client.of("Fetch.continueRequest") == [] and client.of("Fetch.failRequest") == []
 
 
@@ -303,4 +299,4 @@ def test_what_a_click_made_is_told_only_for_a_while_after_it(monkeypatch):
     gate = _gate()
     gate.acted("click")
     monkeypatch.setattr(G.time, "monotonic", lambda: gate.acted_at + G.ACTED_S + 1)
-    assert gate.decide("POST", URL_A, "XHR", request="r1") == G.BLOCK and gate.paused is None
+    assert gate.decide("POST", URL_A, "XHR", request="r1") == G.BLOCK and gate.asked is None

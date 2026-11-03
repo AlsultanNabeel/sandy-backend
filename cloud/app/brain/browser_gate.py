@@ -10,10 +10,12 @@ before the page's own), websockets blocked (`Network.setBlockedURLs`) and watche
 
   * the page's own site: a read goes; after his yes (`approve`) exactly one send goes, the first
     from the tab and frame he said yes to once the click is made, and the gate shuts behind it;
-    a request right after a click or a key the agent made (`acted`) is held, kept paused and not
-    answered, and the fill asks him about it (`HOLD`, `on_hold`): any send, and once Sandy typed
-    a value any read too (a link with its query, a script's fetch), what a page loads aside; any
-    other send is failed and logged;
+    a request right after a click or a key the agent made (`acted`) is held (`HOLD`): answered at
+    once with nothing (204), so it never waits in the browser and the page stays as it was, and
+    the fill asks him about it (`on_hold`), the action that made it kept (`action`) so his yes
+    makes that same action again: any send, and once Sandy typed a value any read too (a link
+    with its query, a script's fetch), what a page loads aside; any other send is failed and
+    logged;
   * another site: what a page loads goes (a script, a style, a font, an image, media, by GET);
     anything that sends (a fetch, a beacon, a form, a frame, any method but GET) is failed and
     logged;
@@ -217,11 +219,14 @@ class Gate:
         self.wrote = False
         # A page he took over: what he sends to its own site goes (`browser_job._handing`).
         self.his = False
-        # The one request held for him ({session, request, method, url}) and who is told of it.
-        self.paused: Optional[Dict[str, str]] = None
+        # The agent's last action on an element ({kind, target, node}): what his yes makes again.
+        self.action: Optional[Dict[str, Any]] = None
+        # The one request he is asked about ({session, request, method, url, action}), answered
+        # with nothing already, and who is told of it.
+        self.asked: Optional[Dict[str, Any]] = None
         # What he filled, read before the agent's last click or key (a held page cannot be read).
         self.filled: List[Dict[str, Any]] = []
-        self.on_hold: Optional[Callable[[Dict[str, str]], None]] = None
+        self.on_hold: Optional[Callable[[Dict[str, Any]], None]] = None
         # The tab and frame whose one send his yes lets through, until it goes (`approve`).
         self.armed: Optional[Tuple[str, str]] = None
         self.breach: Optional[str] = None
@@ -231,10 +236,12 @@ class Gate:
         # Each page's own session on our connection, by its target (the real click is made there).
         self.sessions: Dict[str, str] = {}
 
-    def acted(self, kind: str, text: str = "") -> None:
+    def acted(self, kind: str, text: str = "", *, target: str = "", node: Optional[int] = None) -> None:
         """What the model just did on the page: «click», «enter», «keys» or «type» (with what it
-        typed)."""
+        typed), on the element ``node`` of the tab ``target`` when it is known."""
         self.last, self.acted_at = kind, time.monotonic()
+        if node is not None:
+            self.action = {"kind": kind, "target": str(target or ""), "node": node}
         if kind == "type":
             self.wrote = True
             self.watch(text)
@@ -245,18 +252,6 @@ class Gate:
         if len(whole) >= MIN_TYPED:
             self.typed.add(whole)
         self.typed.update(word for word in whole.split() if len(word) >= MIN_WORD)
-
-    def drop_paused(self) -> Optional[Dict[str, str]]:
-        """The held request, never to go (a fill-only site's)."""
-        paused, self.paused = self.paused, None
-        return paused
-
-    def let_paused(self) -> Optional[Dict[str, str]]:
-        """His yes on the held request: it goes, once."""
-        paused, self.paused = self.paused, None
-        if paused is not None:
-            self.sent.append((paused["method"], paused["url"]))
-        return paused
 
     def approve(self, session: str, frame: str) -> None:
         """His yes, made as the click is: the first send to its own site from this tab
@@ -276,15 +271,16 @@ class Gate:
                 self.on_breach(why)
 
     def _hold(self, method: str, url: str, session: str, request: str) -> str:
-        """A request the agent's click or key made: held for him, the first one; any after it
-        while he is asked is blocked."""
-        if self.paused is not None or not request:
+        """A request the agent's click or key made: held for him, the first one (answered with
+        nothing, the action that made it kept); any after it while he is asked is blocked."""
+        if self.asked is not None or not request:
             self.blocked.append((method, url))
             return BLOCK
-        self.paused = {"session": str(session or ""), "request": str(request), "method": method, "url": url}
+        self.asked = {"session": str(session or ""), "request": str(request), "method": method, "url": url,
+                      "action": self.action}
         logger.info("[browser] a request was held for him: %s", urlsplit(url).hostname)
         if self.on_hold is not None:
-            self.on_hold(self.paused)
+            self.on_hold(self.asked)
         return HOLD
 
     def _carries(self, url: str, body: str) -> bool:
@@ -355,9 +351,12 @@ async def install(client, gate: Gate) -> None:
                               body=str(request.get("postData") or ""), session=str(session or ""),
                               frame=str(event.get("frameId") or ""), request=str(rid or ""))
         if verdict == HOLD:
-            # Kept paused, not answered: his yes lets this very request go (`let_paused`).
-            return
-        if verdict == GO:
+            # Never kept waiting in the browser (a page whose request waits is frozen, and the
+            # request would go the moment our connection dropped): answered with nothing, it goes
+            # nowhere and the page stays as it was; his yes makes the action that made it again.
+            reply = client.send.Fetch.fulfillRequest(params={"requestId": rid, "responseCode": 204,
+                                                             "responseHeaders": []}, session_id=session)
+        elif verdict == GO:
             reply = client.send.Fetch.continueRequest(params={"requestId": rid}, session_id=session)
         else:
             logger.info("[browser] a request was %s: %s", "stopped" if verdict == STOP else "blocked",

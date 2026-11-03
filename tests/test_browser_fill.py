@@ -407,8 +407,10 @@ def test_the_real_agent_is_built_on_our_model_the_sites_domains_and_the_gate(mon
     # A click by place is refused before it is made: nothing listens for one.
     assert {k for k, _ in handlers} == {events.ClickElementEvent, events.TypeTextEvent, events.SendKeysEvent}
     # A click the agent is about to make is the gate's to know.
-    dict(handlers)[events.ClickElementEvent](NS(node=NS(xpath="//button[1]", attributes={"name": "go"})))
-    assert gate.last == "click"
+    dict(handlers)[events.ClickElementEvent](NS(node=NS(xpath="//button[1]", attributes={"name": "go"},
+                                                        target_id="t1", backend_node_id=7)))
+    # ...and the element it is made on, what his yes would click again.
+    assert gate.last == "click" and gate.action == {"kind": "click", "target": "t1", "node": 7}
 
 
 # ── A no closes the session at once ──
@@ -876,7 +878,7 @@ def _clicks_through(row, gate, client, tab, user_id, asked):
     async def run():
         gate.acted("type", "Nabeel")
         gate.filled = [{"field": "Name", "value": "Nabeel"}]       # read before the click (`_Asking`)
-        gate.acted("click")    # on something that was not known to send: a link, a plain element
+        gate.acted("click", target="t1", node=7)    # on what was not known to send: a link, a plain element
         client.handlers["Fetch.requestPaused"]({"requestId": "r20", "resourceType": "Document", "frameId": "f1",
                                                 "request": {"method": "GET", "url": URL + "/next?name=Nabeel"}}, "s1")
         await asyncio.sleep(5)
@@ -884,16 +886,22 @@ def _clicks_through(row, gate, client, tab, user_id, asked):
     return run()
 
 
-def test_a_request_a_click_made_is_held_and_his_yes_lets_that_one_go(world, monkeypatch):
+def test_a_request_a_click_made_is_answered_at_once_and_his_yes_makes_that_click_again(world, monkeypatch):
     _level("submit")
     monkeypatch.setattr(browser_job, "AGENT", _clicks_through)
     asked = _fill("en")
     assert asked.get("needs_confirmation") and "Name: Nabeel" in asked["summary"], asked
     [holder] = world.clients
-    assert {"requestId": "r20"} not in holder.of("Fetch.continueRequest")
+    # Never kept waiting in the browser while he is asked: answered with nothing, it went nowhere.
+    nothing = {"requestId": "r20", "responseCode": 204, "responseHeaders": []}
+    assert holder.of("Fetch.fulfillRequest") == [nothing]
     done = _fill("en", confirmed_job=asked["ids"][0])
     assert done["ok"] and "application 77" in done["reply"]
-    assert ("Fetch.continueRequest", {"requestId": "r20"}, "s1") in holder.sent and world.pressed == []
+    # His yes: the same click again, on the same element, its one send let through.
+    assert {"requestId": "r20"} not in holder.of("Fetch.continueRequest")
+    assert [kind for kind, _ in world.pressed] == ["mouseMoved", "mousePressed", "mouseReleased"]
+    assert {"requestId": "r10"} in holder.of("Fetch.continueRequest")
+    assert {"requestId": "r11", "errorReason": "BlockedByClient"} in holder.of("Fetch.failRequest")
 
 
 def test_on_a_fill_only_site_the_held_request_never_goes(world, monkeypatch):
@@ -904,7 +912,7 @@ def test_on_a_fill_only_site_the_held_request_never_goes(world, monkeypatch):
     [holder] = world.clients
     assert {"requestId": "r20"} not in holder.of("Fetch.continueRequest")
     assert not [p for p in holder.of("Fetch.failRequest") if p["requestId"] == "r20"]
-    # Answered with nothing: it goes nowhere and the page, frozen while it was held, stays as it was.
+    # Answered with nothing: it goes nowhere and the page stays as it was.
     assert {"requestId": "r20", "responseCode": 204, "responseHeaders": []} in holder.of("Fetch.fulfillRequest")
 
 

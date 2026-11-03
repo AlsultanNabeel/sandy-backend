@@ -402,14 +402,17 @@ page's own, `Page.enable` first or it never runs), websockets blocked and watche
 `c.herokuapp.com` are each a site of their own): reads go, after his yes exactly one send goes, the first from the tab and frame the click
 lands in once it is made (`approve`, the frame from `DOM.getNodeForLocation`), and the gate shuts
 behind it (`shut`, also when nothing went); a request right after a click or a key the agent made
-(`acted`, `SENDING`: a click, an Enter, any key, for `ACTED_S` (ten seconds) after it) is held (`HOLD`, kept paused and never answered,
-`gate.paused`), the agent stops (`on_hold`) and he is asked as for a click (`asked.kind` «request»):
-any send, and once Sandy typed (`wrote`) any read too (a link with its query, a script's fetch),
-what a page loads aside; his yes lets that very request go once (`let_paused`, `Fetch.continueRequest`),
-on a fill-only site it never goes and is answered with nothing (204, `_nothing`) so the page stays as
-it was, filled. A page whose request is held is frozen until it is answered (on Chrome and Steel,
-3 Nov 2026: not even read), so what he filled is read before each click or key of the agent
-(`gate.filled`); any other send is blocked. Another site: what
+(`acted`, `SENDING`: a click, an Enter, any key, for `ACTED_S` (ten seconds) after it) is held (`HOLD`, `gate.asked`): answered at once
+with nothing (204, `Fetch.fulfillRequest`), never kept waiting in the browser (a waiting request
+freezes its page and would go the moment our connection dropped), so it goes nowhere and the page
+stays as it was; the agent stops (`on_hold`) and he is asked about the action that made it
+(`gate.action`, the agent's last element: a click, a key, a typed value): any send, and once Sandy
+typed (`wrote`) any read too (a link with its query, a script's fetch), what a page loads aside; his
+yes makes that same action again on that same element under his yes (`_act`: the real click,
+Enter, or the field telling its change again, `_CHANGED_JS`), with no element nothing goes
+(«moved»); on a fill-only site that is all, the page handed to him filled. What he filled is read
+before each click or key of the agent (`gate.filled`: a page may empty its form on the answer);
+any other send is blocked. Another site: what
 a page loads goes (script, style, font, image, media, by GET), anything that sends is blocked and
 logged and the fill goes on. Any site but its own: a request whose address or body carries a value
 Sandy typed (as typed, escaped once or twice, in base64 or its web form, or in hex; the whole value

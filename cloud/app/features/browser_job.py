@@ -85,6 +85,9 @@ _SENDS_JS = r"""function () {
 _FOCUSED_JS = """(() => { const el = document.activeElement;
   if (!el || el === document.body || el.tagName.toLowerCase() === "textarea" || el.isContentEditable) return null;
   return el; })()"""
+# A field telling its change again, as it did when it was filled.
+_CHANGED_JS = """function () { this.focus();
+  for (const name of ["input", "change"]) this.dispatchEvent(new Event(name, {bubbles: true})); }"""
 # Whether the element under the point is this one, or inside it.
 _IS_JS = "function (at) { return !!at && (at === this || this.contains(at)); }"
 _TASK = (
@@ -412,11 +415,13 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         asked: Dict[str, Any] = {}
         gate.on_breach = lambda why: stopped.set()
 
-        def on_hold(held: Dict[str, str]) -> None:
-            # What the agent's click or key made is held: the agent stops, and he is asked.
-            where = urlsplit(held["url"])
-            asked.update(kind="request", session=held["session"], label=f"{where.hostname}{where.path}",
-                         filled=gate.filled)
+        def on_hold(held: Dict[str, Any]) -> None:
+            # What the agent's click or key made is held (answered with nothing already): the
+            # agent stops, and he is asked; his yes makes that same action again (`_act`).
+            where, action = urlsplit(held["url"]), held.get("action") or {}
+            asked.update(kind=action.get("kind") or "request", target=action.get("target"),
+                         node=action.get("node"), session=gate.sessions.get(action.get("target")) or held["session"],
+                         label=f"{where.hostname}{where.path}", filled=gate.filled)
             _note("browser_asked", {"site": row["site"], "element": asked["label"]})
             stopped.set()
         gate.on_hold = on_hold
@@ -489,18 +494,16 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
     """The page held as it is, the gate on it, until his answer; on his yes, the action."""
     from app.integrations import browser_cdp
     session = asked.get("session") or gate.sessions.get(asked.get("target")) or tab
-    # A page whose request is held is frozen until it is answered (seen on Chrome, 3 Nov 2026):
+    # A request held is answered with nothing, and a page may empty its form on that answer:
     # what he filled was read before the click that made it.
-    filled = (asked.get("filled") if asked["kind"] == "request"
+    filled = (asked["filled"] if "filled" in asked
               else await browser_cdp.evaluate(client, session, _FILLED_JS)) or []
     _note("browser_held", {"site": row["site"], "element": asked.get("label", ""),
                            "fields": [f.get("field") for f in filled]})
     from app.features import browser_sites
     if browser_sites.level(row["site"]) != browser_sites.SUBMIT:
-        # Her yes could not send here: no question, the page is his. A held request never goes:
-        # answered with nothing (204), the page stays as it was, filled, and wakes.
-        if asked["kind"] == "request":
-            await _nothing(client, gate.drop_paused())
+        # Her yes could not send here: no question, the page is his (a held request went nowhere,
+        # answered with nothing, and the page stays as it was, filled).
         _save(row["_id"], status=HANDED, summary=_summary(filled))
         now = get(row["_id"]) or {}
         if now.get("detached"):
@@ -515,19 +518,6 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
     if answer != APPROVED:
         return {"status": answer or STOPPED, **({} if answer else {"reason": "expired"})}
     return await _act(row, gate, client, session, asked)
-
-
-async def _nothing(client, held: Optional[Dict[str, str]]) -> None:
-    """A held request answered with no content: it goes nowhere, and its page stays as it is."""
-    from app.brain import browser_gate
-    from app.integrations.browser_cdp import within
-    if held is None:
-        return
-    try:
-        await within(client.send.Fetch.fulfillRequest(params={
-            "requestId": held["request"], "responseCode": 204, "responseHeaders": []}, session_id=held["session"]))
-    except browser_gate._WIRE_ERRORS:
-        logger.info("[browser] a held request was gone before it was answered")
 
 
 async def _answered(job_id: str, user_id: str) -> Optional[str]:
@@ -546,22 +536,13 @@ async def _answered(job_id: str, user_id: str) -> Optional[str]:
 
 
 async def _act(row, gate, client, session: str, asked: Dict[str, Any]) -> Dict[str, Any]:
-    """His yes: the real click (or Enter) on the same element of the same page, and what the
-    page answers."""
-    from app.brain import browser_gate
+    """His yes: the real click (or Enter) on the same element of the same page, or, for a request
+    a typed value or a key made, that element's change told again; and what the page answers.
+    Nothing is ever sent from a copy: no element, no send."""
     from app.integrations import browser_cdp
     from app.integrations.browser_cdp import within
-    if asked["kind"] == "request":
-        # The request his click made, kept paused all along: this very one goes, once.
-        held = gate.let_paused()
-        try:
-            await within(client.send.Fetch.continueRequest(params={"requestId": held["request"]}, session_id=session))
-        except (TypeError, *browser_gate._WIRE_ERRORS):
-            return {"status": FAILED, "reason": "moved"}
-        _note("browser_send", {"site": row["site"], "element": asked.get("label", "")})
-        await asyncio.sleep(1)
-        await browser_cdp.settle(client, session, LOAD_S)
-        return _answered_page(gate, await browser_cdp.html(client, session), await browser_cdp.where(client, session))
+    if asked.get("node") is None:
+        return {"status": FAILED, "reason": "moved"}
     found = await within(client.send.DOM.resolveNode(params={"backendNodeId": asked["node"]}, session_id=session))
     element = (found.get("object") or {}).get("objectId")
     if not element:
@@ -579,6 +560,11 @@ async def _act(row, gate, client, session: str, asked: Dict[str, Any]) -> Dict[s
         gate.approve(session, frame)
         await within(client.send.Input.dispatchMouseEvent(params={"type": "mouseReleased", **point},
                                                           session_id=session))
+    elif asked["kind"] != "enter":
+        # What a typed value or a key made: the same field tells its change again.
+        gate.approve(session, frame)
+        await within(client.send.Runtime.callFunctionOn(params={
+            "functionDeclaration": _CHANGED_JS, "objectId": element}, session_id=session))
     else:
         await within(client.send.Runtime.callFunctionOn(params={
             "functionDeclaration": "function () { this.focus(); }", "objectId": element}, session_id=session))
@@ -664,21 +650,29 @@ async def _sending(name: str, params: Dict[str, Any], browser_session, gate, cli
         return {"kind": "click", "target": node.target_id, "node": node.backend_node_id,
                 "label": _label(node)} if sends else None
     if name == "send_keys" and "enter" in str(params.get("keys") or "").lower():
-        target = browser_session.agent_focus_target_id
-        session = gate.sessions.get(target)
-        if session is None:
-            return None
-        focused = ((await within(client.send.Runtime.evaluate(params={"expression": _FOCUSED_JS},
-                                                              session_id=session))).get("result") or {})
-        if not focused.get("objectId"):
-            return None
-        node = (await within(client.send.DOM.describeNode(params={"objectId": focused["objectId"]},
-                                                          session_id=session))).get("node") or {}
-        attrs = node.get("attributes") or []
-        named = dict(zip(attrs[::2], attrs[1::2]))
-        return {"kind": "enter", "target": target, "node": node.get("backendNodeId"),
-                "label": named.get("name") or named.get("id") or str(node.get("nodeName") or "").lower()}
+        focused = await _focus(browser_session, gate, client)
+        return {"kind": "enter", **focused} if focused else None
     return None
+
+
+async def _focus(browser_session, gate, client) -> Optional[Dict[str, Any]]:
+    """The field a key would go to (``{target, node, label}``), unless a key there only starts a
+    new line."""
+    from app.integrations.browser_cdp import within
+    target = browser_session.agent_focus_target_id
+    session = gate.sessions.get(target)
+    if session is None:
+        return None
+    focused = ((await within(client.send.Runtime.evaluate(params={"expression": _FOCUSED_JS},
+                                                          session_id=session))).get("result") or {})
+    if not focused.get("objectId"):
+        return None
+    node = (await within(client.send.DOM.describeNode(params={"objectId": focused["objectId"]},
+                                                      session_id=session))).get("node") or {}
+    attrs = node.get("attributes") or []
+    named = dict(zip(attrs[::2], attrs[1::2]))
+    return {"target": target, "node": node.get("backendNodeId"),
+            "label": named.get("name") or named.get("id") or str(node.get("nodeName") or "").lower()}
 
 
 async def _filled_now(client, tab: str) -> List[Dict[str, Any]]:
@@ -727,8 +721,12 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
                 if name == "click" and params.get("index") is None:
                     return ActionResult(error="Click an element by its index.")
                 if name in ("click", "send_keys"):
-                    # What he filled, read while the page can still be read (`_hold`).
+                    # What he filled, read before the page answers (`_hold`).
                     gate.filled = await _filled_now(client, tab)
+                if name == "send_keys":
+                    # The field the keys go to: what his yes would tell the change of again.
+                    focus.clear()
+                    focus.update(await _focus(browser_session, gate, client) or {})
                 held = await _sending(name, params, browser_session, gate, client)
                 if held:
                     asked.update(held)
@@ -737,16 +735,20 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
                                         extracted_content="Stopped before sending: the user is asked first.")
             return await super().act(action, browser_session, *args, **kwargs)
 
+    focus: Dict[str, Any] = {}
+
     def on_click(event):
-        gate.acted("click")
+        gate.acted("click", target=event.node.target_id, node=event.node.backend_node_id)
         _note("browser_click", {"element": _label(event.node)})
 
     def on_type(event):
-        gate.acted("type", str(getattr(event, "text", "") or ""))
+        gate.acted("type", str(getattr(event, "text", "") or ""), target=event.node.target_id,
+                   node=event.node.backend_node_id)
         _note("browser_type", {"field": _label(event.node)})
 
     def on_keys(event):
-        gate.acted("enter" if "enter" in str(event.keys).lower() else "keys")
+        gate.acted("enter" if "enter" in str(event.keys).lower() else "keys", target=focus.get("target", ""),
+                   node=focus.get("node"))
         _note("browser_keys", {"keys": str(event.keys)[:20]})
 
     # Before browser-use's own handlers: the gate knows what is about to be done.
