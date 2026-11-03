@@ -34,17 +34,26 @@ async def connect(url: str):
 
     from app.bootstrap import install_redaction
     install_redaction()
-    for _ in range(CONNECT_TRIES - 1):
+    for attempt in range(1, CONNECT_TRIES + 1):
         client = CDPClient(url)
         try:
             await within(client.start())
             return client
-        except (OSError, asyncio.TimeoutError):
+        except BaseException as exc:
+            # A failed attempt is closed, never left half open.
+            await _close(client)
+            if attempt == CONNECT_TRIES or not isinstance(exc, (OSError, asyncio.TimeoutError)):
+                raise
             # Steel's handshake sometimes outlasts the library's own ten seconds (seen 3 Nov 2026).
             logger.info("[browser] the connection was slow to open; once more")
-    client = CDPClient(url)
-    await within(client.start())
-    return client
+    raise ConnectionError("no connection was tried")
+
+
+async def _close(client) -> None:
+    try:
+        await within(client.stop(), 5)
+    except (OSError, RuntimeError, asyncio.TimeoutError) as exc:
+        logger.info("[browser] a failed connection did not close cleanly: %s", type(exc).__name__)
 
 
 async def first_page(client) -> str:

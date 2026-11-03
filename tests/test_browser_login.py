@@ -153,21 +153,27 @@ def test_a_connection_slow_to_open_is_tried_again_and_not_for_ever(monkeypatch):
 
     from cdp_use import client as cdp
     from app.integrations import browser_cdp
-    tries = []
+    tries, closed = [], []
 
     class Slow:
         def __init__(self, url):
             self.url = url
 
         async def start(self):
-            tries.append(1)
+            tries.append(self)
             if len(tries) < 3 or fail_always:
                 raise TimeoutError("timed out during opening handshake")
+
+        async def stop(self):
+            closed.append(self)
     monkeypatch.setattr(cdp, "CDPClient", Slow)
     fail_always = False
-    assert isinstance(asyncio.run(browser_cdp.connect("wss://x")), Slow) and len(tries) == 3
+    opened = asyncio.run(browser_cdp.connect("wss://x"))
+    # Each attempt that failed is closed, never left half open; the one that opened is kept.
+    assert isinstance(opened, Slow) and len(tries) == 3 and closed == tries[:2]
     tries.clear()
+    closed.clear()
     fail_always = True
     with pytest.raises(TimeoutError):
         asyncio.run(browser_cdp.connect("wss://x"))
-    assert len(tries) == browser_cdp.CONNECT_TRIES
+    assert len(tries) == browser_cdp.CONNECT_TRIES and closed == tries

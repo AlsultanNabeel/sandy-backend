@@ -428,7 +428,7 @@ holds its session; every minute (`schedule_runner`, `browser_job.sweep`) a sessi
 any more (no beat for `STALE_S`, a page handed to him included, a fill that ended
 without closing) is closed and billed on his account, never past `SESSION_MS`. A process that ends (a restart, a deploy: SIGTERM, SIGINT or SIGQUIT, `close_on_exit` from `bootstrap` in every worker) closes every session it holds at Steel first (`close_held`, `_HELD`, on a thread of its own, `EXIT_S` 10 s at most), each fill failed «restart», and only then does what the signal did before. His «no», a new request instead of an answer, or a second unclear one (taken in one write, as his
 yes is: when «اه» and «لأ» come at once only one of them is) closes the session at once (`confirm.let_go`, `tools.LET_GO`), in the chat and on the call. Every
-call to the browser has `browser_cdp.CALL_S` (20 s) at most. The tool waits `WAIT_S` (80 s); past
+call to the browser has `browser_cdp.CALL_S` (20 s) at most. A connection whose opening handshake times out is tried again, `CONNECT_TRIES` (3) in all, and each attempt that failed is closed, never left half open. The tool waits `WAIT_S` (80 s); past
 it the fill is `detached`, and once it is held or stops it tells him in the chat he asked from
 (`conversations_api.say_in`: its question, kept as the thread's `pending` so his next message
 answers it, or its result) and on his phone, each state once whoever tells it (`told`); never as a task's result. Each action on the page is
