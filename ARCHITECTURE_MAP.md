@@ -371,7 +371,9 @@ action*: browser-use's agent (our model, `brain/browser_llm.SandyLLM`, every ste
 `background.call("browser_step")`; the site's domains only, no frame of another site
 (`cross_origin_iframes` off), `EXCLUDED` actions off, `MAX_STEPS` 15, its telemetry off) has each
 action looked at before it is done (`_Asking`): a click on what sends (`_SENDS_JS`: a form's
-submit, a button in a form, one that names a send in either language) or an Enter in a field is
+submit, a button in a form, one that names a send in either language: send, submit, buy, checkout,
+delete, publish, accept, confirm, subscribe, pay, order and their kin, إرسال، تقديم، شراء، حذف، نشر،
+موافق، اشترك، ادفع and theirs) or an Enter in a field is
 not done; a line break typed and a click by place are refused. The fill then holds the page as it
 is, the gate still on it, up to `HOLD_S` (ten minutes, the question's life), beating `beat_at`:
 `held`, a `needs_confirmation` naming what he filled (read back from the page, never a password or
@@ -386,13 +388,16 @@ has `Fetch.enable`, no websocket or peer connection in its scripts (`NO_SOCKETS_
 page's own, `Page.enable` first or it never runs), websockets blocked and watched. The page's own
 site: reads go, after his yes exactly one send goes, the first from the tab and frame the click
 lands in once it is made (`approve`, the frame from `DOM.getNodeForLocation`), and the gate shuts
-behind it (`shut`, also when nothing went), one right after a click
-or Enter he was not asked about stops the fill (`unasked`), any other is blocked. Another site: what
+behind it (`shut`, also when nothing went); a request right after a click or a key the agent made
+(`acted`, `SENDING`: a click, an Enter, any key) is held (`HOLD`, kept paused and never answered,
+`gate.paused`), the agent stops (`on_hold`) and he is asked as for a click (`asked.kind` «request»):
+any send, and once Sandy typed (`wrote`) any read too (a link with its query, a script's fetch),
+what a page loads aside; his yes lets that very request go once (`let_paused`, `Fetch.continueRequest`),
+on a fill-only site it never goes; any other send is blocked. Another site: what
 a page loads goes (script, style, font, image, media, by GET), anything that sends is blocked and
 logged and the fill goes on. Any site but its own: a request whose address or body carries a value
 Sandy typed (as typed or encoded, `MIN_TYPED` 3) stops the fill (`leak`), an image too. A stop
-cancels the agent at once (`on_breach`), closes the session and tells him (`fill_leak`,
-`fill_unasked`); no gate, no fill. Whatever stops a fill (a leak, the emergency stop, an error, its
+cancels the agent at once (`on_breach`), closes the session and tells him (`fill_leak`); no gate, no fill. Whatever stops a fill (a leak, the emergency stop, an error, its
 end), Steel closes the session first and only then does the gate come off it (`_shut`, in
 `_drive`'s own `finally`): while Steel has not closed it (`steel_client.release` and `closed` both
 say no) the gate stays on and Steel is asked again every `SHUT_S`, until Steel's own time is up. A session is closed once, by whoever gets there first

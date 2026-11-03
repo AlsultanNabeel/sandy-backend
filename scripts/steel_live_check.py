@@ -160,6 +160,24 @@ async def gate_checks(session_id: str) -> list:
         results.append(report("a second send is not let through", len(gate.sent) == before
                               and not await browser_cdp.evaluate(client, tab, ANSWERED_JS)))
 
+        # 9. Once she typed, a read a click makes (a link with its query) is held, kept paused; his
+        # yes lets that very request go, twenty seconds later.
+        await browser_cdp.goto(client, tab, FORM)
+        gate.acted("type", "Sandy Test")
+        gate.acted("click")
+        await browser_cdp.evaluate(client, tab, "location.href = '/get?name=Sandy+Test'; true")
+        await asyncio.sleep(20)
+        still = await browser_cdp.where(client, tab)
+        paused = gate.paused or {}
+        results.append(report("a read a click made once she typed is held", "forms/post" in still
+                              and "/get?name=" in paused.get("url", ""), f"on {still[-12:]}"))
+        out = await browser_job._act(row, gate, client, paused.get("session") or tab,
+                                     {"kind": "request", "label": "get"})
+        now = await browser_cdp.where(client, tab)
+        results.append(report("his yes lets that very request go", out.get("status") == browser_job.DONE
+                              and "/get?name=" in now, f"{out.get('status')} {out.get('reason', '')} on {now[-20:]}"))
+        gate.last = None
+
         # 8. A tab opened later: the gate is on it before it loads.
         await browser_cdp.evaluate(client, tab, "window.open('" + FORM + "', '_blank'); true")
         await asyncio.sleep(5)

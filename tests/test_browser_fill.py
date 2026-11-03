@@ -533,6 +533,15 @@ def test_the_sends_check_knows_a_forms_submit_and_a_button_that_names_a_send():
     assert '["submit", "image"]' in js and "c.form" in js and "إرسال" in js and "submit" in js
 
 
+@pytest.mark.parametrize("words", ["تقديم الطلب", "شراء", "حذف الحساب", "نشر", "موافق", "اشترك الآن", "ادفع",
+                                   "Buy now", "Checkout", "Delete", "Publish", "Accept", "Confirm", "Subscribe",
+                                   "Pay", "Place order"])
+def test_the_words_of_a_send_are_known_in_both_languages(words):
+    import re
+    found = re.search(r"return /(.+)/\.test\(words\)", browser_job._SENDS_JS)
+    assert re.search(found.group(1), words.lower())
+
+
 # ── One yes acts ──
 
 def test_two_yeses_at_once_click_once_and_the_second_says_so(world):
@@ -845,3 +854,38 @@ def test_a_session_steel_does_not_close_keeps_its_gate_until_it_does(world, monk
     world.refuse = 2
     _fill("en")
     assert world.order == ["release", "release", "release", "stop"], world.order
+
+
+# ── What a click made, once she typed, is held for him ──
+
+def _clicks_through(row, gate, client, tab, user_id, asked):
+    async def run():
+        gate.acted("type", "Nabeel")
+        gate.acted("click")    # on something that was not known to send: a link, a plain element
+        client.handlers["Fetch.requestPaused"]({"requestId": "r20", "resourceType": "Document", "frameId": "f1",
+                                                "request": {"method": "GET", "url": URL + "/next?name=Nabeel"}}, "s1")
+        await asyncio.sleep(5)
+        pytest.fail("the agent went on")
+    return run()
+
+
+def test_a_request_a_click_made_is_held_and_his_yes_lets_that_one_go(world, monkeypatch):
+    _level("submit")
+    monkeypatch.setattr(browser_job, "AGENT", _clicks_through)
+    asked = _fill("en")
+    assert asked.get("needs_confirmation") and "Name: Nabeel" in asked["summary"], asked
+    [holder] = world.clients
+    assert {"requestId": "r20"} not in holder.of("Fetch.continueRequest")
+    done = _fill("en", confirmed_job=asked["ids"][0])
+    assert done["ok"] and "application 77" in done["reply"]
+    assert ("Fetch.continueRequest", {"requestId": "r20"}, "s1") in holder.sent and world.pressed == []
+
+
+def test_on_a_fill_only_site_the_held_request_never_goes(world, monkeypatch):
+    _level("fill")
+    monkeypatch.setattr(browser_job, "AGENT", _clicks_through)
+    out = _fill("en")
+    assert not out.get("needs_confirmation")
+    [holder] = world.clients
+    assert {"requestId": "r20"} not in holder.of("Fetch.continueRequest")
+    assert not [p for p in holder.of("Fetch.failRequest") if p["requestId"] == "r20"]

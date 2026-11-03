@@ -1,6 +1,6 @@
 """The network gate (`brain/browser_gate.py`), the safety net of a fill under the action's own
 question. On the page's own site a read goes and a send goes only in the moment after his yes;
-one right after a click he was not asked about stops the fill; his yes lets exactly one send
+a request right after a click or a key is held for him (once she typed, a read too); his yes lets exactly one send
 through, from the tab and frame he said yes to. From another site what a page
 loads goes (a script, a style, a font, an image, media), and anything that sends is blocked. A
 request to any other site that carries a value Sandy typed stops the fill, a GET for an image
@@ -22,7 +22,7 @@ OTHER = "https://cdn.other.net"
 def _gate(typed=("Nabeel Alsultan", "n@example.com")):
     gate = G.Gate("forms.example.com")
     for value in typed:
-        gate.acted("type", value)
+        gate.watch(value)
     gate.last = None
     return gate
 
@@ -71,11 +71,43 @@ def test_the_sites_own_send_waits_for_his_yes_and_typing_never_makes_it_his():
     assert gate.decide("POST", "https://forms.example.com/autosave", "XHR") == G.BLOCK and gate.breach is None
 
 
-@pytest.mark.parametrize("kind", ["click", "enter"])
-def test_a_send_after_an_action_he_was_not_asked_about_stops_the_fill(kind):
+@pytest.mark.parametrize("kind", ["click", "enter", "keys"])
+def test_a_send_after_a_click_or_a_key_is_held_for_him_and_the_next_blocked(kind):
+    held = []
     gate = _gate()
+    gate.on_hold = held.append
     gate.acted(kind)
-    assert gate.decide("POST", URL_A, "Document") == G.STOP and gate.breach == G.UNASKED
+    assert gate.decide("POST", URL_A, "Document", session="s1", request="r1") == G.HOLD
+    assert held == [{"session": "s1", "request": "r1", "method": "POST", "url": URL_A}] and gate.breach is None
+    assert gate.decide("POST", URL_A + "/2", "XHR", session="s1", request="r2") == G.BLOCK
+
+
+@pytest.mark.parametrize("method, url, kind", [("GET", URL_A + "?email=n%40example.com", "Document"),
+                                               ("GET", "https://forms.example.com/api/check?q=1", "Fetch"),
+                                               ("GET", "https://forms.example.com/next", "Document")])
+def test_once_she_typed_even_a_read_after_a_click_is_held(method, url, kind):
+    gate = _gate()
+    gate.acted("type", "Nabeel")
+    gate.acted("click")
+    assert gate.decide(method, url, kind, request="r1") == G.HOLD and gate.paused["url"] == url
+
+
+def test_what_a_page_loads_after_a_click_goes_and_a_read_before_she_typed_goes():
+    gate = _gate()
+    gate.acted("click")
+    assert gate.decide("GET", "https://forms.example.com/next", "Document", request="r1") == G.GO
+    gate.acted("type", "Nabeel")
+    gate.acted("click")
+    assert gate.decide("GET", "https://forms.example.com/logo.png", "Image", request="r2") == G.GO
+    assert gate.paused is None
+
+
+def test_his_yes_on_the_held_request_lets_it_go_once():
+    gate = _gate()
+    gate.acted("click")
+    gate.decide("POST", URL_A, "Document", session="s1", request="r1")
+    assert gate.let_paused()["request"] == "r1" and gate.sent == [("POST", URL_A)]
+    assert gate.let_paused() is None
 
 
 def test_after_his_yes_one_send_goes_from_his_tab_and_frame_and_the_gate_shuts():
@@ -185,6 +217,20 @@ def test_a_paused_request_is_answered_as_the_gate_decides():
     assert client.of("Fetch.failRequest") == [{"requestId": "r3", "errorReason": "BlockedByClient"},
                                               {"requestId": "r4", "errorReason": "BlockedByClient"}]
     assert gate.breach == G.LEAK
+
+
+def test_a_held_request_is_kept_paused_never_answered():
+    client = FakeCDP()
+    gate = _gate()
+
+    async def flow():
+        await G.install(client, gate)
+        gate.acted("click")
+        await client.fire("Fetch.requestPaused", {"requestId": "r1", "resourceType": "Document",
+                                                  "request": {"method": "POST", "url": URL_A}}, "s1")
+    asyncio.run(flow())
+    assert gate.paused["request"] == "r1"
+    assert client.of("Fetch.continueRequest") == [] and client.of("Fetch.failRequest") == []
 
 
 def test_a_gate_that_cannot_be_put_on_fails_closed():

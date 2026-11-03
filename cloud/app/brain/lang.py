@@ -573,9 +573,6 @@ PHRASES = {
     "fill_leak": {"ar": "وقّفت التعبئة على {site} وسكّرت الصفحة: كانت بدها تبعت من معلوماتك لموقع تاني، وما طلع منها شي.",
                   "en": "I stopped filling the form on {site} and closed the page: it tried to send your details to "
                         "another site, and nothing left."},
-    "fill_unasked": {"ar": "وقّفت التعبئة على {site} وسكّرت الصفحة: حاولت تبعت إشي بلا ما أسألك، وما انبعت شي.",
-                     "en": "I stopped filling the form on {site} and closed the page: it tried to send something "
-                           "without me asking you, and nothing was sent."},
     "fill_moved": {"ar": "ما بعتت النموذج على {site}: الزر اللي وافقت عليه ما عاد مكانه، فما ضغطت شي.",
                    "en": "I didn't send the form on {site}: the button you said yes to isn't where it was, so I "
                          "clicked nothing."},

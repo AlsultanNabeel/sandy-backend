@@ -36,6 +36,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from pymongo.errors import PyMongoError
 
@@ -76,7 +77,7 @@ _SENDS_JS = r"""function () {
   if (tag === "button" && !["button", "reset"].includes(type) && c.form) return true;
   if (c.hasAttribute("formaction")) return true;
   const words = (c.innerText || c.value || c.getAttribute("aria-label") || "").toLowerCase();
-  return /send|submit|apply|register|sign ?up|confirm|order|book|pay|post|subscribe|continue|next|finish|done|save|إرسال|ارسال|أرسل|ارسل|ابعت|سج[ّ]?ل|تسجيل|تأكيد|أك[ّ]?د|اطلب|احجز|ادفع|اشترك|متابعة|التالي|إنهاء|حفظ/.test(words);
+  return /send|submit|apply|register|sign ?up|confirm|order|book|pay|post|subscribe|continue|next|finish|done|save|buy|purchase|check ?out|delete|remove|publish|accept|agree|إرسال|ارسال|أرسل|ارسل|ابعت|سج[ّ]?ل|تسجيل|تأكيد|أك[ّ]?د|اطلب|احجز|ادفع|دفع|اشترك|اشتراك|متابعة|التالي|إنهاء|حفظ|تقديم|قد[ّ]?م|شراء|اشتر|حذف|احذف|نشر|انشر|موافق|وافق/.test(words);
 }"""
 # The field an Enter would go to, unless Enter there only starts a new line.
 _FOCUSED_JS = """(() => { const el = document.activeElement;
@@ -397,10 +398,18 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         client = await browser_cdp.connect(steel_client.connect_url(row["steel_id"]))
         gate = browser_gate.Gate(row["site"])
         stopped = asyncio.Event()
+        asked: Dict[str, Any] = {}
         gate.on_breach = lambda why: stopped.set()
+
+        def on_hold(held: Dict[str, str]) -> None:
+            # What the agent's click or key made is held: the agent stops, and he is asked.
+            where = urlsplit(held["url"])
+            asked.update(kind="request", session=held["session"], label=f"{where.hostname}{where.path}")
+            _note("browser_asked", {"site": row["site"], "element": asked["label"]})
+            stopped.set()
+        gate.on_hold = on_hold
         for part in re.split(r"[,،;\n]", str(row.get("args", {}).get("details") or "")):
-            gate.acted("type", part.split(":", 1)[-1].strip())
-        gate.last = None
+            gate.watch(part.split(":", 1)[-1].strip())
         await browser_gate.install(client, gate)
         tab = await browser_cdp.first_page(client)
         await browser_cdp.apply_state(client, tab, browser_sites.session(row["site"]))
@@ -417,9 +426,10 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             _note("browser_orders", {"site": row["site"]}, ok=False)
             outcome = {"status": FAILED, "reason": "orders"}
             return outcome
-        asked: Dict[str, Any] = {}
         outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped, RUN_S)
         if gate.breach is None and asked:
+            # A request held stopped the agent the same way: from here only a breach stops it.
+            stopped.clear()
             outcome = await _hold(row, gate, client, tab, asked, stopped, user_id)
         for method, url in gate.blocked:
             _note("browser_blocked", {"method": method, "site": browser_gate.root_of(url)}, ok=False)
@@ -442,7 +452,7 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
                 user_id: str) -> Dict[str, Any]:
     """The page held as it is, the gate on it, until his answer; on his yes, the action."""
     from app.integrations import browser_cdp
-    session = gate.sessions.get(asked.get("target")) or tab
+    session = asked.get("session") or gate.sessions.get(asked.get("target")) or tab
     filled = await browser_cdp.evaluate(client, session, _FILLED_JS) or []
     _note("browser_held", {"site": row["site"], "element": asked.get("label", ""),
                            "fields": [f.get("field") for f in filled]})
@@ -483,9 +493,20 @@ async def _answered(job_id: str, user_id: str) -> Optional[str]:
 async def _act(row, gate, client, session: str, asked: Dict[str, Any]) -> Dict[str, Any]:
     """His yes: the real click (or Enter) on the same element of the same page, and what the
     page answers."""
-    from app.features import web_page
+    from app.brain import browser_gate
     from app.integrations import browser_cdp
     from app.integrations.browser_cdp import within
+    if asked["kind"] == "request":
+        # The request his click made, kept paused all along: this very one goes, once.
+        held = gate.let_paused()
+        try:
+            await within(client.send.Fetch.continueRequest(params={"requestId": held["request"]}, session_id=session))
+        except (TypeError, *browser_gate._WIRE_ERRORS):
+            return {"status": FAILED, "reason": "moved"}
+        _note("browser_send", {"site": row["site"], "element": asked.get("label", "")})
+        await asyncio.sleep(1)
+        await browser_cdp.settle(client, session, LOAD_S)
+        return _answered_page(gate, await browser_cdp.html(client, session), await browser_cdp.where(client, session))
     found = await within(client.send.DOM.resolveNode(params={"backendNodeId": asked["node"]}, session_id=session))
     element = (found.get("object") or {}).get("objectId")
     if not element:
@@ -522,12 +543,17 @@ async def _act(row, gate, client, session: str, asked: Dict[str, Any]) -> Dict[s
         await browser_cdp.settle(client, session, LOAD_S)
     finally:
         gate.shut()
+    return _answered_page(gate, await browser_cdp.html(client, session), await browser_cdp.where(client, session))
+
+
+def _answered_page(gate, html: str, url: str) -> Dict[str, Any]:
+    """What his yes came to: the page that answered, or why nothing went."""
+    from app.features import web_page
     if gate.breach is not None:
         return {"status": FAILED, "reason": gate.breach}
     if not gate.sent:
         return {"status": FAILED, "reason": "unsent"}
-    page = web_page.extract(await browser_cdp.html(client, session), await browser_cdp.where(client, session))
-    return {"status": DONE, "result": page["text"][:600]}
+    return {"status": DONE, "result": web_page.extract(html, url)["text"][:600]}
 
 
 def _summary(filled: List[Dict[str, Any]]) -> str:
@@ -820,7 +846,7 @@ def _push(uid: str, body: str) -> None:
 
 
 # Why a fill stopped, by the gate or at his yes, as told to him.
-_TOLD = {"leak": "fill_leak", "socket": "fill_leak", "uncovered": "fill_leak", "unasked": "fill_unasked",
+_TOLD = {"leak": "fill_leak", "socket": "fill_leak", "uncovered": "fill_leak",
          "moved": "fill_moved", "unsent": "fill_unsent", "orders": "fill_orders", "cost": "fill_cost",
          "steps": "fill_steps"}
 
