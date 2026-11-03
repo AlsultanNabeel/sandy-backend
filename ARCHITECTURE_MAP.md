@@ -419,8 +419,8 @@ and «طلّعها» on a site (`browser_sites.sign_out`, that site's fills) clo
 session at once (`stop_for`), not when Steel would a quarter hour later. A fill beats (`beat_at`, `BEAT_S`) while it
 holds its session; every minute (`schedule_runner`, `browser_job.sweep`) a session no one holds
 any more (no beat for `STALE_S`, a page handed to him included, a fill that ended
-without closing) is closed and billed on his account, never past `SESSION_MS`. His «no», a new request instead of an answer, or a second unclear one
-closes the session at once (`confirm.let_go`, `tools.LET_GO`), in the chat and on the call. Every
+without closing) is closed and billed on his account, never past `SESSION_MS`. His «no», a new request instead of an answer, or a second unclear one (taken in one write, as his
+yes is: when «اه» and «لأ» come at once only one of them is) closes the session at once (`confirm.let_go`, `tools.LET_GO`), in the chat and on the call. Every
 call to the browser has `browser_cdp.CALL_S` (20 s) at most. The tool waits `WAIT_S` (80 s); past
 it the fill is `detached`, and once it is held or stops it tells him in the chat he asked from
 (`conversations_api.say_in`: its question, kept as the thread's `pending` so his next message

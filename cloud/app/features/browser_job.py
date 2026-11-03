@@ -785,13 +785,21 @@ def submit(job_id: str) -> Optional[Dict[str, Any]]:
 
 def let_go(job_id: str) -> None:
     """His «no» (or a question let go): a fill still waiting for his yes stops, and its holder
-    closes its session now, not when Steel closes it on its own a quarter of an hour later."""
-    row = get(job_id)
-    if not row or row.get("status") != HELD:
+    closes its session now, not when Steel closes it on its own a quarter of an hour later. Taken
+    in one write, as his yes is: when both come at once, only one of them is."""
+    coll = _coll()
+    if coll is None:
         return
-    _save(job_id, status=STOPPED)
-    _release(row)
-    _note("browser_let_go", {"site": row.get("site", "")})
+    try:
+        taken = coll.find_one_and_update({"_id": str(job_id), "status": HELD},
+                                         {"$set": {"status": STOPPED, "updated_at": _now()}})
+    except PyMongoError:
+        logger.warning("[browser] could not take the no of %s", job_id, exc_info=True)
+        return
+    if taken is None:
+        return
+    _release(taken)
+    _note("browser_let_go", {"site": taken.get("site", "")})
 
 
 def open_jobs() -> List[Dict[str, Any]]:

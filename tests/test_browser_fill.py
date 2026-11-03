@@ -975,3 +975,26 @@ def test_two_fills_begun_at_once_never_both_pass_his_limit(world, monkeypatch):
         t.join(20)
     assert len(opened) == 1, outs
     assert sum("already have a form fill open" in (o.get("reply") or "") for o in outs) == 1
+
+
+# ── «اه» and «لأ» at once: one of them ──
+
+def test_a_no_that_comes_as_the_yes_is_taken_changes_nothing(world, monkeypatch, brain_db):  # noqa: F811
+    _level("submit")
+    job = _fill("en")["ids"][0]
+    seen = _job(job)                                    # the no read it waiting...
+    brain_db[browser_job.COLLECTION].update_one({"_id": job}, {"$set": {"status": browser_job.APPROVED}})
+    monkeypatch.setattr(browser_job, "get", lambda job_id: seen)   # ...and the yes took it meanwhile
+    with active_user_profile_context(A):
+        browser_job.let_go(job)
+    assert brain_db[browser_job.COLLECTION].find_one({"_id": job})["status"] == browser_job.APPROVED
+    assert world.released == []
+
+
+def test_a_yes_that_comes_after_the_no_took_it_is_none(world):
+    _level("submit")
+    job = _fill("en")["ids"][0]
+    with active_user_profile_context(A):
+        browser_job.let_go(job)
+        assert browser_job.submit(job) is None
+    assert _job(job)["status"] == browser_job.STOPPED
