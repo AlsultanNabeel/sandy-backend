@@ -345,11 +345,73 @@ async def _beating(job_id: str) -> None:
         _save(job_id, beat_at=_now())
 
 
+# The fills whose session this process holds, by id ({row, user_id}): closed before it ends.
+_HELD: Dict[str, Dict[str, Any]] = {}
+_HELD_LOCK = threading.Lock()
+# How long a process that is ending waits for its sessions to close.
+EXIT_S = 10
+
+
+def close_held() -> int:
+    """Before this process ends (a restart, a deploy): every session it holds is closed at Steel
+    now, its fill failed, not left open for the sweep of another process. How many."""
+    from app.features import trace_store
+    db = get_db()
+    with _HELD_LOCK:
+        held = list(_HELD.values())
+    for h in held:
+        row = h["row"]
+        if db is not None:
+            try:
+                db[COLLECTION].update_one({"_id": row["_id"], "status": {"$in": list(OPEN)}},
+                                          {"$set": {"status": FAILED, "reason": "restart", "updated_at": _now()}})
+            except PyMongoError:
+                logger.warning("[browser] could not mark a fill ended by a restart", exc_info=True)
+        with trace_store.background(h["user_id"], "browser_exit", keep=True):
+            _release(row)
+    if held:
+        logger.info("[browser] %d open session(s) closed before the process ended", len(held))
+    return len(held)
+
+
+def close_on_exit() -> None:
+    """The process's stop signals close the sessions it holds first (`close_held`, `EXIT_S` at
+    most), then do what they did. On the main thread only, where signals are handled."""
+    import signal
+    if threading.current_thread() is not threading.main_thread():
+        return
+
+    def closing(before):
+        def handler(signum, frame):
+            # On a thread of its own: a lock the interrupted main thread holds never hangs it.
+            closer = threading.Thread(target=close_held, name="SandyFillExit", daemon=True)
+            closer.start()
+            closer.join(EXIT_S)
+            if callable(before):
+                before(signum, frame)
+            elif before == signal.SIG_DFL:
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+        return handler
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT):
+        signal.signal(sig, closing(signal.getsignal(sig)))
+
+
 def _run(job_id: str, user_id: str) -> None:
+    row = get(job_id) or {}
+    with _HELD_LOCK:
+        _HELD[job_id] = {"row": row, "user_id": user_id}
+    try:
+        _drive_and_tell(job_id, user_id, row)
+    finally:
+        with _HELD_LOCK:
+            _HELD.pop(job_id, None)
+
+
+def _drive_and_tell(job_id: str, user_id: str, row: Dict[str, Any]) -> None:
     from app.brain import browser_gate
     from app.features import trace_store
     from app.integrations.steel_client import SteelError
-    row = get(job_id) or {}
     with trace_store.background(user_id, "browser_fill", keep=True):
         try:
             # Its session is closed in there, before the gate comes off it.

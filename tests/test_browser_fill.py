@@ -1082,3 +1082,37 @@ def test_a_gate_whose_connection_drops_cuts_the_agent_at_once(world, monkeypatch
     world.clients[0].cut()
     _wait_for(lambda: bool(cut) and "stop" in world.order)
     assert cut and cut[0] - began < 1 and world.order == ["release", "stop"]
+
+
+# ── A process that ends closes the sessions it holds first ──
+
+@pytest.fixture
+def signals():
+    import signal
+    kept = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT)}
+    yield signal
+    for sig, handler in kept.items():
+        signal.signal(sig, handler)
+
+
+def test_a_process_that_ends_closes_every_session_it_holds_first(world, signals):
+    _level("submit")
+    asked = _fill("en")
+    assert asked.get("needs_confirmation") and world.released == []
+    seen = []
+    signals.signal(signals.SIGTERM, lambda signum, frame: seen.append(("before", list(world.released))))
+    browser_job.close_on_exit()
+    signals.raise_signal(signals.SIGTERM)       # a restart or a deploy
+    # Closed at Steel before what the signal did before (the server's own stop) ran.
+    assert seen == [("before", ["st1"])]
+    job = _job(asked["ids"][0])
+    assert job["status"] == browser_job.FAILED and job["reason"] == "restart" and job["closed_at"]
+    _wait_for(lambda: "stop" in world.order)
+    assert world.released == ["st1"]           # once: the fill found it closed already
+
+
+def test_every_worker_closes_its_sessions_before_it_ends():
+    import inspect
+
+    from app import bootstrap
+    assert "close_on_exit()" in inspect.getsource(bootstrap.bootstrap)

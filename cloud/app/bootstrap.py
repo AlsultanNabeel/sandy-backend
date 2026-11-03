@@ -280,4 +280,9 @@ def bootstrap(app_env: str = "prod", app=None) -> None:
         except Exception as exc:
             logger.warning("[Bootstrap] schedule runner start failed: %s", exc)
 
+    # Every worker: the Steel sessions it holds are closed before it ends (a restart, a deploy).
+    from app.features.browser_job import close_on_exit
+
+    close_on_exit()
+
     logger.debug("[Bootstrap] Startup complete (env=%s)", app_env)
