@@ -399,7 +399,7 @@ written, a node put in, its rel or href changed in place; `x-dns-prefetch-contro
 (`PAGE_GUARD_JS`, before the
 page's own, `Page.enable` first or it never runs), websockets blocked and watched. The page's own site (told by the public suffix list,
 `publicsuffixlist` bundled and its private part too, so `a.netlify.app`, `b.github.io` and
-`c.herokuapp.com` are each a site of their own): reads go, after his yes exactly one send goes, the first from the tab and frame the click
+`c.herokuapp.com` are each a site of their own): reads go, after his yes exactly one send goes, the first page or script request (`SENDS`: Document, XHR, Fetch; never an image, a beacon or another load) from the tab and frame the click
 lands in once it is made (`approve`, the frame from `DOM.getNodeForLocation`), and the gate shuts
 behind it (`shut`, also when nothing went); a request right after a click or a key the agent made
 (`acted`, `SENDING`: a click, an Enter, any key, for `ACTED_S` (ten seconds) after it) is held (`HOLD`, `gate.asked`): answered at once

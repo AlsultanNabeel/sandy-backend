@@ -351,3 +351,15 @@ def test_before_she_typed_or_without_her_value_the_sites_reads_go():
     gate.acted("type", "Nabeel Alsultan")
     gate.last = None
     assert gate.decide("GET", "https://forms.example.com/api/check?q=1", "Fetch") == G.GO
+
+
+
+@pytest.mark.parametrize("kind", ["Image", "Ping", "Media", "Font", "Script", "Stylesheet", "Other", "EventSource"])
+def test_his_yes_lets_through_a_page_or_a_scripts_request_only(kind):
+    gate = _gate()
+    gate.approve("s1", "f1")
+    # An image or a beacon the click made first never takes his yes...
+    assert gate.decide("POST", URL_A + "/pixel", kind, session="s1", frame="f1") == G.BLOCK
+    assert gate.sent == [] and gate.armed is not None
+    # ...the form's own send does.
+    assert gate.decide("POST", URL_A, "Document", session="s1", frame="f1") == G.GO and gate.sent == [("POST", URL_A)]

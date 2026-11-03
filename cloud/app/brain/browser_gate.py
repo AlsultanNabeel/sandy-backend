@@ -9,7 +9,8 @@ before the page's own), websockets blocked (`Network.setBlockedURLs`) and watche
 (`Network.webSocketCreated`), and every request stops at the gate first (`decide`):
 
   * the page's own site: a read goes; after his yes (`approve`) exactly one send goes, the first
-    from the tab and frame he said yes to once the click is made, and the gate shuts behind it;
+    page or script request (`SENDS`) from the tab and frame he said yes to once the click is made,
+    and the gate shuts behind it;
     a request right after a click or a key the agent made (`acted`) is held (`HOLD`): answered at
     once with nothing (204), so it never waits in the browser and the page stays as it was, and
     the fill asks him about it (`on_hold`), the action that made it kept (`action`) so his yes
@@ -49,6 +50,9 @@ LEAK, SOCKET, CUT = "leak", "socket", "cut"
 READS = ("GET", "HEAD", "OPTIONS")
 # What a page loads from anywhere: never a send.
 LOADS = ("Script", "Stylesheet", "Font", "Image", "Media")
+# The only sends his yes lets through: a page, or a script's own request (never an image, a
+# beacon or any other load a page could carry a send in).
+SENDS = ("Document", "XHR", "Fetch")
 # What follows these on the page's own site is held for him: a click, an Enter or any other key.
 SENDING = ("click", "enter", "keys")
 # What a click or a key made comes this soon after it; a request later is not its.
@@ -310,7 +314,8 @@ class Gate:
         if own and self.his:
             return GO
         if own:
-            if self.armed is not None and self.armed == (str(session or ""), str(frame or "")):
+            if (self.armed is not None and self.armed == (str(session or ""), str(frame or ""))
+                    and resource_type in SENDS):
                 self.armed = None
                 self.sent.append((method, url))
                 return GO
