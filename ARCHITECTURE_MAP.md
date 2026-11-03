@@ -401,7 +401,7 @@ page's own, `Page.enable` first or it never runs), websockets blocked and watche
 `c.herokuapp.com` are each a site of their own): reads go, after his yes exactly one send goes, the first from the tab and frame the click
 lands in once it is made (`approve`, the frame from `DOM.getNodeForLocation`), and the gate shuts
 behind it (`shut`, also when nothing went); a request right after a click or a key the agent made
-(`acted`, `SENDING`: a click, an Enter, any key) is held (`HOLD`, kept paused and never answered,
+(`acted`, `SENDING`: a click, an Enter, any key, for `ACTED_S` (ten seconds) after it) is held (`HOLD`, kept paused and never answered,
 `gate.paused`), the agent stops (`on_hold`) and he is asked as for a click (`asked.kind` «request»):
 any send, and once Sandy typed (`wrote`) any read too (a link with its query, a script's fetch),
 what a page loads aside; his yes lets that very request go once (`let_paused`, `Fetch.continueRequest`),

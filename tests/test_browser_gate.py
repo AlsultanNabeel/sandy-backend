@@ -297,3 +297,10 @@ def test_the_page_guard_holds_every_way_a_hint_to_another_host_gets_in(way):
     """Each way a script can put a dns-prefetch or a preconnect into a page is covered; the guard
     itself runs in a real browser (scripts/steel_live_check.py, «no hint to another host»)."""
     assert way in G.PAGE_GUARD_JS and "dns-prefetch|preconnect" in G.PAGE_GUARD_JS
+
+
+def test_what_a_click_made_is_told_only_for_a_while_after_it(monkeypatch):
+    gate = _gate()
+    gate.acted("click")
+    monkeypatch.setattr(G.time, "monotonic", lambda: gate.acted_at + G.ACTED_S + 1)
+    assert gate.decide("POST", URL_A, "XHR", request="r1") == G.BLOCK and gate.paused is None

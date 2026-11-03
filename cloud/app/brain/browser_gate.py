@@ -33,6 +33,7 @@ import functools
 import ipaddress
 import logging
 import re
+import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import unquote_plus, urlsplit
 
@@ -45,6 +46,8 @@ READS = ("GET", "HEAD", "OPTIONS")
 LOADS = ("Script", "Stylesheet", "Font", "Image", "Media")
 # What follows these on the page's own site is held for him: a click, an Enter or any other key.
 SENDING = ("click", "enter", "keys")
+# What a click or a key made comes this soon after it; a request later is not its.
+ACTED_S = 10
 # A typed value shorter than this is too common to tell a leak by («1», «ok»).
 MIN_TYPED = 3
 # A value is watched word by word too, each word this long or more («Nabeel» of «Nabeel Alsultan»;
@@ -208,6 +211,7 @@ class Gate:
     def __init__(self, site: str):
         self.site = _root(site)
         self.last: Optional[str] = None
+        self.acted_at = 0.0
         self.typed: Set[str] = set()
         # Whether Sandy typed on the page yet: from then on a read after a click is held too.
         self.wrote = False
@@ -228,7 +232,7 @@ class Gate:
     def acted(self, kind: str, text: str = "") -> None:
         """What the model just did on the page: «click», «enter», «keys» or «type» (with what it
         typed)."""
-        self.last = kind
+        self.last, self.acted_at = kind, time.monotonic()
         if kind == "type":
             self.wrote = True
             self.watch(text)
@@ -302,7 +306,8 @@ class Gate:
                 self.sent.append((method, url))
                 return GO
             loads = method == "GET" and resource_type in LOADS
-            if self.last in SENDING and not loads and (method not in READS or self.wrote):
+            just = self.last in SENDING and time.monotonic() - self.acted_at < ACTED_S
+            if just and not loads and (method not in READS or self.wrote):
                 return self._hold(method, url, session, request)
             if method in READS:
                 return GO
