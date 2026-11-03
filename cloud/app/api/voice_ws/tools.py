@@ -402,12 +402,14 @@ def _build_live_tools(types, end_call: bool = False, user_id: str = "") -> List:
 
 def _dispatch_tool(name: str, args: Dict[str, Any], user_id: str = "",
                    turn: str = "", trace: Optional[Any] = None,
-                   language: str = "", channel: str = "app") -> Dict[str, Any]:
+                   language: str = "", channel: str = "app",
+                   browsed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Run one tool call in the caller's tenant (runs via run_in_executor); ``turn`` groups
     the call's turn's writes for undo, ``trace`` (`trace_store.Trace`) is the turn's
     trace the call is kept in, ``language`` the one the turn is spoken in, which its
     replies come in (`lang`), and ``channel`` whose call it is («app», «robot»): what it
-    changes is logged as that call's (`blocks/events`).
+    changes is logged as that call's (`blocks/events`); ``browsed`` what the whole call read so far
+    (`voice.dispatch`).
 
     ``user_id`` is passed in because the pool thread lacks the session context;
     without it every scoped read/write goes nowhere.
@@ -424,7 +426,7 @@ def _dispatch_tool(name: str, args: Dict[str, Any], user_id: str = "",
         try:
             with active_user_profile_context(_voice_profile(chat_id)), trace_store.using(trace):
                 return dispatch(name, args, chat_id, turn,
-                                source="robot" if channel == "robot" else "voice")
+                                source="robot" if channel == "robot" else "voice", browsed=browsed)
         except Exception as exc:  # noqa: BLE001 — one tool never ends the call
             logger.error("[voice_ws] tool %s failed: %s", name, exc, exc_info=True)
             return {"handled": False, "reply": lang.say("voice_tool_failed", name=name)}

@@ -264,6 +264,7 @@ def execute(name: str, args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         result = {"ok": False, "broke": True, "error": f"tool failed: {type(exc).__name__}"}
     trace_store.note_tool(name, dict(args or {}), result, ms=(time.perf_counter() - t0) * 1000)
     ctx.results.append((name, result))
+    BW.saw(name, result, ctx)
     if result.get("ok"):
         ctx.worked.append(name)
     return result

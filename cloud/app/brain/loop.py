@@ -21,7 +21,7 @@ from app.blocks import _base as blocks_base
 from app.blocks import changes, events
 from app.utils.ltm_crypto import decrypt_field
 from app.brain import (confirm, context, future, honesty, lang, language_guard, model, responses,
-                       stm, stops, tools)
+                       stm, stops, tools, tools_browser)
 from app.brain.fast_path import try_fast_route
 from app.brain.ctx import TurnCtx
 from app.features import trace_store
@@ -452,8 +452,10 @@ def _answer(outcome, message, ctx, image_state, user_id, thread_id, history, com
     if outcome is None:
         try:
             told = context.untold_results(user_id, spoken=ctx.source == "voice")
+            memory: List[str] = []
             system = context.build_system(user_id, message, history, spoken=ctx.source == "voice",
-                                          thread_id=thread_id, results=told)
+                                          thread_id=thread_id, results=told, memory=memory)
+            tools_browser.remembered(ctx, [*memory, *(m["content"] for m in context.history_messages(history))])
             if note:
                 system += "\n\n" + note
             messages = [{"role": "system", "content": system},

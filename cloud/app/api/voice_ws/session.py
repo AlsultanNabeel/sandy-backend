@@ -1300,6 +1300,8 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
     # turn's id, under which its writes are kept for «تراجعي» (`blocks.changes`).
     _turn_worked: List[str] = []
     _turn_id = {"id": uuid.uuid4().hex}
+    # What the call read so far, pages and his data: its model keeps them all till it ends.
+    _browsed: Dict[str, Any] = {}
     # What the turn did, for the owner's trace (`trace_store`): tokens, tools, words.
     _trace = {"t": trace_store.Trace(get_voice_identity(), "voice", thread_id="voice",
                                      turn_id=_turn_id["id"])}
@@ -1582,7 +1584,7 @@ async def _live_to_device(ws, session, recent: "_RecentAudio",
                         tools_pool, _dispatch_tool, fc.name,
                         dict(fc.args or {}), get_voice_identity(), _turn_id["id"], _trace["t"],
                         _spoken_in("".join(_user_buf)),
-                        "robot" if get_voice_channel() == _ROBOT_CHANNEL else "app"
+                        "robot" if get_voice_channel() == _ROBOT_CHANNEL else "app", _browsed
                     )
                     if result.get("ok"):
                         _turn_worked.append(fc.name)

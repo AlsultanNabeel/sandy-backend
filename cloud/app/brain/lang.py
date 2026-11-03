@@ -621,6 +621,14 @@ PHRASES = {
     "page_login_expired": {"ar": "دخولك على {site} انتهى. سجّل كمان مرة من هون: {link}",
                            "en": "Your sign-in on {site} has expired. Sign in again from here: {link}"},
     "sources_line": {"ar": "📎 المصدر: {sites}", "en": "📎 Source: {sites}"},
+    "page_not_followed": {"ar": "ما فتحت هالرابط: بعد ما قريت صفحة، بفتح بس من نفس الموقع، أو رابط من "
+                                "رسالتك، أو رابط موجود بالصفحة زي ما هو.",
+                          "en": "I didn't open that link: after reading a page I only open the same site, a "
+                                "link from your message, or a link on the page as it is."},
+    "page_carries_his": {"ar": "⚠️ انتبه: ما فتحت رابط على {site} لأنه كان فيه شي من معلوماتك. ممكن صفحة "
+                               "حاولت تطلّعها.",
+                         "en": "⚠️ Heads up: I didn't open a link on {site} because it carried something of "
+                               "yours. A page may have tried to get it out."},
     "page_warning": {"ar": "⚠️ انتبه: صفحة {site} فيها كلام بيحاول يعطيني أوامر. ما نفّذت منه شي.",
                      "en": "⚠️ Heads up: the page on {site} has text trying to give me orders. I didn't "
                            "follow any of it."},

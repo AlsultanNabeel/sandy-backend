@@ -231,9 +231,12 @@ def _probe(spec: Dict[str, Any], ctx: TurnCtx) -> Any:
         if not tools_browser.offered(ctx.user_id):
             raise RuntimeError("the browser is not on for this account")
         try:
-            return web_page.for_compare(web_page.read(str(args.get("url") or ""), user_id=ctx.user_id))
+            page = web_page.read(str(args.get("url") or ""), user_id=ctx.user_id)
         except web_page.PageError as exc:
             raise RuntimeError(f"the page could not be read: {exc.code}") from None
+        # Its model reads on from this page only as a turn does after one (`tools_browser`).
+        tools_browser.task_read(ctx, page, str(spec.get("instructions") or ""))
+        return web_page.for_compare(page)
     result = tools.execute(tool, args, ctx)
     if result.get("broke"):
         raise RuntimeError(f"the check's tool {tool} broke")

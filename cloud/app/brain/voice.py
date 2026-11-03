@@ -143,19 +143,25 @@ def _answer_choice(answer: str, held: Dict[str, Any], chat_id: str) -> Dict[str,
 
 
 def dispatch(name: str, args: Dict[str, Any], chat_id: str, turn: str = "",
-             source: str = "voice") -> Dict[str, Any]:
+             source: str = "voice", browsed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Run one voice tool call for ``chat_id`` (the caller sets the tenant context). What it
     writes is kept under ``turn`` (the call's turn, so «تراجعي» takes back all of it), and is
-    the doing of ``source`` (the app's call, «voice», or the robot's, «robot»)."""
+    the doing of ``source`` (the app's call, «voice», or the robot's, «robot»). ``browsed`` is
+    what the call read so far, the whole call's (`tools_browser._browsed`): its model keeps
+    every page and every answer of his data till it ends."""
     from app.blocks import events
     with changes.recording(turn or new_id()), events.using_source(source):
-        return _dispatch(name, args, chat_id, turn)
+        return _dispatch(name, args, chat_id, turn, browsed)
 
 
-def _dispatch(name: str, args: Dict[str, Any], chat_id: str, turn: str) -> Dict[str, Any]:
+def _dispatch(name: str, args: Dict[str, Any], chat_id: str, turn: str,
+              browsed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if name == "confirm":
         return _answer_held(str((args or {}).get("answer") or ""), chat_id)
-    result = tools.execute(name, args or {}, TurnCtx(user_id=chat_id, source="voice", turn_id=turn))
+    ctx = TurnCtx(user_id=chat_id, source="voice", turn_id=turn)
+    if browsed is not None:
+        ctx.artifacts["browsed"] = browsed
+    result = tools.execute(name, args or {}, ctx)
     if result.get("needs_confirmation") or result.get("needs_choice"):
         db = get_db()
         # Two bulk changes in one breath wait as one: the question names both, one yes runs both.

@@ -396,16 +396,19 @@ def reply_language(message: str) -> str:
 
 def build_system(user_id: str, message: str,
                  history: Optional[List[Dict[str, Any]]] = None, *, spoken: bool = False,
-                 thread_id: str = "", results: Sequence[Dict[str, Any]] = ()) -> str:
+                 thread_id: str = "", results: Sequence[Dict[str, Any]] = (),
+                 memory: Optional[List[str]] = None) -> str:
     """Steady parts first, changing parts last: the provider caches an unchanged
     prefix, so the persona and rules are read once, and the clock never breaks it.
-    The channel line comes after the persona, so it wins over a persona written for voice."""
+    The channel line comes after the persona, so it wins over a persona written for voice.
+    ``memory`` is given what of his memory went in (`tools_browser.remembered`)."""
     from app.brain import tools_browser, tools_tasks
 
     parts = [build_effective_persona(user_id or None), address_instruction(), _RULES,
              TASKS_RULE if user_id and tools_tasks.offered(user_id) else "",
              BROWSER_RULE if user_id and tools_browser.offered(user_id) else "",
              SPOKEN_CHANNEL if spoken else CHAT_CHANNEL]
+    remembered = len(parts)
     try:
         parts.append(profile_block(user_id))
         parts.append(facts_block())
@@ -418,6 +421,8 @@ def build_system(user_id: str, message: str,
         parts.append(conversation_block(thread_id, message, vector))
     except Exception as exc:  # noqa: BLE001 — memory is never worth a failed reply
         logger.warning("[brain] memory context skipped: %s", exc)
+    if memory is not None:
+        memory.extend(parts[remembered:])
     parts.append(time_awareness_block(history))
     # Last but the language: the clock's greeting rule before it would win otherwise.
     parts.append(results_block(list(results)))
