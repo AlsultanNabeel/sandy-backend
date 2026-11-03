@@ -23,7 +23,8 @@ before the page's own), websockets blocked (`Network.setBlockedURLs`) and watche
     the page (`typed`) is failed and stops the fill (`LEAK`), a GET for an image too.
 
 A stop (`breach`) is told to the fill at once (`on_breach`), which closes the session and tells
-him. A gate that cannot be put on (`GateError`) means no fill at all.
+him. A gate that cannot be put on (`GateError`) means no fill at all, and a gate whose connection
+drops (`CUT`: the browser then asks no one about any request) stops the fill at once.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ from urllib.parse import unquote_plus, urlsplit
 logger = logging.getLogger(__name__)
 
 GO, BLOCK, STOP, HOLD = "go", "block", "stop", "hold"
-LEAK, SOCKET = "leak", "socket"
+LEAK, SOCKET, CUT = "leak", "socket", "cut"
 READS = ("GET", "HEAD", "OPTIONS")
 # What a page loads from anywhere: never a send.
 LOADS = ("Script", "Stylesheet", "Font", "Image", "Media")
@@ -394,6 +395,11 @@ async def install(client, gate: Gate) -> None:
                 await client.send.Runtime.runIfWaitingForDebugger(session_id=new)
         asyncio.ensure_future(hold_then_go())
 
+    def on_cut(reading: "asyncio.Future") -> None:
+        # Our connection's reader ended without our stopping it: the connection dropped.
+        if not reading.cancelled():
+            gate.stop(CUT)
+
     try:
         client.register.Fetch.requestPaused(on_paused)
         client.register.Network.webSocketCreated(on_socket)
@@ -409,5 +415,10 @@ async def install(client, gate: Gate) -> None:
                 params={"targetId": t["targetId"], "flatten": True})))["sessionId"]
             gate.sessions[t["targetId"]] = session
             await _cover(client, gate, session)
+        # cdp-use's reader of the connection (`PROVEN`): it ends once the connection drops.
+        reading = client._message_handler_task
+        if reading is None or reading.done():
+            raise ConnectionError("the gate's connection is not open")
+        reading.add_done_callback(on_cut)
     except _WIRE_ERRORS as exc:  # whatever stops the gate stops the fill
         raise GateError(f"the gate could not be put on: {type(exc).__name__}") from exc

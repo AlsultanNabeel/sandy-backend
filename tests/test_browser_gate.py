@@ -300,3 +300,28 @@ def test_what_a_click_made_is_told_only_for_a_while_after_it(monkeypatch):
     gate.acted("click")
     monkeypatch.setattr(G.time, "monotonic", lambda: gate.acted_at + G.ACTED_S + 1)
     assert gate.decide("POST", URL_A, "XHR", request="r1") == G.BLOCK and gate.asked is None
+
+
+def test_a_gate_whose_connection_drops_stops_the_fill_and_our_own_stop_does_not():
+    """Once our connection drops the browser asks no one about any request: the fill stops."""
+    stops = []
+    for drop in (True, False):
+        client, gate = FakeCDP(), _gate()
+        gate.on_breach = stops.append
+
+        async def flow():
+            await G.install(client, gate)
+            if drop:
+                client.cut()
+            else:
+                await client.stop()
+            for _ in range(5):
+                await asyncio.sleep(0)
+        asyncio.run(flow())
+        assert gate.breach == (G.CUT if drop else None)
+    assert stops == [G.CUT]
+
+
+def test_the_gate_watches_the_reader_cdp_use_has():
+    from cdp_use.client import CDPClient
+    assert CDPClient("ws://127.0.0.1:9/x")._message_handler_task is None

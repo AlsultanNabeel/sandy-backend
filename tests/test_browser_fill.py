@@ -1046,3 +1046,39 @@ def test_the_emergency_stop_cuts_the_step_the_agent_is_on(world, monkeypatch):
         stop_all.stop("userA")
     _wait_for(lambda: bool(cut))
     assert cut and cut[0] - began < 2.5
+
+
+# ── The gate's connection drops: the fill stops at once and Steel closes it ──
+
+def test_a_gate_whose_connection_drops_while_he_is_asked_is_closed_at_steel_at_once(world):
+    _level("submit")
+    asked = _fill("en")
+    assert asked.get("needs_confirmation")
+    [holder] = world.clients
+    holder.cut()
+    _wait_for(lambda: "stop" in world.order)
+    assert world.order == ["release", "stop"]
+    job = _job(asked["ids"][0])
+    assert job["status"] == browser_job.FAILED and job["reason"] == "cut"
+
+
+def test_a_gate_whose_connection_drops_cuts_the_agent_at_once(world, monkeypatch):
+    import threading
+    _level("submit")
+    cut = []
+
+    async def agent(row, gate, client, tab, user_id, asked):
+        try:
+            await asyncio.sleep(8)                     # a step on its own connection, the gate's gone
+        except asyncio.CancelledError:
+            cut.append(time.monotonic())
+            raise
+        return {"status": browser_job.DONE, "result": ""}
+    monkeypatch.setattr(browser_job, "AGENT", agent)
+    threading.Thread(target=_fill, args=("en",)).start()
+    _wait_for(lambda: bool(world.clients))
+    time.sleep(0.5)
+    began = time.monotonic()
+    world.clients[0].cut()
+    _wait_for(lambda: bool(cut) and "stop" in world.order)
+    assert cut and cut[0] - began < 1 and world.order == ["release", "stop"]

@@ -57,9 +57,24 @@ class FakeCDP:
         self.send = _Send(self)
         self.register = _Register(self)
         self.stopped = False
+        self._reader: Optional[asyncio.Future] = None
+
+    @property
+    def _message_handler_task(self) -> asyncio.Future:
+        """The connection's reader, as cdp-use's: done once the connection drops (`cut`)."""
+        if self._reader is None:
+            self._loop = asyncio.get_running_loop()
+            self._reader = self._loop.create_future()
+        return self._reader
+
+    def cut(self) -> None:
+        """The connection drops (from any thread)."""
+        self._loop.call_soon_threadsafe(lambda: self._reader.done() or self._reader.set_result(None))
 
     async def stop(self):
         self.stopped = True
+        if self._reader is not None and not self._reader.done():
+            self._reader.cancel()
 
     def names(self) -> List[str]:
         return [name for name, _, _ in self.sent]

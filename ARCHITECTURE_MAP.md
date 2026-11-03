@@ -417,7 +417,7 @@ a page loads goes (script, style, font, image, media, by GET), anything that sen
 logged and the fill goes on. Any site but its own: a request whose address or body carries a value
 Sandy typed (as typed, escaped once or twice, in base64 or its web form, or in hex; the whole value
 from `MIN_TYPED` 3, its words from `MIN_WORD` 5) stops the fill (`leak`), an image too. A stop
-cancels the agent at once (`on_breach`), closes the session and tells him (`fill_leak`); no gate, no fill. Whatever stops a fill (a leak, the emergency stop, an error, its
+cancels the agent at once (`on_breach`), closes the session and tells him (`fill_leak`); no gate, no fill. A gate whose connection drops at any moment (`CUT`: cdp-use's reader of it ends, `_message_handler_task`, not by our own stop; the browser then asks no one about any request) stops the fill as a leak does: the agent's step is cut at once and never goes on on its own connection, a held fill or a handed page stops too, and Steel closes the session. Whatever stops a fill (a leak, the emergency stop, an error, its
 end), Steel closes the session first and only then does the gate come off it (`_shut`, in
 `_drive`'s own `finally`): while Steel has not closed it (`steel_client.release` and `closed` both
 say no) the gate stays on and Steel is asked again every `SHUT_S`, until Steel's own time is up. A session is closed once, by whoever gets there first
