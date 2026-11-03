@@ -889,3 +889,44 @@ def test_on_a_fill_only_site_the_held_request_never_goes(world, monkeypatch):
     [holder] = world.clients
     assert {"requestId": "r20"} not in holder.of("Fetch.continueRequest")
     assert not [p for p in holder.of("Fetch.failRequest") if p["requestId"] == "r20"]
+
+
+# ── A page handed to him stays under the gate until it closes ──
+
+def test_a_handed_page_stays_under_the_gate_and_once_his_his_sends_go(world, monkeypatch):
+    from app.brain import browser_gate as G
+    gates, real = [], G.Gate
+    monkeypatch.setattr(G, "Gate", lambda site: gates.append(real(site)) or gates[-1])
+    _level("fill")
+    monkeypatch.setattr(browser_job, "HANDED_S", 30)
+    out = _fill("en")
+    assert not out.get("needs_confirmation")
+    [holder], [gate] = world.clients, gates
+    job = _job_open()
+    assert job["status"] == browser_job.HANDED and not holder.stopped and world.released == []
+    assert gate.decide("POST", URL, "XHR") == G.BLOCK                       # the site's own: not his yet
+    assert gate.decide("POST", "https://cdn.other.net/collect", "XHR") == G.BLOCK
+    with active_user_profile_context(A):
+        assert browser_job.take_over(job["id"])
+    _wait_for(lambda: gate.his)
+    assert gate.decide("POST", URL, "Document") == G.GO                     # his now: it goes
+    assert gate.decide("POST", "https://cdn.other.net/collect", "XHR") == G.BLOCK
+    assert gate.decide("GET", "https://evil.example.org/c?e=n@example.com", "Image") == G.STOP
+    _wait_for(lambda: "stop" in world.order)
+    assert world.order == ["release", "stop"]
+
+
+def test_a_handed_page_is_closed_once_its_time_is_up(world, monkeypatch):
+    _level("fill")
+    monkeypatch.setattr(browser_job, "HANDED_S", 1)
+    _fill("en")
+    _wait_for(lambda: "stop" in world.order)
+    assert world.order == ["release", "stop"]
+    with active_user_profile_context(A):
+        assert browser_job.open_jobs() == []
+
+
+def _job_open():
+    with active_user_profile_context(A):
+        [row] = browser_job.open_jobs()
+        return browser_job.get(row["id"])

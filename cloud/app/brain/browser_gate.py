@@ -88,6 +88,8 @@ class Gate:
         self.typed: Set[str] = set()
         # Whether Sandy typed on the page yet: from then on a read after a click is held too.
         self.wrote = False
+        # A page he took over: what he sends to its own site goes (`browser_job._handing`).
+        self.his = False
         # The one request held for him ({session, request, method, url}) and who is told of it.
         self.paused: Optional[Dict[str, str]] = None
         self.on_hold: Optional[Callable[[Dict[str, str]], None]] = None
@@ -166,6 +168,8 @@ class Gate:
             self.blocked.append((method, url))
             self.stop(LEAK)
             return STOP
+        if own and self.his:
+            return GO
         if own:
             if self.armed is not None and self.armed == (str(session or ""), str(frame or "")):
                 self.armed = None

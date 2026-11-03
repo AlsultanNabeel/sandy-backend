@@ -4,7 +4,7 @@ without his yes (behind the `browser` switch).
 `sandy_browser_jobs`, one row per fill under its user, kept a day (TTL on `expire_at`):
 
   {site, url, goal, args, status, steel_id, live, action, summary, result, reason, thread_id,
-   lang, detached, told, beat_at, closed_at, created_at, updated_at, expire_at}
+   lang, detached, told, his, beat_at, closed_at, created_at, updated_at, expire_at}
 
 with `live` (Steel's view of the session, which has no protection of its own), `summary` and
 `result` sealed (`ltm_crypto`). `start` opens the session and runs the fill: our own gate goes on
@@ -55,6 +55,8 @@ WAIT_S = 80
 RUN_S = 300
 # A held fill waits for his yes as long as its question does (`pending.TTL_MINUTES`).
 HOLD_S = 10 * 60
+# A page handed to him stays open, the gate on it, this long at most.
+HANDED_S = 5 * 60
 BEAT_S = 5
 MAX_STEPS = 15
 LOAD_S = 20
@@ -182,7 +184,7 @@ def _limits(user_id: str) -> None:
     from app.features import web_page
     if web_page._over_cap(user_id):
         raise Busy("daily_cap")
-    held = {"status": {"$in": list(_HOLDING)}, "closed_at": None}
+    held = {"status": {"$in": [*_HOLDING, HANDED]}, "closed_at": None}
     coll, db = _coll(), get_db()
     try:
         if coll is not None and coll.count_documents(held) >= config.SANDY_BROWSER_FILLS_EACH:
@@ -308,19 +310,17 @@ STALE_S = 120
 
 def sweep() -> int:
     """Every session no one holds any more, closed and billed on its account (every minute,
-    `schedule_runner`): a fill whose holder stopped beating, a page he took over once Steel's own
-    time is up, a fill that ended without closing. How many were closed."""
+    `schedule_runner`): a fill or a handed page whose holder stopped beating, a fill that ended
+    without closing. How many were closed."""
     from app.features import trace_store
-    from app.integrations import steel_client
     db = get_db()
     if db is None:
         return 0
     now = _now()
-    stale, ended = now - timedelta(seconds=STALE_S), now - timedelta(milliseconds=steel_client.SESSION_MS)
+    stale = now - timedelta(seconds=STALE_S)
     try:
         rows = list(db[COLLECTION].find({"closed_at": None, "$or": [
-            {"status": {"$in": list(_HOLDING)}, "beat_at": {"$lt": stale}},
-            {"status": HANDED, "created_at": {"$lt": ended}},
+            {"status": {"$in": [*_HOLDING, HANDED]}, "beat_at": {"$lt": stale}},
             {"status": {"$in": [DONE, FAILED, STOPPED]}, "updated_at": {"$lt": stale}}]}).limit(100))
     except PyMongoError:
         logger.warning("[browser] the sweep could not read", exc_info=True)
@@ -437,15 +437,35 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             _note("browser_gate_stop", {"site": row["site"], "why": gate.breach}, ok=False)
             outcome = {"status": FAILED, "reason": gate.breach}
         outcome = _ending(row["_id"], outcome or {"status": STOPPED})
+        if outcome.get("status") == HANDED:
+            outcome = await _handing(row, gate, stopped, user_id)
         return outcome
     finally:
-        # Whatever stopped it (a leak, the emergency stop, an error, its end): Steel closes the
-        # session first, and only then does the gate come off it. A page handed to him stays open.
-        if outcome.get("status") != HANDED:
-            await _shut(row)
+        # Whatever stopped it (a leak, the emergency stop, an error, its end, a handed page's
+        # time): Steel closes the session first, and only then does the gate come off it.
+        await _shut(row)
         beat.cancel()
         if client is not None:
             await client.stop()
+
+
+async def _handing(row: Dict[str, Any], gate, stopped: asyncio.Event, user_id: str) -> Dict[str, Any]:
+    """A page handed to him: open, the gate still on it, until he is done with it (his stop),
+    the gate stops it, or `HANDED_S` is up. Once he takes it over (`his`), what he sends to the
+    site goes; nothing of his ever goes to another."""
+    from app.features import stop_all
+    stopped.clear()
+    deadline = time.monotonic() + HANDED_S
+    while time.monotonic() < deadline and not stopped.is_set():
+        now = get(row["_id"]) or {}
+        if now.get("status") != HANDED or now.get("closed_at") or stop_all.stopped(user_id):
+            return {"status": STOPPED if now.get("status") in (HANDED, STOPPED) else now.get("status") or STOPPED}
+        gate.his = bool(now.get("his"))
+        await asyncio.sleep(0.5)
+    if gate.breach is not None:
+        _note("browser_gate_stop", {"site": row["site"], "why": gate.breach}, ok=False)
+        return {"status": FAILED, "reason": gate.breach}
+    return {"status": HANDED}
 
 
 async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asyncio.Event,
@@ -757,7 +777,7 @@ def open_jobs() -> List[Dict[str, Any]]:
     if coll is None:
         return []
     try:
-        rows = list(coll.find({"status": {"$in": list(OPEN)}}).sort("created_at", -1).limit(20))
+        rows = list(coll.find({"status": {"$in": list(OPEN)}, "closed_at": None}).sort("created_at", -1).limit(20))
     except PyMongoError:
         logger.warning("[browser] could not list fills", exc_info=True)
         return []
@@ -769,16 +789,17 @@ def open_jobs() -> List[Dict[str, Any]]:
 def take_over(job_id: str) -> bool:
     """«خليني أكمّل أنا»: the agent stops before its next step and the page is his."""
     row = get(job_id)
-    if not row or row.get("status") not in OPEN:
+    if not row or row.get("status") not in OPEN or row.get("closed_at"):
         return False
-    _save(job_id, status=HANDED)
+    # His from now: what he sends to the site goes (`_handing`).
+    _save(job_id, status=HANDED, his=True)
     return True
 
 
 def live_url(job_id: str, control: bool) -> Optional[str]:
     """Steel's view of the session, to watch (or, after `take_over`, to drive)."""
     row = get(job_id)
-    if not row or row.get("status") not in OPEN or not row.get("live"):
+    if not row or row.get("status") not in OPEN or row.get("closed_at") or not row.get("live"):
         return None
     joiner = "&" if "?" in row["live"] else "?"
     flags = "interactive=true&showControls=true" if control else "interactive=false&showControls=false"

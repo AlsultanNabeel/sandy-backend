@@ -381,7 +381,12 @@ hidden field). His yes (`submit`, `APPROVED`) makes the real click (`Input.dispa
 the element's centre, refused when something else lies over it now, «moved») or Enter on that same
 element of the same page (`_act`), and the page that answers is the result; nothing is ever sent
 again from a copy. A `fill` site hands him the page (`HANDED`, what he filled named, the live
-link), with no question its yes could not answer, in the background too. *The gate* (`brain/browser_gate.py`) is the
+link), with no question its yes could not answer, in the background too. A page handed to him (a `fill`
+site's, or one he took over, `take_over`, `his`) stays open with the gate on it until it closes
+(`_handing`): five minutes at most (`HANDED_S`), his stop or the gate's; once he took it over what
+he sends to its own site goes (`gate.his`), and nothing of his to another; then Steel closes it
+and the gate comes off. A handed page counts as an open fill (`_limits`) and is gone from his list
+once closed (`open_jobs`, `live_url`). *The gate* (`brain/browser_gate.py`) is the
 safety net under it, our own connection: every target, tabs now and every tab, frame and worker
 later (`Target.setAutoAttach` with `waitForDebuggerOnStart` on the browser and on each target),
 has `Fetch.enable`, no websocket or peer connection in its scripts (`NO_SOCKETS_JS`, before the
@@ -405,7 +410,7 @@ say no) the gate stays on and Steel is asked again every `SHUT_S`, until Steel's
 and «طلّعها» on a site (`browser_sites.sign_out`, that site's fills) close every open fill's
 session at once (`stop_for`), not when Steel would a quarter hour later. A fill beats (`beat_at`, `BEAT_S`) while it
 holds its session; every minute (`schedule_runner`, `browser_job.sweep`) a session no one holds
-any more (no beat for `STALE_S`, a page he took over past Steel's own time, a fill that ended
+any more (no beat for `STALE_S`, a page handed to him included, a fill that ended
 without closing) is closed and billed on his account, never past `SESSION_MS`. His «no», a new request instead of an answer, or a second unclear one
 closes the session at once (`confirm.let_go`, `tools.LET_GO`), in the chat and on the call. Every
 call to the browser has `browser_cdp.CALL_S` (20 s) at most. The tool waits `WAIT_S` (80 s); past
