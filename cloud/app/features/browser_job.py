@@ -609,8 +609,11 @@ async def _spot(client, session: str, node: int, element: str) -> Optional[Dict[
         if not quads or len(quads[0]) != 8:
             return None
         x, y = sum(quads[0][0::2]) / 4, sum(quads[0][1::2]) / 4
+        # The click is made where it is on the screen; what lies there is asked by where it is on
+        # the page, scrolled as it is (a button lower down was not found otherwise, 3 Nov 2026).
+        view = (await within(client.send.Page.getLayoutMetrics(session_id=session))).get("cssLayoutViewport") or {}
         at = await within(client.send.DOM.getNodeForLocation(params={
-            "x": round(x), "y": round(y),
+            "x": round(x + float(view.get("pageX") or 0)), "y": round(y + float(view.get("pageY") or 0)),
             "includeUserAgentShadowDOM": True, "ignorePointerEventsNone": True}, session_id=session))
         there = ((await within(client.send.DOM.resolveNode(params={"backendNodeId": at.get("backendNodeId")},
                                                            session_id=session))).get("object") or {}).get("objectId")

@@ -954,11 +954,13 @@ def _job_open():
 def test_a_click_in_a_frame_lands_where_the_element_is_on_the_page(world):
     _level("submit")
     world.quad = [100, 300, 140, 300, 140, 340, 100, 340]     # a button inside a frame lower down
+    world.scrolled = 500                                      # the page scrolled down to it
     job = _fill("en")["ids"][0]
     assert _fill("en", confirmed_job=job)["ok"]
+    # Clicked where it is on the screen; what lies there asked where it is on the page.
     assert set(world.points) == {(120, 320)}
     [holder] = world.clients
-    assert {"x": 120, "y": 320, "includeUserAgentShadowDOM": True,
+    assert {"x": 120, "y": 820, "includeUserAgentShadowDOM": True,
             "ignorePointerEventsNone": True} in holder.of("DOM.getNodeForLocation")
 
 
