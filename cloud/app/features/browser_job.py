@@ -34,6 +34,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
@@ -348,8 +349,9 @@ async def _beating(job_id: str) -> None:
 # The fills whose session this process holds, by id ({row, user_id}): closed before it ends.
 _HELD: Dict[str, Dict[str, Any]] = {}
 _HELD_LOCK = threading.Lock()
-# How long a process that is ending waits for its sessions to close.
+# How long a process that is ending waits for its sessions to close, on a worker of its own.
 EXIT_S = 10
+_EXIT = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SandyFillExit")
 
 
 def close_held() -> int:
@@ -383,10 +385,11 @@ def close_on_exit() -> None:
 
     def closing(before):
         def handler(signum, frame):
-            # On a thread of its own: a lock the interrupted main thread holds never hangs it.
-            closer = threading.Thread(target=close_held, name="SandyFillExit", daemon=True)
-            closer.start()
-            closer.join(EXIT_S)
+            # On a worker of its own: a lock the interrupted main thread holds never hangs it.
+            try:
+                _EXIT.submit(contextvars.copy_context().run, close_held).result(EXIT_S)
+            except FuturesTimeout:
+                logger.warning("[browser] the open sessions were still closing as the process ended")
             if callable(before):
                 before(signum, frame)
             elif before == signal.SIG_DFL:
