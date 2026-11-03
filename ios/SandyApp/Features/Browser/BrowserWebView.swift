@@ -34,7 +34,7 @@ struct BrowserWebView: UIViewRepresentable {
 
         init(onLoad: ((WKWebView) -> Void)?) { self.onLoad = onLoad }
 
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
             onLoad?(webView)
         }
     }
