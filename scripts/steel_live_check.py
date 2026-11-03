@@ -392,6 +392,102 @@ def leaking_fill() -> list:
                             and order[-1:] == [("gate off", True)], str(order))]
 
 
+def cut_fill() -> list:
+    """A whole fill whose send is held for him, then the gate's own connection cut: nothing of it
+    ever reaches the server (a second connection that only watches the network sees no answer
+    from it), the fill stops and Steel closes the session."""
+    import threading
+
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+    from app.db import get_db
+    from app.features import browser_job, browser_sites
+    from app.integrations import browser_cdp, steel_client
+    from app.utils.user_profiles import active_user_profile_context
+    began, ready, done = threading.Event(), threading.Event(), threading.Event()
+    seen, held, gate_wire = [], [], []
+
+    async def submits(row, gate, client, tab, user_id, asked):
+        held.append(row["steel_id"])
+        began.set()
+        while not ready.is_set():
+            await asyncio.sleep(0.2)
+        await browser_cdp.evaluate(client, tab, FILL_JS)
+        gate.acted("type", "Sandy Test")
+        gate.acted("click", target="", node=1)
+        await browser_cdp.evaluate(client, tab, "document.forms[0].submit(); true")
+        await asyncio.sleep(30)
+        return {"status": browser_job.DONE, "result": "the held send was never asked about"}
+
+    def watch(steel_id):
+        async def run():
+            c = await connect(steel_client.connect_url(steel_id))
+            page = next(t["targetId"] for t in (await c.send.Target.getTargets())["targetInfos"] if t["type"] == "page")
+            sess = (await c.send.Target.attachToTarget(params={"targetId": page, "flatten": True}))["sessionId"]
+            c.register.Network.responseReceived(
+                lambda e, s=None: seen.append((e["response"]["url"], e["response"]["status"])))
+            await c.send.Network.enable(params={}, session_id=sess)
+            ready.set()
+            while not done.is_set():
+                await asyncio.sleep(0.2)
+            await browser_cdp._close(c)
+        asyncio.run(run())
+
+    connect = browser_cdp.connect
+
+    async def recorded(url):
+        client = await connect(url)
+        gate_wire.append((client, asyncio.get_running_loop()))
+        return client
+    real, browser_job.AGENT = browser_job.AGENT, submits
+    browser_cdp.connect = recorded
+    out = {}
+    try:
+        with active_user_profile_context(_world()):
+            browser_sites.set_level("httpbin.org", browser_sites.SUBMIT)
+
+            def fill():
+                with active_user_profile_context(_world_profile()):
+                    out.update(tools.execute("page_fill", {"url": FORM, "goal": "order", "details": "Name: Sandy Test"},
+                                             TurnCtx(user_id="live", thread_id="t1")))
+            filling = threading.Thread(target=fill)
+            filling.start()
+            began.wait(90)
+            browser_cdp.connect = connect
+            watcher = threading.Thread(target=watch, args=(held[0],), daemon=True)
+            watcher.start()
+            filling.join(120)
+            asked = bool(out.get("needs_confirmation"))
+            time.sleep(3)                     # a send let go would be answered by now
+            before = list(seen)
+            client, loop = gate_wire[0]
+            loop.call_soon_threadsafe(client.ws.transport.abort)    # the gate's connection drops
+            deadline = time.monotonic() + 60
+            job = {}
+            while time.monotonic() < deadline:
+                job = get_db()[browser_job.COLLECTION].find_one({}) or {}
+                if job.get("closed_at") and job.get("status") == browser_job.FAILED:
+                    break
+                time.sleep(0.5)
+            time.sleep(5)
+            done.set()
+    finally:
+        browser_job.AGENT = real
+        browser_cdp.connect = connect
+    answered = [(u, st) for u, st in seen if u.endswith("/post")]
+    status = _status(job.get("steel_id", ""))
+    return [report("a send held for him is answered with nothing at once, never kept waiting", asked
+                   and [st for u, st in before if u.endswith("/post")] in ([], [204]), str(before[-3:])),
+            report("its gate's connection cut: nothing of it reaches the server",
+                   all(st == 204 for _, st in answered), str(answered)),
+            report("and the fill stops and Steel closes the session", job.get("reason") == "cut"
+                   and status == "released", f"{job.get('status')} {job.get('reason')}, Steel {status}")]
+
+
+def _world_profile():
+    return {"chat_id": "live", "relation": "user", "permissions": "all"}
+
+
 def whole_fill() -> bool:
     """A whole fill through `page_fill` on the real model and Steel: asked before the click, then
     the real click on his yes."""
@@ -450,6 +546,7 @@ def main() -> int:
     finally:
         steel_client.release(session["id"], time.monotonic() - began)
     results += leaking_fill()
+    results += cut_fill()
     if args.fill:
         results.append(whole_fill())
     print(f"\n{sum(results)}/{len(results)} passed")
