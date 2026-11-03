@@ -195,7 +195,7 @@ def test_a_page_its_scripts_build_is_read_by_steel(web, steel):
     page = web_page.read("https://app.example/", user_id="userA")
     assert page["via"] == "steel" and "Built by the page's own scripts" in page["text"]
     assert steel == [("https://app.example/", False)]
-    assert usage_store.browser_calls_today("userA") == 1 and usage_store.browser_calls_today("userB") == 0
+    assert _calls("userA") == 1 and _calls("userB") == 0
 
 
 def test_a_page_read_whole_by_a_plain_request_never_calls_steel(web, steel):
@@ -221,6 +221,50 @@ def test_steel_stops_at_the_days_limit_per_account(web, steel, monkeypatch):
         web_page.read("https://shy.example/", user_id="userA")
     assert e.value.code == "daily_cap" and len(steel) == 2
     assert web_page.read("https://shy.example/", user_id="userB")["via"] == "steel"
+
+
+def test_two_reads_at_once_never_both_take_the_last_of_the_days_calls(web, steel, monkeypatch, brain_db):  # noqa: F811
+    import threading
+    import time as clock
+    monkeypatch.setattr(web_page.config, "SANDY_BROWSER_DAILY", 2)
+    web.hosts["shy.example"] = "93.184.216.34"
+    web.pages["https://shy.example/"] = Resp(status=403)
+    # A read of the count that takes its time: a check apart from the count lets every one through.
+    coll = type(brain_db[usage_store._DAILY])
+    real = coll.find_one
+    def slow(self, *a, **kw):
+        found = real(self, *a, **kw)
+        clock.sleep(0.05)
+        return found
+    monkeypatch.setattr(coll, "find_one", slow)
+    out = []
+
+    def read():
+        try:
+            out.append(web_page.read("https://shy.example/", user_id="userA")["via"])
+        except web_page.PageError as exc:
+            out.append(exc.code)
+    runs = [threading.Thread(target=read) for _ in range(6)]
+    for run in runs:
+        run.start()
+    for run in runs:
+        run.join()
+    assert len(steel) == 2 and sorted(out) == ["daily_cap"] * 4 + ["steel"] * 2
+
+
+def test_a_count_that_cannot_be_read_never_opens_steel(web, steel, monkeypatch, brain_db):  # noqa: F811
+    from pymongo.errors import PyMongoError
+    web.hosts["shy.example"] = "93.184.216.34"
+    web.pages["https://shy.example/"] = Resp(status=403)
+    coll = type(brain_db[usage_store._DAILY])
+
+    def down(self, *a, **kw):
+        raise PyMongoError("down")
+    for name in ("find_one", "find_one_and_update", "update_one"):
+        monkeypatch.setattr(coll, name, down)
+    with pytest.raises(web_page.PageError) as e:
+        web_page.read("https://shy.example/", user_id="userA")
+    assert e.value.code == "daily_cap" and steel == []
 
 
 def test_with_the_limit_reached_what_the_plain_request_read_is_still_answered(web, steel, monkeypatch):
@@ -344,3 +388,9 @@ def test_what_the_pages_styles_show_is_read(web, style, markup):
     web.hosts["notes.example"] = "93.184.216.34"
     web.pages["https://notes.example/"] = Resp(body=body.encode())
     assert "Shown words of the page." in web_page.read("https://notes.example/", user_id="userA")["text"]
+
+
+def _calls(user_id):
+    """Today's calls to Steel on his usage row."""
+    row = usage_store.get_db()[usage_store._DAILY].find_one({"_id": usage_store._day_key(user_id)}) or {}
+    return int(row.get("browser") or 0)

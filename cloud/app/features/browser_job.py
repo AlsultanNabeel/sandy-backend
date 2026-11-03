@@ -211,12 +211,12 @@ def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) 
     """A fill of ``args`` ({url, goal, details}) begun; its id. Raises Busy past a limit and
     SteelError when no session could be opened. It counts on the day's browser calls."""
     from app.blocks import _base
-    from app.features import usage_store, web_page
+    from app.features import web_page
     from app.integrations import steel_client
     url = web_page.check_url(str(args.get("url") or ""))
     if not _proven():
         raise Busy("unproven")
-    if web_page._over_cap(user_id):
+    if not web_page.take_call(user_id):
         raise Busy("daily_cap")
     coll = _coll()
     if coll is None or get_db() is None:
@@ -242,7 +242,6 @@ def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) 
             logger.warning("[browser] could not drop a fill that never began", exc_info=True)
         raise
     _save(job_id, steel_id=session["id"], live=session["debug_url"])
-    usage_store.add_browser_call(user_id)
     _on_pool(job_id, user_id)
     return job_id
 

@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from pymongo.errors import PyMongoError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from app.db import configure, get_db
 
@@ -147,28 +147,23 @@ def add_voice_seconds(user_id: str, seconds: float) -> None:
         logger.warning("[UsageStore] voice seconds not recorded for %s", user_id, exc_info=True)
 
 
-def browser_calls_today(user_id: str) -> int:
-    """Calls to the paid browser service this user made today (0 when unreadable: fails open)."""
-    if get_db() is None or not user_id:
-        return 0
-    try:
-        doc = get_db()[_DAILY].find_one({"_id": _day_key(user_id)}, {"browser": 1}) or {}
-    except PyMongoError:
-        logger.debug("[UsageStore] browser calls read skipped", exc_info=True)
-        return 0
-    return int(doc.get("browser") or 0)
-
-
-def add_browser_call(user_id: str) -> None:
-    """One call to the paid browser service on today's count."""
-    if get_db() is None or not user_id:
-        return
+def take_browser_call(user_id: str, cap: int) -> bool:
+    """One call to the paid browser service taken on today's count, if it stays within ``cap``:
+    checked and counted in one write, so two at once never both pass the last one. False at the
+    cap, and when the count cannot be read or written: it never opens on a failure."""
+    if get_db() is None or not user_id or int(cap) <= 0:
+        return False
     now = _now()
     try:
-        get_db()[_DAILY].update_one(
-            {"_id": _day_key(user_id)},
+        get_db()[_DAILY].find_one_and_update(
+            {"_id": _day_key(user_id), "$or": [{"browser": {"$lt": int(cap)}}, {"browser": {"$exists": False}}]},
             {"$inc": {"browser": 1}, "$set": {"updated_at": now},
              "$setOnInsert": {"user_id": user_id, "date": f"{now:%Y-%m-%d}"}},
             upsert=True)
+    except DuplicateKeyError:
+        # Today's row is there and at the cap: the upsert found nothing to match.
+        return False
     except PyMongoError:
-        logger.warning("[UsageStore] browser call not counted", exc_info=True)
+        logger.warning("[UsageStore] browser call not counted: refused", exc_info=True)
+        return False
+    return True

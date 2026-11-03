@@ -20,7 +20,7 @@ from cdp_fake import FakeCDP
 from app import notify
 from app.brain import browser_guard, lang, loop, pending, tools
 from app.brain.ctx import TurnCtx
-from app.features import browser_job, browser_sites, stop_all
+from app.features import browser_job, browser_sites, stop_all, usage_store
 from app.integrations import browser_cdp, steel_client
 from app.utils.user_profiles import active_user_profile_context
 
@@ -617,10 +617,9 @@ def test_the_server_runs_as_many_as_it_may_across_every_account(world, brain_db,
 
 
 def test_a_fill_counts_on_the_days_browser_calls_and_stops_at_its_limit(world, monkeypatch):
-    from app.features import usage_store
     _level("submit")
     _fill("en")
-    assert usage_store.browser_calls_today("userA") == 1
+    assert _calls("userA") == 1
     monkeypatch.setattr(browser_job.config, "SANDY_BROWSER_DAILY", 1)
     with active_user_profile_context(A):
         browser_job.let_go(browser_job.open_jobs()[0]["id"])
@@ -1203,3 +1202,9 @@ def test_the_emergency_stop_pressed_after_his_yes_stops_the_click_before_it_is_m
     finally:
         with active_user_profile_context(A):
             stop_all.resume("userA")
+
+
+def _calls(user_id):
+    """Today's calls to Steel on his usage row."""
+    row = usage_store.get_db()[usage_store._DAILY].find_one({"_id": usage_store._day_key(user_id)}) or {}
+    return int(row.get("browser") or 0)

@@ -384,15 +384,15 @@ def _thin(page: Optional[Dict[str, Any]]) -> bool:
     return page is None or len(str(page.get("text") or "")) < THIN
 
 
-def _over_cap(user_id: str) -> bool:
+def take_call(user_id: str) -> bool:
+    """One of today's calls to Steel taken, checked and counted in one write; False at
+    `SANDY_BROWSER_DAILY`, or when the count cannot be read: never open on a failure."""
     from app.features import usage_store
-    return usage_store.browser_calls_today(user_id) >= config.SANDY_BROWSER_DAILY
+    return usage_store.take_browser_call(user_id, config.SANDY_BROWSER_DAILY)
 
 
 def _by_steel(url: str, user_id: str) -> Dict[str, Any]:
-    from app.features import usage_store
     from app.integrations import steel_client
-    usage_store.add_browser_call(user_id)
     data = steel_client.scrape(url)
     page = extract(data["html"], url)
     page["login"] = _wants_login(data["html"], url, page["text"])
@@ -414,9 +414,7 @@ def _by_screenshot(url: str, user_id: str) -> Optional[Dict[str, Any]]:
     import base64
 
     from app.brain import background
-    from app.features import usage_store
     from app.integrations import steel_client
-    usage_store.add_browser_call(user_id)
     shot = steel_client.scrape(url, screenshot=True)["screenshot"]
     if not shot.startswith("https://"):
         return None
@@ -455,7 +453,7 @@ def read(url: str, *, user_id: str) -> Dict[str, Any]:
     for step in ("steel", "screenshot"):
         if not _thin(page) or not steel_client.configured():
             break
-        if _over_cap(user_id):
+        if not take_call(user_id):
             capped = True
             break
         try:
@@ -492,14 +490,12 @@ def read_signed_in(url: str, state: Dict[str, Any], *, user_id: str) -> Dict[str
     screenshot: Steel keeps those at a public link."""
     import asyncio
 
-    from app.features import usage_store
     from app.integrations import steel_client
     url = check_url(url)
     if not steel_client.configured():
         raise PageError("unreachable", site_of(url))
-    if _over_cap(user_id):
+    if not take_call(user_id):
         raise PageError("daily_cap", site_of(url))
-    usage_store.add_browser_call(user_id)
     try:
         page = asyncio.run(_live_read(url, state))
     except (steel_client.SteelError, OSError, RuntimeError, KeyError) as exc:
