@@ -30,6 +30,21 @@ SWITCH = "tasks"
 # (`tools_tasks._check_allowed`, `task_runner._probe`).
 READ_TOOLS = ("web_search", "recall", "summarize", "weather", "device_state", "page_read")
 ALLOWED = READ_TOOLS
+# What reads his own data: his memory, his rows, his devices. Never offered in one step of a
+# task's thinking with a page read (`step_tools`), so what a page says can never carry it away.
+PRIVATE_READS = ("recall", "summarize", "device_state")
+
+
+def step_tools(spec: Mapping[str, Any]) -> List[str]:
+    """The tools a task's model may use as it thinks: a check on his own data keeps those and
+    no page; a check on a page, or a page among its tools, keeps the page and none of his data."""
+    allowed = [t for t in spec.get("tools") or [] if t in ALLOWED]
+    check = str((spec.get("probe") or {}).get("tool") or "")
+    if check in PRIVATE_READS:
+        return [t for t in allowed if t != "page_read"]
+    if check == "page_read" or "page_read" in allowed:
+        return [t for t in allowed if t not in PRIVATE_READS]
+    return allowed
 
 
 # How its results are emailed, as he said it: on every change, a summary once a day at his hour,

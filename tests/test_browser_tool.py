@@ -356,3 +356,45 @@ def test_a_tasks_model_reads_on_from_its_page_as_a_turn_does(watched, monkeypatc
     _tick(watched.doc)
     assert ("https://evil.example/c", "page_not_followed") in tried
     assert ("https://jobs.example/p/1", None) in tried
+
+
+# ── A task that reads pages never holds his own data in the same step ──
+
+def _offered_in_a_step(monkeypatch, probe, tool_names):
+    offered = []
+
+    def model(what, messages, **kw):
+        if what == "task":
+            offered.append(sorted(s["function"]["name"] for s in kw.get("tools") or []))
+        return NS(choices=[NS(message=NS(content="NOTHING", tool_calls=None))])
+    monkeypatch.setattr(background, "call", model)
+    spec = {"instructions": "watch", "notify_when": "news", "probe": probe, "tools": tool_names, "lang": "en"}
+    diff = {"added": [{"title": "x"}], "removed": [], "changed": [], "numbers": []}
+    with active_user_profile_context(A):
+        task_runner._think({"_id": "t"}, spec, diff, {}, TurnCtx(user_id="userA", whole=True), "userA")
+    return offered[0]
+
+
+@pytest.mark.parametrize("probe, tool_names, offered", [
+    ({"tool": "page_read", "args": {"url": "https://jobs.example/"}},
+     ["page_read", "recall", "summarize", "device_state", "weather"], ["page_read", "weather"]),
+    ({"tool": "web_search", "args": {"query": "jobs"}}, ["web_search", "page_read", "recall"],
+     ["page_read", "web_search"]),
+    ({"tool": "recall", "args": {"kind": "fact"}}, ["recall", "page_read", "web_search"], ["recall", "web_search"]),
+])
+def test_his_own_data_and_a_page_read_are_never_offered_in_one_step(on, monkeypatch, probe, tool_names, offered):
+    assert _offered_in_a_step(monkeypatch, probe, tool_names) == offered
+
+
+def test_a_tool_left_out_of_the_step_is_refused_if_the_model_calls_it(on, monkeypatch):
+    ran = []
+    monkeypatch.setattr(task_runner.tools, "execute", lambda name, args, ctx: ran.append(name) or {"ok": True})
+    replies = iter([NS(content=None, tool_calls=[NS(id="c1", function=NS(name="recall", arguments="{}"))]),
+                    NS(content="NOTHING", tool_calls=None)])
+    monkeypatch.setattr(background, "call", lambda *a, **kw: NS(choices=[NS(message=next(replies))]))
+    spec = {"instructions": "watch", "notify_when": "news", "lang": "en", "tools": ["page_read", "recall"],
+            "probe": {"tool": "page_read", "args": {"url": "https://jobs.example/"}}}
+    with active_user_profile_context(A):
+        task_runner._think({"_id": "t"}, spec, {"added": [], "removed": [], "changed": [], "numbers": []}, {},
+                           TurnCtx(user_id="userA", whole=True), "userA")
+    assert ran == []

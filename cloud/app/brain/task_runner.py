@@ -8,7 +8,8 @@ and the result goes out through `notify.deliver`. Never a word aloud.
    seen or a period's end, and the order of a list are left out; of a web search, each
    result's title and link alone) is the same as the last
    run's: the run ends there, with no model call and no message.
-2. The model, on what changed, with the task's own tools only (within `ALLOWED`), at most
+2. The model, on what changed, with the task's own tools only (within `ALLOWED`; never his own
+   data with a page, `tasks.step_tools`), at most
    `MAX_STEPS` steps: it answers what is worth telling him, or `NOTHING`.
 3. The review: the model reads that once against the task and the data, and answers it as it
    should be sent, or `NOTHING`.
@@ -44,7 +45,7 @@ from app.features import trace_store
 
 logger = logging.getLogger(__name__)
 
-SWITCH, READ_TOOLS, ALLOWED = tasks.SWITCH, tasks.READ_TOOLS, tasks.ALLOWED
+SWITCH, READ_TOOLS = tasks.SWITCH, tasks.READ_TOOLS
 NOTHING = "NOTHING"
 MAX_STEPS = 4
 FAILURES_TO_STOP = 3
@@ -255,7 +256,7 @@ def _text(resp: Any) -> str:
 def _think(doc: Dict[str, Any], spec: Dict[str, Any], diff: Dict[str, Any], before: Dict[str, Any],
            ctx: TurnCtx, uid: str) -> str:
     """The model's message on what changed, or NOTHING."""
-    allowed = [t for t in spec.get("tools") or [] if t in ALLOWED]
+    allowed = tasks.step_tools(spec)
     specs = [s for s in tools.openai_tools(uid) if s["function"]["name"] in allowed]
     messages = _think_messages(spec, diff, before)
     for _ in range(MAX_STEPS):
