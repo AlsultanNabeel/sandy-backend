@@ -219,6 +219,8 @@ class Gate:
         self.his = False
         # The one request held for him ({session, request, method, url}) and who is told of it.
         self.paused: Optional[Dict[str, str]] = None
+        # What he filled, read before the agent's last click or key (a held page cannot be read).
+        self.filled: List[Dict[str, Any]] = []
         self.on_hold: Optional[Callable[[Dict[str, str]], None]] = None
         # The tab and frame whose one send his yes lets through, until it goes (`approve`).
         self.armed: Optional[Tuple[str, str]] = None
@@ -243,6 +245,11 @@ class Gate:
         if len(whole) >= MIN_TYPED:
             self.typed.add(whole)
         self.typed.update(word for word in whole.split() if len(word) >= MIN_WORD)
+
+    def drop_paused(self) -> Optional[Dict[str, str]]:
+        """The held request, never to go (a fill-only site's)."""
+        paused, self.paused = self.paused, None
+        return paused
 
     def let_paused(self) -> Optional[Dict[str, str]]:
         """His yes on the held request: it goes, once."""

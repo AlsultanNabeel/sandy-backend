@@ -415,7 +415,8 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         def on_hold(held: Dict[str, str]) -> None:
             # What the agent's click or key made is held: the agent stops, and he is asked.
             where = urlsplit(held["url"])
-            asked.update(kind="request", session=held["session"], label=f"{where.hostname}{where.path}")
+            asked.update(kind="request", session=held["session"], label=f"{where.hostname}{where.path}",
+                         filled=gate.filled)
             _note("browser_asked", {"site": row["site"], "element": asked["label"]})
             stopped.set()
         gate.on_hold = on_hold
@@ -488,12 +489,18 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
     """The page held as it is, the gate on it, until his answer; on his yes, the action."""
     from app.integrations import browser_cdp
     session = asked.get("session") or gate.sessions.get(asked.get("target")) or tab
-    filled = await browser_cdp.evaluate(client, session, _FILLED_JS) or []
+    # A page whose request is held is frozen until it is answered (seen on Chrome, 3 Nov 2026):
+    # what he filled was read before the click that made it.
+    filled = (asked.get("filled") if asked["kind"] == "request"
+              else await browser_cdp.evaluate(client, session, _FILLED_JS)) or []
     _note("browser_held", {"site": row["site"], "element": asked.get("label", ""),
                            "fields": [f.get("field") for f in filled]})
     from app.features import browser_sites
     if browser_sites.level(row["site"]) != browser_sites.SUBMIT:
-        # Her yes could not send here: no question, the page is his.
+        # Her yes could not send here: no question, the page is his. A held request never goes:
+        # answered with nothing (204), the page stays as it was, filled, and wakes.
+        if asked["kind"] == "request":
+            await _nothing(client, gate.drop_paused())
         _save(row["_id"], status=HANDED, summary=_summary(filled))
         now = get(row["_id"]) or {}
         if now.get("detached"):
@@ -508,6 +515,19 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
     if answer != APPROVED:
         return {"status": answer or STOPPED, **({} if answer else {"reason": "expired"})}
     return await _act(row, gate, client, session, asked)
+
+
+async def _nothing(client, held: Optional[Dict[str, str]]) -> None:
+    """A held request answered with no content: it goes nowhere, and its page stays as it is."""
+    from app.brain import browser_gate
+    from app.integrations.browser_cdp import within
+    if held is None:
+        return
+    try:
+        await within(client.send.Fetch.fulfillRequest(params={
+            "requestId": held["request"], "responseCode": 204, "responseHeaders": []}, session_id=held["session"]))
+    except browser_gate._WIRE_ERRORS:
+        logger.info("[browser] a held request was gone before it was answered")
 
 
 async def _answered(job_id: str, user_id: str) -> Optional[str]:
@@ -590,8 +610,8 @@ async def _spot(client, session: str, node: int, element: str) -> Optional[Dict[
             return None
         x, y = sum(quads[0][0::2]) / 4, sum(quads[0][1::2]) / 4
         at = await within(client.send.DOM.getNodeForLocation(params={
-            "x": round(x), "y": round(y), "includeUserAgentShadowDOM": True, "ignorePointerEventsNone": True},
-            session_id=session))
+            "x": round(x), "y": round(y),
+            "includeUserAgentShadowDOM": True, "ignorePointerEventsNone": True}, session_id=session))
         there = ((await within(client.send.DOM.resolveNode(params={"backendNodeId": at.get("backendNodeId")},
                                                            session_id=session))).get("object") or {}).get("objectId")
         same = there and ((await within(client.send.Runtime.callFunctionOn(params={
@@ -658,6 +678,15 @@ async def _sending(name: str, params: Dict[str, Any], browser_session, gate, cli
     return None
 
 
+async def _filled_now(client, tab: str) -> List[Dict[str, Any]]:
+    from app.brain import browser_gate
+    from app.integrations import browser_cdp
+    try:
+        return await browser_cdp.evaluate(client, tab, _FILLED_JS) or []
+    except browser_gate._WIRE_ERRORS:
+        return []
+
+
 def _label(node) -> str:
     attrs = getattr(node, "attributes", None) or {}
     return str(attrs.get("name") or attrs.get("id") or attrs.get("aria-label") or getattr(node, "tag_name", ""))
@@ -694,6 +723,9 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
                     return ActionResult(error="Type it without a line break: a line break can send the form.")
                 if name == "click" and params.get("index") is None:
                     return ActionResult(error="Click an element by its index.")
+                if name in ("click", "send_keys"):
+                    # What he filled, read while the page can still be read (`_hold`).
+                    gate.filled = await _filled_now(client, tab)
                 held = await _sending(name, params, browser_session, gate, client)
                 if held:
                     asked.update(held)

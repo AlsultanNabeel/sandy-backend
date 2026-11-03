@@ -38,7 +38,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
     brain_db["sandy_users"].insert_one({"_id": "userA"})
     browser_sites.init_browser_sites(brain_db)
     w = NS(snapshot=FORM, clients=[], opened=[], released=[], mode="submit", sent_notes=[], pressed=[], here=True,
-           order=[], refuse=0, shut=set(), points=[], quad=[0, 0, 20, 0, 20, 40, 0, 40],
+           order=[], refuse=0, shut=set(), points=[], quad=[0, 0, 20, 0, 20, 40, 0, 40], scrolled=0,
            filled=[{"field": "Name", "value": "Nabeel"}, {"field": "Email", "value": "n@example.com"}],
            result="<html><body><main><p>Thanks Nabeel, your application 77 was received.</p></main></body></html>")
 
@@ -98,6 +98,8 @@ def world(monkeypatch, brain_db):  # noqa: F811
         client.answers["Input.dispatchMouseEvent"] = press(client)
         client.answers["DOM.getNodeForLocation"] = {"backendNodeId": 7, "frameId": "f1"}
         client.answers["DOM.getContentQuads"] = lambda params, session: {"quads": [w.quad]}
+        client.answers["Page.getLayoutMetrics"] = lambda params, session: {"cssLayoutViewport": {"pageX": 0,
+                                                                                                "pageY": w.scrolled}}
         stop = client.stop
 
         async def stopped():
@@ -494,6 +496,7 @@ def _tools(monkeypatch, sends):
     asked = {}
     row = {"_id": "j1", "site": "forms.example.com", "steel_id": "st1", "goal": "apply", "args": {}}
     asyncio.run(browser_job._agent(row, gate, client, "s1", "userA", asked))
+    client.gate = gate
     page = NS(agent_focus_target_id="t1")
 
     async def element(index):
@@ -511,6 +514,15 @@ def test_a_click_that_sends_is_not_made_and_he_is_asked(monkeypatch):
     assert result.is_done and done == [] and asked == {"kind": "click", "target": "t1", "node": 7, "label": "go"}
     [call] = client.of("Runtime.callFunctionOn")
     assert call["functionDeclaration"] == browser_job._SENDS_JS and call["objectId"] == "o7"
+
+
+def test_what_he_filled_is_read_before_each_click_while_the_page_can_be(monkeypatch):
+    run, asked, done, client = _tools(monkeypatch, sends=False)
+    client.answers["Runtime.evaluate"] = lambda params, session: {"result": {
+        "value": [{"field": "Name", "value": "Nabeel"}] if params["expression"] == browser_job._FILLED_JS else None,
+        "objectId": "o8"}}
+    run(click={"index": 3})
+    assert client.gate.filled == [{"field": "Name", "value": "Nabeel"}]
 
 
 def test_a_click_that_does_not_send_is_made(monkeypatch):
@@ -863,6 +875,7 @@ def test_a_session_steel_does_not_close_keeps_its_gate_until_it_does(world, monk
 def _clicks_through(row, gate, client, tab, user_id, asked):
     async def run():
         gate.acted("type", "Nabeel")
+        gate.filled = [{"field": "Name", "value": "Nabeel"}]       # read before the click (`_Asking`)
         gate.acted("click")    # on something that was not known to send: a link, a plain element
         client.handlers["Fetch.requestPaused"]({"requestId": "r20", "resourceType": "Document", "frameId": "f1",
                                                 "request": {"method": "GET", "url": URL + "/next?name=Nabeel"}}, "s1")
@@ -891,6 +904,8 @@ def test_on_a_fill_only_site_the_held_request_never_goes(world, monkeypatch):
     [holder] = world.clients
     assert {"requestId": "r20"} not in holder.of("Fetch.continueRequest")
     assert not [p for p in holder.of("Fetch.failRequest") if p["requestId"] == "r20"]
+    # Answered with nothing: it goes nowhere and the page, frozen while it was held, stays as it was.
+    assert {"requestId": "r20", "responseCode": 204, "responseHeaders": []} in holder.of("Fetch.fulfillRequest")
 
 
 # ── A page handed to him stays under the gate until it closes ──

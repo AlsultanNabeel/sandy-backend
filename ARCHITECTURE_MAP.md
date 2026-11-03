@@ -405,7 +405,10 @@ behind it (`shut`, also when nothing went); a request right after a click or a k
 `gate.paused`), the agent stops (`on_hold`) and he is asked as for a click (`asked.kind` «request»):
 any send, and once Sandy typed (`wrote`) any read too (a link with its query, a script's fetch),
 what a page loads aside; his yes lets that very request go once (`let_paused`, `Fetch.continueRequest`),
-on a fill-only site it never goes; any other send is blocked. Another site: what
+on a fill-only site it never goes and is answered with nothing (204, `_nothing`) so the page stays as
+it was, filled. A page whose request is held is frozen until it is answered (on Chrome and Steel,
+3 Nov 2026: not even read), so what he filled is read before each click or key of the agent
+(`gate.filled`); any other send is blocked. Another site: what
 a page loads goes (script, style, font, image, media, by GET), anything that sends is blocked and
 logged and the fill goes on. Any site but its own: a request whose address or body carries a value
 Sandy typed (as typed, escaped once or twice, in base64 or its web form, or in hex; the whole value
