@@ -596,7 +596,7 @@ def test_the_server_runs_as_many_as_it_may_across_every_account(world, brain_db,
     _level("submit")
     monkeypatch.setattr(browser_job.config, "SANDY_BROWSER_FILLS", 1)
     brain_db[browser_job.COLLECTION].insert_one({"_id": "other", "user_id": "userB", "status": browser_job.HELD,
-                                                 "closed_at": None})
+                                                 "closed_at": None, "created_at": browser_job._now()})
     out = _fill("en")
     assert out["ok"] is False and "busy" in out["reply"] and world.opened == []
 
@@ -953,3 +953,25 @@ def test_a_click_where_another_element_lies_now_is_never_made(world):
     world.here = False                    # what lies under the point is not what he said yes to
     out = _fill("en", confirmed_job=job)
     assert out["ok"] is False and "isn't where it was" in out["reply"] and world.pressed == []
+
+
+# ── The limits hold for two fills begun at once ──
+
+def test_two_fills_begun_at_once_never_both_pass_his_limit(world, monkeypatch):
+    import threading
+    _level("submit")
+    opened, real = [], steel_client.create_session
+
+    def slow():
+        time.sleep(0.5)                  # Steel takes its time: both have been counted by then
+        opened.append(1)
+        return real()
+    monkeypatch.setattr(steel_client, "create_session", slow)
+    outs = []
+    both = [threading.Thread(target=lambda: outs.append(_fill("en"))) for _ in range(2)]
+    for t in both:
+        t.start()
+    for t in both:
+        t.join(20)
+    assert len(opened) == 1, outs
+    assert sum("already have a form fill open" in (o.get("reply") or "") for o in outs) == 1

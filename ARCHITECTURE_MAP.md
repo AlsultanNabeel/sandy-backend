@@ -365,7 +365,9 @@ workers: a held fill keeps its thread). It runs only on the versions it was prov
 both pinned; any other and no fill, no session). *Its limits*: `MAX_STEPS` counted by us too, a cost in
 dollars (`SANDY_BROWSER_FILL_USD`, 0.30: its model calls and fees on its trace and its Steel time,
 `_spent`, `Trace.cost`), one open fill per account (`SANDY_BROWSER_FILLS_EACH`) and
-`SANDY_BROWSER_FILLS` (3) across the server (counted in Mongo and by the pool's own slots), and
+`SANDY_BROWSER_FILLS` (3) across the server (counted in Mongo and by the pool's own slots; the
+fill is written down first and counted with those written before it, `_admitted`, so two begun at
+once never both get past a limit; a handed page counts too), and
 each fill counts on the day's browser calls (`SANDY_BROWSER_DAILY`). *The question is on the
 action*: browser-use's agent (our model, `brain/browser_llm.SandyLLM`, every step through
 `background.call("browser_step")`; the site's domains only, no frame of another site

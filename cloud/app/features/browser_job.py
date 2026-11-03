@@ -175,19 +175,18 @@ def _proven() -> bool:
     return True
 
 
-def _limits(user_id: str) -> None:
-    """Busy when he is at the day's limit, has a fill open already, or the server has as many
-    as it runs."""
-    from app.features import web_page
-    if web_page._over_cap(user_id):
-        raise Busy("daily_cap")
-    held = {"status": {"$in": [*_HOLDING, HANDED]}, "closed_at": None}
-    coll, db = _coll(), get_db()
+def _admitted(job_id: str, user_id: str, began: datetime) -> None:
+    """Busy unless this fill, already written down, is within his limit and the server's,
+    counted with every fill written before it (by when, then by id): two begun at once never both
+    get past a limit, whichever process they are on."""
+    held = {"status": {"$in": [*_HOLDING, HANDED]}, "closed_at": None,
+            "$or": [{"created_at": {"$lt": began}}, {"created_at": began, "_id": {"$lt": job_id}}]}
+    db = get_db()
     try:
-        if coll is not None and coll.count_documents(held) >= config.SANDY_BROWSER_FILLS_EACH:
+        if db[COLLECTION].count_documents({**held, "user_id": str(user_id)}) >= config.SANDY_BROWSER_FILLS_EACH:
             raise Busy("busy")
         # Across every account and every process of the server.
-        if db is not None and db[COLLECTION].count_documents(held) >= config.SANDY_BROWSER_FILLS:
+        if db[COLLECTION].count_documents(held) >= config.SANDY_BROWSER_FILLS:
             raise Busy("busy_server")
     except PyMongoError:
         logger.warning("[browser] could not count the open fills", exc_info=True)
@@ -210,31 +209,36 @@ def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) 
     from app.blocks import _base
     from app.features import usage_store, web_page
     from app.integrations import steel_client
-    from app.utils.ltm_crypto import encrypt_field
     url = web_page.check_url(str(args.get("url") or ""))
     if not _proven():
         raise Busy("unproven")
-    _limits(user_id)
+    if web_page._over_cap(user_id):
+        raise Busy("daily_cap")
+    coll = _coll()
+    if coll is None or get_db() is None:
+        raise RuntimeError("no tenant")
     if not _SLOTS.acquire(blocking=False):
         raise Busy("busy_server")
+    # Written down first, then counted with those before it: the limits hold for two at once.
+    job_id, now = _base.new_id(), _now()
     try:
+        coll.insert_one({"_id": job_id, "site": web_page.site_of(url), "url": url,
+                         "goal": str(args.get("goal") or ""),
+                         "args": {k: args[k] for k in ("url", "goal", "details") if k in args},
+                         "status": RUNNING, "steel_id": None, "thread_id": thread_id, "lang": language,
+                         "detached": False, "beat_at": now, "closed_at": None, "created_at": now,
+                         "updated_at": now, "expire_at": now + KEEP})
+        _admitted(job_id, user_id, now)
         session = steel_client.create_session()
     except BaseException:
         _SLOTS.release()
+        try:
+            coll.delete_one({"_id": job_id})
+        except PyMongoError:
+            logger.warning("[browser] could not drop a fill that never began", exc_info=True)
         raise
+    _save(job_id, steel_id=session["id"], live=session["debug_url"])
     usage_store.add_browser_call(user_id)
-    job_id = _base.new_id()
-    coll = _coll()
-    if coll is None:
-        _SLOTS.release()
-        steel_client.release(session["id"])
-        raise RuntimeError("no tenant")
-    now = _now()
-    coll.insert_one({"_id": job_id, "site": web_page.site_of(url), "url": url, "goal": str(args.get("goal") or ""),
-                     "args": {k: args[k] for k in ("url", "goal", "details") if k in args},
-                     "status": RUNNING, "steel_id": session["id"], "live": encrypt_field(session["debug_url"]),
-                     "thread_id": thread_id, "lang": language, "detached": False, "beat_at": now,
-                     "closed_at": None, "created_at": now, "updated_at": now, "expire_at": now + KEEP})
     _on_pool(job_id, user_id)
     return job_id
 
