@@ -377,8 +377,9 @@ delete, publish, accept, confirm, subscribe, pay, order and their kin, إرسا�
 not done; a line break typed and a click by place are refused. The fill then holds the page as it
 is, the gate still on it, up to `HOLD_S` (ten minutes, the question's life), beating `beat_at`:
 `held`, a `needs_confirmation` naming what he filled (read back from the page, never a password or
-hidden field). His yes (`submit`, `APPROVED`) makes the real click (`Input.dispatchMouseEvent` on
-the element's centre, refused when something else lies over it now, «moved») or Enter on that same
+hidden field). His yes (`submit`, `APPROVED`) makes the real click (`Input.dispatchMouseEvent` on the element's centre in the page's own
+coordinates though it lie in a frame of the site, `DOM.getContentQuads`; refused, «moved», unless
+the element `DOM.getNodeForLocation` finds under that point is that very one or inside it) or Enter on that same
 element of the same page (`_act`), and the page that answers is the result; nothing is ever sent
 again from a copy. A `fill` site hands him the page (`HANDED`, what he filled named, the live
 link), with no question its yes could not answer, in the background too. A page handed to him (a `fill`

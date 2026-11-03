@@ -85,11 +85,8 @@ _SENDS_JS = r"""function () {
 _FOCUSED_JS = """(() => { const el = document.activeElement;
   if (!el || el === document.body || el.tagName.toLowerCase() === "textarea" || el.isContentEditable) return null;
   return el; })()"""
-# The element brought into view: where a real click lands, and whether it lands on it.
-_SPOT_JS = """function () { this.scrollIntoView({block: "center", inline: "center"});
-  const r = this.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
-  const at = document.elementFromPoint(x, y);
-  return {x, y, here: !!at && (at === this || this.contains(at))}; }"""
+# Whether the element under the point is this one, or inside it.
+_IS_JS = "function (at) { return !!at && (at === this || this.contains(at)); }"
 _TASK = (
     "Fill the form on this page for the user. What he wants: {goal}\n"
     "Use only these details of his: {details}\n"
@@ -531,16 +528,11 @@ async def _act(row, gate, client, session: str, asked: Dict[str, Any]) -> Dict[s
     element = (found.get("object") or {}).get("objectId")
     if not element:
         return {"status": FAILED, "reason": "moved"}
-    spot = ((await within(client.send.Runtime.callFunctionOn(params={
-        "functionDeclaration": _SPOT_JS, "objectId": element, "returnByValue": True},
-        session_id=session))).get("result") or {}).get("value") or {}
-    if not spot.get("here"):
+    spot = await _spot(client, session, asked["node"], element)
+    if spot is None:
         # Something else lies over it now: acting there is not what he said yes to.
         return {"status": FAILED, "reason": "moved"}
-    # The frame it lies in: the one his yes lets a send come from.
-    frame = str((await within(client.send.DOM.getNodeForLocation(params={
-        "x": round(spot["x"]), "y": round(spot["y"]), "includeUserAgentShadowDOM": True,
-        "ignorePointerEventsNone": True}, session_id=session))).get("frameId") or "")
+    frame = spot["frame"]
     if asked["kind"] == "click":
         point = {"x": spot["x"], "y": spot["y"], "button": "left", "clickCount": 1}
         for kind in ("mouseMoved", "mousePressed"):
@@ -564,6 +556,33 @@ async def _act(row, gate, client, session: str, asked: Dict[str, Any]) -> Dict[s
     finally:
         gate.shut()
     return _answered_page(gate, await browser_cdp.html(client, session), await browser_cdp.where(client, session))
+
+
+async def _spot(client, session: str, node: int, element: str) -> Optional[Dict[str, Any]]:
+    """Where a real click on ``node`` lands, in the page's own coordinates though it lie in a
+    frame (`DOM.getContentQuads`), and the frame it lies in; None unless the element under that
+    point is this very one, or inside it."""
+    from app.brain import browser_gate
+    from app.integrations.browser_cdp import within
+    try:
+        await within(client.send.DOM.scrollIntoViewIfNeeded(params={"backendNodeId": node}, session_id=session))
+        quads = (await within(client.send.DOM.getContentQuads(params={"backendNodeId": node},
+                                                              session_id=session))).get("quads") or []
+        if not quads or len(quads[0]) != 8:
+            return None
+        x, y = sum(quads[0][0::2]) / 4, sum(quads[0][1::2]) / 4
+        at = await within(client.send.DOM.getNodeForLocation(params={
+            "x": round(x), "y": round(y), "includeUserAgentShadowDOM": True, "ignorePointerEventsNone": True},
+            session_id=session))
+        there = ((await within(client.send.DOM.resolveNode(params={"backendNodeId": at.get("backendNodeId")},
+                                                           session_id=session))).get("object") or {}).get("objectId")
+        same = there and ((await within(client.send.Runtime.callFunctionOn(params={
+            "functionDeclaration": _IS_JS, "objectId": element, "arguments": [{"objectId": there}],
+            "returnByValue": True}, session_id=session))).get("result") or {}).get("value")
+    except browser_gate._WIRE_ERRORS:
+        # Not in the same frame as what lies there, or gone: not what he said yes to.
+        return None
+    return {"x": x, "y": y, "frame": str(at.get("frameId") or "")} if same else None
 
 
 def _answered_page(gate, html: str, url: str) -> Dict[str, Any]:

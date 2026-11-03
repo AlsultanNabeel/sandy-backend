@@ -196,6 +196,49 @@ async def gate_checks(session_id: str) -> list:
     return results
 
 
+# A frame of the site's own, lower down the page, with the form in it.
+OWN_FRAME_JS = """new Promise((done) => { const f = document.createElement("iframe"); f.src = "/forms/post";
+  f.style = "margin-top: 500px; width: 600px; height: 700px; border: 0"; f.id = "own";
+  f.onload = () => { const d = f.contentDocument; d.forms[0].custname.value = "Sandy Test";
+    d.forms[0].custtel.value = "000"; d.forms[0].custemail.value = "%s"; done(true); };
+  document.body.appendChild(f); })""" % EMAIL
+FRAME_BUTTON_JS = "document.getElementById('own').contentDocument.querySelector('form button')"
+COVER_JS = """(() => {
+  const c = document.createElement("div"); c.style = `position: fixed; left: 0; top: 0; width: 100vw;
+  height: 100vh; z-index: 9; background: transparent`; document.body.appendChild(c); return true; })()"""
+FRAME_ANSWERED_JS = "document.getElementById('own').contentWindow.location.pathname"
+
+
+async def frame_checks(session_id: str) -> list:
+    """His yes on a button inside a frame of the site's own: it lands there, and never when
+    something else lies over it."""
+    from app.features import browser_job
+    from app.integrations import browser_cdp
+    results = []
+    for covered in (True, False):
+        client, gate, tab = await _fresh(session_id)
+        try:
+            await browser_cdp.evaluate(client, tab, OWN_FRAME_JS)
+            if covered:
+                await browser_cdp.evaluate(client, tab, COVER_JS)
+            found = await client.send.Runtime.evaluate(params={"expression": FRAME_BUTTON_JS}, session_id=tab)
+            node = (await client.send.DOM.describeNode(params={"objectId": found["result"]["objectId"]},
+                                                       session_id=tab))["node"]["backendNodeId"]
+            out = await browser_job._act({"_id": "live", "site": "httpbin.org"}, gate, client, tab,
+                                         {"kind": "click", "node": node, "label": "submit"})
+            where = await browser_cdp.evaluate(client, tab, FRAME_ANSWERED_JS)
+            if covered:
+                results.append(report("a button in a frame with something over it is never clicked",
+                                      out.get("reason") == "moved" and not gate.sent, f"{out}"))
+            else:
+                results.append(report("his yes on a button inside a frame of the site lands there",
+                                      out.get("status") == browser_job.DONE and where == "/post"
+                                      and len(gate.sent) == 1, f"{out.get('status')} {out.get('reason', '')} {where}"))
+        finally:
+            await client.stop()
+    return results
+
+
 def live_view(debug_url: str) -> bool:
     import requests
     if not debug_url:
@@ -332,6 +375,7 @@ def main() -> int:
     began = time.monotonic()
     try:
         results += asyncio.run(gate_checks(session["id"]))
+        results += asyncio.run(frame_checks(session["id"]))
         results.append(live_view(session["debug_url"]))
     finally:
         steel_client.release(session["id"], time.monotonic() - began)

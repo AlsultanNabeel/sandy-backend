@@ -38,7 +38,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
     brain_db["sandy_users"].insert_one({"_id": "userA"})
     browser_sites.init_browser_sites(brain_db)
     w = NS(snapshot=FORM, clients=[], opened=[], released=[], mode="submit", sent_notes=[], pressed=[], here=True,
-           order=[], refuse=0, shut=set(),
+           order=[], refuse=0, shut=set(), points=[], quad=[0, 0, 20, 0, 20, 40, 0, 40],
            filled=[{"field": "Name", "value": "Nabeel"}, {"field": "Email", "value": "n@example.com"}],
            result="<html><body><main><p>Thanks Nabeel, your application 77 was received.</p></main></body></html>")
 
@@ -72,6 +72,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
     def press(client):
         def answer(params, session):
             w.pressed.append((params["type"], session))
+            w.points.append((params["x"], params["y"]))
             if params["type"] == "mouseReleased":
                 # The real click on the send button: the page's own send, through the gate.
                 client.handlers["Fetch.requestPaused"]({"requestId": "r10", "resourceType": "Document", "frameId": "f1",
@@ -84,8 +85,8 @@ def world(monkeypatch, brain_db):  # noqa: F811
         return answer
 
     def spot(params, session):
-        if "elementFromPoint" in params["functionDeclaration"]:
-            return {"result": {"value": {"x": 10, "y": 20, "here": w.here}}}
+        if params["functionDeclaration"] == browser_job._IS_JS:
+            return {"result": {"value": w.here}}
         return {"result": {"value": True}}
 
     async def connect(url):
@@ -96,6 +97,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
         client.answers["Runtime.callFunctionOn"] = spot
         client.answers["Input.dispatchMouseEvent"] = press(client)
         client.answers["DOM.getNodeForLocation"] = {"backendNodeId": 7, "frameId": "f1"}
+        client.answers["DOM.getContentQuads"] = lambda params, session: {"quads": [w.quad]}
         stop = client.stop
 
         async def stopped():
@@ -930,3 +932,24 @@ def _job_open():
     with active_user_profile_context(A):
         [row] = browser_job.open_jobs()
         return browser_job.get(row["id"])
+
+
+# ── A click inside a frame of the site ──
+
+def test_a_click_in_a_frame_lands_where_the_element_is_on_the_page(world):
+    _level("submit")
+    world.quad = [100, 300, 140, 300, 140, 340, 100, 340]     # a button inside a frame lower down
+    job = _fill("en")["ids"][0]
+    assert _fill("en", confirmed_job=job)["ok"]
+    assert set(world.points) == {(120, 320)}
+    [holder] = world.clients
+    assert {"x": 120, "y": 320, "includeUserAgentShadowDOM": True,
+            "ignorePointerEventsNone": True} in holder.of("DOM.getNodeForLocation")
+
+
+def test_a_click_where_another_element_lies_now_is_never_made(world):
+    _level("submit")
+    job = _fill("en")["ids"][0]
+    world.here = False                    # what lies under the point is not what he said yes to
+    out = _fill("en", confirmed_job=job)
+    assert out["ok"] is False and "isn't where it was" in out["reply"] and world.pressed == []
