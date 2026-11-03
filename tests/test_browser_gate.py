@@ -60,6 +60,30 @@ def test_a_typed_value_to_another_site_stops_the_fill_even_an_image(url, body):
     assert gate.breach == G.LEAK and stops == [G.LEAK]
 
 
+def _b64(text, web=False):
+    import base64
+    raw = text.encode()
+    return (base64.urlsafe_b64encode(raw) if web else base64.b64encode(raw)).decode().rstrip("=")
+
+
+@pytest.mark.parametrize("url, body", [
+    (f"https://evil.example.org/p.gif?d={_b64('Nabeel Alsultan')}", ""),
+    ("https://evil.example.org/c/" + _b64('{"email":"n@example.com"}', web=True), ""),
+    ("https://evil.example.org/c", f"blob={_b64('id=7&name=Nabeel Alsultan&x=1')}"),
+    (f"https://evil.example.org/p.gif?h={'Nabeel Alsultan'.encode().hex()}", ""),
+    (f"https://evil.example.org/p.gif?h={'n@example.com'.encode().hex().upper()}", ""),
+    ("https://evil.example.org/p.gif?u=Nabeel%2520Alsultan", "")])
+def test_a_typed_value_encoded_to_another_site_stops_the_fill(url, body):
+    gate = _gate()
+    assert gate.decide("GET" if not body else "POST", url, "Image", body=body) == G.STOP and gate.breach == G.LEAK
+
+
+def test_a_value_is_watched_by_its_words_of_five_letters_or_more_only():
+    gate = _gate(typed=("Sam Lee", "Nabeel Alsultan"))
+    assert gate.decide("GET", f"{OTHER}/Lee.png", "Image") == G.GO
+    assert gate.decide("GET", f"{OTHER}/a.png?q=Alsultan", "Image") == G.STOP
+
+
 def test_a_short_value_is_too_common_to_tell_a_leak_by():
     gate = _gate(typed=("ok", "Nabeel Alsultan"))
     assert gate.decide("GET", f"{OTHER}/ok.png", "Image") == G.GO
@@ -179,7 +203,7 @@ def test_every_target_waits_until_the_gate_is_on_it_and_websockets_are_blocked()
     # Pages and frames get it before every new document of theirs, with their page domain on.
     for sid in ("s2", "s3"):
         assert names.index(("Page.enable", sid)) < names.index(("Page.addScriptToEvaluateOnNewDocument", sid))
-    assert {"source": G.NO_SOCKETS_JS, "runImmediately": True} in client.of("Page.addScriptToEvaluateOnNewDocument")
+    assert {"source": G.PAGE_GUARD_JS, "runImmediately": True} in client.of("Page.addScriptToEvaluateOnNewDocument")
     assert ("Page.addScriptToEvaluateOnNewDocument", "s4") not in names
     assert gate.sessions == {"t1": "s1", "ts2": "s2"}
 
@@ -263,3 +287,13 @@ def test_a_tab_gets_one_gate_even_when_it_is_attached_twice():
                                                       "waitingForDebugger": False})
     asyncio.run(flow())
     assert [sid for name, _, sid in client.sent if name == "Fetch.enable"] == ["s1"]
+
+
+@pytest.mark.parametrize("way", ["appendChild", "insertBefore", "replaceChild", "insertAdjacentElement",
+                                 "innerHTML", "outerHTML", "insertAdjacentHTML", "write", "setHTMLUnsafe",
+                                 "setAttribute", "setAttributeNS", "setAttributeNode", "setNamedItem",
+                                 "relList", "x-dns-prefetch-control"])
+def test_the_page_guard_holds_every_way_a_hint_to_another_host_gets_in(way):
+    """Each way a script can put a dns-prefetch or a preconnect into a page is covered; the guard
+    itself runs in a real browser (scripts/steel_live_check.py, «no hint to another host»)."""
+    assert way in G.PAGE_GUARD_JS and "dns-prefetch|preconnect" in G.PAGE_GUARD_JS

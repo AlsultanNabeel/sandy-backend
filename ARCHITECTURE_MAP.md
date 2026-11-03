@@ -390,7 +390,10 @@ and the gate comes off. A handed page counts as an open fill (`_limits`) and is 
 once closed (`open_jobs`, `live_url`). *The gate* (`brain/browser_gate.py`) is the
 safety net under it, our own connection: every target, tabs now and every tab, frame and worker
 later (`Target.setAutoAttach` with `waitForDebuggerOnStart` on the browser and on each target),
-has `Fetch.enable`, no websocket or peer connection in its scripts (`NO_SOCKETS_JS`, before the
+has `Fetch.enable`, no websocket or peer connection in its scripts and, in a page, no hint to open a name or a
+connection to another host (dns-prefetch, preconnect: by every way a script can put one in, markup
+written, a node put in, its rel or href changed in place; `x-dns-prefetch-control` off)
+(`PAGE_GUARD_JS`, before the
 page's own, `Page.enable` first or it never runs), websockets blocked and watched. The page's own site (told by the public suffix list,
 `publicsuffixlist` bundled and its private part too, so `a.netlify.app`, `b.github.io` and
 `c.herokuapp.com` are each a site of their own): reads go, after his yes exactly one send goes, the first from the tab and frame the click
@@ -403,7 +406,8 @@ what a page loads aside; his yes lets that very request go once (`let_paused`, `
 on a fill-only site it never goes; any other send is blocked. Another site: what
 a page loads goes (script, style, font, image, media, by GET), anything that sends is blocked and
 logged and the fill goes on. Any site but its own: a request whose address or body carries a value
-Sandy typed (as typed or encoded, `MIN_TYPED` 3) stops the fill (`leak`), an image too. A stop
+Sandy typed (as typed, escaped once or twice, in base64 or its web form, or in hex; the whole value
+from `MIN_TYPED` 3, its words from `MIN_WORD` 5) stops the fill (`leak`), an image too. A stop
 cancels the agent at once (`on_breach`), closes the session and tells him (`fill_leak`); no gate, no fill. Whatever stops a fill (a leak, the emergency stop, an error, its
 end), Steel closes the session first and only then does the gate come off it (`_shut`, in
 `_drive`'s own `finally`): while Steel has not closed it (`steel_client.release` and `closed` both
@@ -434,7 +438,7 @@ hidden (rules put in by script, off the page, near white on white, of no size, i
 box) is never read; a script's form submit is
 blocked; a font and a style from Google's sites load; a send to another site is blocked; a frame
 of another site never loads; a websocket never opens, nor one taken from a fresh frame (blocking it
-on the network alone did not hold: it opened, hence `NO_SOCKETS_JS`); an image to another site
+on the network alone did not hold: it opened, hence the page guard); an image to another site
 carrying what she typed is stopped; his yes is the real click on the same page and sends once, a
 second send is not let through, a new tab's send is blocked; the live view opens; and a whole fill
 on a page that leaks is stopped, its Steel session released, him told; a whole fill on the real

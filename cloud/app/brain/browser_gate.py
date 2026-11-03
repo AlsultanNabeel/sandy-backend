@@ -4,7 +4,7 @@
 It is our own connection to the session, apart from browser-use's (`install`): every target, the
 tabs open now and every tab, frame and worker attached later (`Target.setAutoAttach` with
 `waitForDebuggerOnStart` on the browser and on each target, so each one waits until the gate is
-on it), has `Fetch.enable` on it, no websocket or peer connection in its scripts (`NO_SOCKETS_JS`,
+on it), has `Fetch.enable` on it, no websocket or peer connection in its scripts (`PAGE_GUARD_JS`,
 before the page's own), websockets blocked (`Network.setBlockedURLs`) and watched
 (`Network.webSocketCreated`), and every request stops at the gate first (`decide`):
 
@@ -27,11 +27,14 @@ him. A gate that cannot be put on (`GateError`) means no fill at all.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import functools
 import ipaddress
 import logging
+import re
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
-from urllib.parse import quote, quote_plus, unquote_plus, urlsplit
+from urllib.parse import unquote_plus, urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -44,18 +47,126 @@ LOADS = ("Script", "Stylesheet", "Font", "Image", "Media")
 SENDING = ("click", "enter", "keys")
 # A typed value shorter than this is too common to tell a leak by («1», «ok»).
 MIN_TYPED = 3
+# A value is watched word by word too, each word this long or more («Nabeel» of «Nabeel Alsultan»;
+# never «Al» or «Lee», which any page carries).
+MIN_WORD = 5
+# What could be a value encoded in a request: base64 (and its web form) and hex.
+_B64 = re.compile(r"[A-Za-z0-9+/_-]{8,}={0,2}")
+_HEX = re.compile(r"(?:[0-9a-fA-F]{2}){4,}")
 _NO_NETWORK = ("data:", "blob:", "about:")
 _PATTERNS = [{"urlPattern": "*", "requestStage": "Request"}]
 _SOCKETS = {"urls": ["ws://*", "wss://*"],
             "urlPatterns": [{"urlPattern": "ws://*:*/*", "block": True}, {"urlPattern": "wss://*:*/*", "block": True}]}
 # Run in every page, frame and worker before its own scripts: no websocket, no peer connection
 # (each a way out the network gate never sees: tried on Steel, 2 Nov 2026, a blocked websocket
-# still opened).
-NO_SOCKETS_JS = """(() => { const no = function () { throw new DOMException("blocked", "SecurityError"); };
+# still opened), and in a page no hint to open a name or a connection to another host
+# (dns-prefetch, preconnect: they reach the network with no request the gate is asked about).
+PAGE_GUARD_JS = r"""(() => { const no = function () { throw new DOMException("blocked", "SecurityError"); };
   for (const name of ["WebSocket", "WebTransport", "RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel"]) {
     try { Object.defineProperty(globalThis, name, {value: no, writable: false, configurable: false}); } catch (e) {} }
+  if (typeof Element === "undefined" || typeof document === "undefined") return;
+  const HINT = /(^|\s)(dns-prefetch|preconnect)(\s|$)/i;
+  const away = (href) => { try { return new URL(href || "", location.href).hostname !== location.hostname; }
+    catch (e) { return true; } };
+  const P = (o, k) => Object.getOwnPropertyDescriptor(o, k);
+  const getAttr = Element.prototype.getAttribute, setAttr = Element.prototype.setAttribute,
+        dropAttr = Element.prototype.removeAttribute;
+  const isLink = (el) => !!el && el.nodeType === 1 && el.localName === "link";
+  // Whether a link with this rel and this href would be a hint to another host.
+  const foreign = (rel, href) => HINT.test(rel || "") && away(href);
+  const tame = (node) => {   // a node about to go in: its hints to other hosts lose their rel
+    if (!node || typeof node !== "object") return node;
+    const all = isLink(node) ? [node] : [];
+    if (node.querySelectorAll) all.push(...node.querySelectorAll("link"));
+    for (const l of all) if (foreign(getAttr.call(l, "rel"), getAttr.call(l, "href"))) dropAttr.call(l, "rel");
+    return node; };
+  const inert = (html) => { const t = document.createElement("template"); innerSet.call(t, String(html));
+    tame(t.content); return innerGet.call(t); };
+  const inner = P(Element.prototype, "innerHTML"), innerSet = inner.set, innerGet = inner.get;
+  const wrapArgs = (proto, names) => { for (const n of names) { const f = proto[n]; if (!f) continue;
+    Object.defineProperty(proto, n, {value: function (...a) { return f.apply(this, a.map(tame)); }, configurable: false}); } };
+  wrapArgs(Node.prototype, ["appendChild", "insertBefore", "replaceChild"]);
+  wrapArgs(Element.prototype, ["append", "prepend", "before", "after", "replaceWith", "replaceChildren",
+    "insertAdjacentElement"]);
+  wrapArgs(DocumentFragment.prototype, ["append", "prepend", "replaceChildren"]);
+  wrapArgs(Document.prototype, ["append", "prepend", "replaceChildren"]);
+  const wrapHtml = (proto, key) => { const d = P(proto, key); if (!d || !d.set) return;
+    Object.defineProperty(proto, key, {get: d.get, set: function (v) { d.set.call(this, inert(v)); }, configurable: false}); };
+  wrapHtml(Element.prototype, "innerHTML"); wrapHtml(Element.prototype, "outerHTML");
+  if (typeof ShadowRoot !== "undefined") wrapHtml(ShadowRoot.prototype, "innerHTML");
+  const adj = Element.prototype.insertAdjacentHTML;
+  Object.defineProperty(Element.prototype, "insertAdjacentHTML", {value: function (where, html) {
+    return adj.call(this, where, inert(html)); }, configurable: false});
+  for (const n of ["write", "writeln"]) { const f = Document.prototype[n];
+    Object.defineProperty(Document.prototype, n, {value: function (...a) { return f.apply(this, a.map(inert)); },
+      configurable: false}); }
+  for (const n of ["setHTMLUnsafe"]) for (const proto of [Element.prototype, typeof ShadowRoot !== "undefined" ? ShadowRoot.prototype : null]) {
+    const f = proto && proto[n]; if (f) Object.defineProperty(proto, n, {value: function (html) { return f.call(this, inert(html)); },
+      configurable: false}); }
+  // A link's rel or href changed in place, by any of the ways a script can.
+  const would = (el, name, value) => isLink(el) && ["rel", "href"].includes(String(name).toLowerCase())
+    && foreign(String(name).toLowerCase() === "rel" ? value : getAttr.call(el, "rel"),
+               String(name).toLowerCase() === "href" ? value : getAttr.call(el, "href"));
+  Object.defineProperty(Element.prototype, "setAttribute", {value: function (name, value) {
+    if (would(this, name, value)) return; return setAttr.call(this, name, value); }, configurable: false});
+  const setNS = Element.prototype.setAttributeNS;
+  Object.defineProperty(Element.prototype, "setAttributeNS", {value: function (ns, name, value) {
+    if (would(this, String(name).split(":").pop(), value)) return; return setNS.call(this, ns, name, value); },
+    configurable: false});
+  for (const key of ["rel", "href"]) { const d = P(HTMLLinkElement.prototype, key);
+    Object.defineProperty(HTMLLinkElement.prototype, key, {get: d.get, set: function (v) { this.setAttribute(key, v); },
+      configurable: false}); }
+  const val = P(Attr.prototype, "value");
+  for (const key of ["value", "nodeValue", "textContent"]) { const d = P(Attr.prototype, key) || P(Node.prototype, key);
+    if (!d || !d.set) continue;
+    Object.defineProperty(Attr.prototype, key, {get: d.get, set: function (v) {
+      if (would(this.ownerElement, this.name, v)) return; d.set.call(this, v); }, configurable: false}); }
+  for (const n of ["setAttributeNode", "setAttributeNodeNS"]) { const f = Element.prototype[n];
+    Object.defineProperty(Element.prototype, n, {value: function (attr) {
+      if (would(this, attr.name, val.get.call(attr))) return null; return f.call(this, attr); }, configurable: false}); }
+  const owners = new WeakMap(), attrs = P(Element.prototype, "attributes");
+  Object.defineProperty(Element.prototype, "attributes", {get: function () { const m = attrs.get.call(this);
+    owners.set(m, this); return m; }, configurable: false});
+  for (const n of ["setNamedItem", "setNamedItemNS"]) { const f = NamedNodeMap.prototype[n];
+    Object.defineProperty(NamedNodeMap.prototype, n, {value: function (attr) {
+      if (would(owners.get(this), attr.name, val.get.call(attr))) return null; return f.call(this, attr); },
+      configurable: false}); }
+  // relList: each change tried on a copy that is in no page first.
+  const lists = new WeakMap(), relList = P(HTMLLinkElement.prototype, "relList");
+  Object.defineProperty(HTMLLinkElement.prototype, "relList", {get: function () { const l = relList.get.call(this);
+    lists.set(l, this); return l; }, configurable: false});
+  const DTL = DOMTokenList.prototype, value = P(DTL, "value");
+  const tried = (list, change) => { const el = lists.get(list); if (!el) return false;
+    const copy = document.createElement("link"); setAttr.call(copy, "rel", getAttr.call(el, "rel") || "");
+    change(relList.get.call(copy)); return foreign(getAttr.call(copy, "rel"), getAttr.call(el, "href")); };
+  for (const n of ["add", "toggle", "replace"]) { const f = DTL[n];
+    Object.defineProperty(DTL, n, {value: function (...a) { if (tried(this, (c) => f.apply(c, a))) return false;
+      return f.apply(this, a); }, configurable: false}); }
+  Object.defineProperty(DTL, "value", {get: value.get, set: function (v) {
+    if (tried(this, (c) => value.set.call(c, v))) return; value.set.call(this, v); }, configurable: false});
+  const meta = () => { try { const m = document.createElement("meta"); setAttr.call(m, "http-equiv", "x-dns-prefetch-control");
+    setAttr.call(m, "content", "off"); (document.head || document.documentElement).appendChild(m); } catch (e) {} };
+  if (document.documentElement) meta(); else document.addEventListener("readystatechange", meta, {once: true});
 })()"""
 _FRAMES = ("page", "iframe")
+
+
+def _readings(raw: str) -> str:
+    """Every reading of a request's text a value could hide in, lowercase."""
+    once = unquote_plus(raw)
+    texts = [raw, once, unquote_plus(once)]
+    decoded = []
+    for text in texts:
+        for token in {piece for found in _B64.findall(text) for piece in (found, *found.split("/")) if piece}:
+            for alphabet in (None, b"-_"):
+                try:
+                    decoded.append(base64.b64decode(token + "=" * (-len(token) % 4), altchars=alphabet))
+                except (binascii.Error, ValueError):
+                    pass
+        for token in _HEX.findall(text):
+            decoded.append(bytes.fromhex(token))
+    readings = texts + [d.decode("utf-8", "ignore") for d in decoded]
+    return "\n".join(readings + [unquote_plus(r) for r in readings[3:]]).lower()
 
 
 def _wire_errors() -> Tuple[type, ...]:
@@ -124,9 +235,10 @@ class Gate:
 
     def watch(self, text: str) -> None:
         """A value of his that must never reach another site (what Sandy will type)."""
-        for value in (str(text or ""), *str(text or "").split()):
-            if len(value.strip()) >= MIN_TYPED:
-                self.typed.add(value.strip())
+        whole = str(text or "").strip()
+        if len(whole) >= MIN_TYPED:
+            self.typed.add(whole)
+        self.typed.update(word for word in whole.split() if len(word) >= MIN_WORD)
 
     def let_paused(self) -> Optional[Dict[str, str]]:
         """His yes on the held request: it goes, once."""
@@ -165,10 +277,12 @@ class Gate:
         return HOLD
 
     def _carries(self, url: str, body: str) -> bool:
-        """Whether a request carries a value Sandy typed, as typed or encoded."""
-        seen = f"{url}\n{unquote_plus(url)}\n{body}\n{unquote_plus(body)}".lower()
-        return any(form.lower() in seen for value in self.typed
-                   for form in (value, quote(value, safe=""), quote_plus(value)))
+        """Whether a request carries a value Sandy typed, as typed or encoded: escaped for a link
+        (once or twice), in base64 or its web form, or in hex."""
+        if not self.typed:
+            return False
+        seen = _readings(f"{url}\n{body}")
+        return any(value.lower() in seen for value in self.typed)
 
     def decide(self, method: str, url: str, resource_type: str = "", *, body: str = "",
                session: str = "", frame: str = "", request: str = "") -> str:
@@ -207,8 +321,8 @@ async def _cover(client, gate: Gate, session: str, kind: str = "page") -> None:
         # A script for new documents runs only where the page domain is on.
         await within(client.send.Page.enable(params={}, session_id=session))
         await within(client.send.Page.addScriptToEvaluateOnNewDocument(
-            params={"source": NO_SOCKETS_JS, "runImmediately": True}, session_id=session))
-    await within(client.send.Runtime.evaluate(params={"expression": NO_SOCKETS_JS}, session_id=session))
+            params={"source": PAGE_GUARD_JS, "runImmediately": True}, session_id=session))
+    await within(client.send.Runtime.evaluate(params={"expression": PAGE_GUARD_JS}, session_id=session))
     await within(client.send.Fetch.enable(params={"patterns": _PATTERNS}, session_id=session))
     await within(client.send.Network.enable(params={}, session_id=session))
     await within(client.send.Network.setBlockedURLs(params=_SOCKETS, session_id=session))

