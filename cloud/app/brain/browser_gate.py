@@ -14,8 +14,10 @@ before the page's own), websockets blocked (`Network.setBlockedURLs`) and watche
     once with nothing (204), so it never waits in the browser and the page stays as it was, and
     the fill asks him about it (`on_hold`), the action that made it kept (`action`) so his yes
     makes that same action again: any send, and once Sandy typed a value any read too (a link
-    with its query, a script's fetch), what a page loads aside; any other send is failed and
-    logged;
+    with its query, a script's fetch), what a page loads aside; and once Sandy typed, any request
+    that carries a value of hers, whatever made it (a script, a choice in a list) and whatever it
+    is, a read or an image too, held the same way, or failed on a site she only fills (`asks`);
+    any other send is failed and logged;
   * another site: what a page loads goes (a script, a style, a font, an image, media, by GET);
     anything that sends (a fetch, a beacon, a form, a frame, any method but GET) is failed and
     logged;
@@ -216,8 +218,11 @@ class Gate:
         self.last: Optional[str] = None
         self.acted_at = 0.0
         self.typed: Set[str] = set()
-        # Whether Sandy typed on the page yet: from then on a read after a click is held too.
+        # Whether Sandy typed on the page yet (or chose in a list): from then on a read after a
+        # click is held too, and any request to the site that carries a value of hers.
         self.wrote = False
+        # Whether his yes can send on this site (a `submit` site): if not, what would be held is failed.
+        self.asks = True
         # A page he took over: what he sends to its own site goes (`browser_job._handing`).
         self.his = False
         # The agent's last action on an element ({kind, target, node}): what his yes makes again.
@@ -238,12 +243,12 @@ class Gate:
         self.sessions: Dict[str, str] = {}
 
     def acted(self, kind: str, text: str = "", *, target: str = "", node: Optional[int] = None) -> None:
-        """What the model just did on the page: «click», «enter», «keys» or «type» (with what it
-        typed), on the element ``node`` of the tab ``target`` when it is known."""
+        """What the model just did on the page: «click», «enter», «keys», «type» or «select» (with
+        what it typed or chose), on the element ``node`` of the tab ``target`` when it is known."""
         self.last, self.acted_at = kind, time.monotonic()
         if node is not None:
             self.action = {"kind": kind, "target": str(target or ""), "node": node}
-        if kind == "type":
+        if kind in ("type", "select"):
             self.wrote = True
             self.watch(text)
 
@@ -312,6 +317,12 @@ class Gate:
             loads = method == "GET" and resource_type in LOADS
             just = self.last in SENDING and time.monotonic() - self.acted_at < ACTED_S
             if just and not loads and (method not in READS or self.wrote):
+                return self._hold(method, url, session, request)
+            if self.wrote and self._carries(url, body):
+                # A value of hers on its way to the site, whatever made it: never before his yes.
+                if not self.asks:
+                    self.blocked.append((method, url))
+                    return BLOCK
                 return self._hold(method, url, session, request)
             if method in READS:
                 return GO

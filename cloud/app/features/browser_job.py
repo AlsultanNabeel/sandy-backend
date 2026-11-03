@@ -476,6 +476,8 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         stopped = asyncio.Event()
         asked: Dict[str, Any] = {}
         gate.on_breach = lambda why: stopped.set()
+        # On a site she only fills, a value of hers to it is failed, never held for a yes.
+        gate.asks = browser_sites.level(row["site"]) == browser_sites.SUBMIT
 
         def on_hold(held: Dict[str, Any]) -> None:
             # What the agent's click or key made is held (answered with nothing already): the
@@ -758,7 +760,8 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     os.environ.setdefault("BROWSER_USE_CLOUD_SYNC", "false")
     from browser_use import Agent, BrowserSession
     from browser_use.agent.views import ActionResult
-    from browser_use.browser.events import ClickElementEvent, SendKeysEvent, TypeTextEvent
+    from browser_use.browser.events import (ClickElementEvent, SelectDropdownOptionEvent, SendKeysEvent,
+                                            TypeTextEvent)
     from browser_use.tools.service import Tools
 
     from app.brain import browser_guard
@@ -808,6 +811,11 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
                    node=event.node.backend_node_id)
         _note("browser_type", {"field": _label(event.node)})
 
+    def on_select(event):
+        gate.acted("select", str(getattr(event, "text", "") or ""), target=event.node.target_id,
+                   node=event.node.backend_node_id)
+        _note("browser_select", {"field": _label(event.node)})
+
     def on_keys(event):
         gate.acted("enter" if "enter" in str(event.keys).lower() else "keys", target=focus.get("target", ""),
                    node=focus.get("node"))
@@ -817,6 +825,7 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     session.event_bus.on(ClickElementEvent, on_click)
     session.event_bus.on(TypeTextEvent, on_type)
     session.event_bus.on(SendKeysEvent, on_keys)
+    session.event_bus.on(SelectDropdownOptionEvent, on_select)
     reason: Dict[str, str] = {}
 
     steps = [0]

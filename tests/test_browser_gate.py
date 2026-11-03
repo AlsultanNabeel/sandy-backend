@@ -325,3 +325,29 @@ def test_a_gate_whose_connection_drops_stops_the_fill_and_our_own_stop_does_not(
 def test_the_gate_watches_the_reader_cdp_use_has():
     from cdp_use.client import CDPClient
     assert CDPClient("ws://127.0.0.1:9/x")._message_handler_task is None
+
+
+
+@pytest.mark.parametrize("method, url, kind, body", [
+    ("GET", "https://forms.example.com/api/check?name=Nabeel+Alsultan", "Fetch", ""),
+    ("GET", "https://www.example.com/p.gif?e=n%40example.com", "Image", ""),
+    ("POST", "https://forms.example.com/autosave", "XHR", "email=n@example.com"),
+    ("GET", "https://forms.example.com/api/city?c=Amman", "XHR", "")])
+def test_once_she_typed_a_request_to_her_site_with_her_value_is_held_whatever_made_it(method, url, kind, body):
+    for asks in (True, False):
+        gate = _gate()
+        gate.asks = asks
+        gate.acted("type", "Nabeel Alsultan", target="t1", node=7)
+        gate.acted("select", "Amman", target="t1", node=8)  # a choice in a list is a value of hers too
+        gate.last = None                                    # nothing she clicked: the page's own script
+        verdict = gate.decide(method, url, kind, body=body, session="s1", request="r1")
+        # Held for his yes on a site she may send on; on a site she only fills, never let go.
+        assert verdict == (G.HOLD if asks else G.BLOCK) and gate.breach is None
+
+
+def test_before_she_typed_or_without_her_value_the_sites_reads_go():
+    gate = _gate()
+    assert gate.decide("GET", "https://forms.example.com/api/check?name=Nabeel+Alsultan", "Fetch") == G.GO
+    gate.acted("type", "Nabeel Alsultan")
+    gate.last = None
+    assert gate.decide("GET", "https://forms.example.com/api/check?q=1", "Fetch") == G.GO

@@ -407,7 +407,7 @@ with nothing (204, `Fetch.fulfillRequest`), never kept waiting in the browser (a
 freezes its page and would go the moment our connection dropped), so it goes nowhere and the page
 stays as it was; the agent stops (`on_hold`) and he is asked about the action that made it
 (`gate.action`, the agent's last element: a click, a key, a typed value): any send, and once Sandy
-typed (`wrote`) any read too (a link with its query, a script's fetch), what a page loads aside; his
+typed (`wrote`, a choice in a list too, `select`) any read too (a link with its query, a script's fetch), what a page loads aside; and once she typed, any request to the site that carries a value of hers (`_carries`), whatever made it (a script, a choice in a list) and whatever it is (a read, an image), held the same way, or failed on a site she only fills (`gate.asks`); his
 yes makes that same action again on that same element under his yes (`_act`: the real click,
 Enter, or the field telling its change again, `_CHANGED_JS`), with no element nothing goes
 («moved»); on a fill-only site that is all, the page handed to him filled. What he filled is read

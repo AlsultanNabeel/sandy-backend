@@ -405,7 +405,8 @@ def test_the_real_agent_is_built_on_our_model_the_sites_domains_and_the_gate(mon
     excluded = set(agent["tools"].registry.registry.actions)
     assert not excluded & {"evaluate", "navigate", "search", "upload_file"} and {"click", "input"} <= excluded
     # A click by place is refused before it is made: nothing listens for one.
-    assert {k for k, _ in handlers} == {events.ClickElementEvent, events.TypeTextEvent, events.SendKeysEvent}
+    assert {k for k, _ in handlers} == {events.ClickElementEvent, events.TypeTextEvent, events.SendKeysEvent,
+                                        events.SelectDropdownOptionEvent}
     # A click the agent is about to make is the gate's to know.
     dict(handlers)[events.ClickElementEvent](NS(node=NS(xpath="//button[1]", attributes={"name": "go"},
                                                         target_id="t1", backend_node_id=7)))
@@ -1116,3 +1117,49 @@ def test_every_worker_closes_its_sessions_before_it_ends():
 
     from app import bootstrap
     assert "close_on_exit()" in inspect.getsource(bootstrap.bootstrap)
+
+
+# ── Once she typed, a value of hers to the site is held, whatever made the request ──
+
+def _script_sends_her_value(row, gate, client, tab, user_id, asked):
+    async def run():
+        gate.acted("type", "Nabeel", target="t1", node=7)
+        gate.filled = [{"field": "Name", "value": "Nabeel"}]
+        gate.last = None                                    # no click or key: the page's own script
+        client.handlers["Fetch.requestPaused"]({"requestId": "r30", "resourceType": "Fetch", "frameId": "f1",
+                                                "request": {"method": "GET", "url": URL + "/check?n=Nabeel"}}, "s1")
+        await asyncio.sleep(0.5)
+        return {"status": browser_job.DONE, "result": "went on"}
+    return run()
+
+
+def test_a_scripts_read_carrying_her_value_is_held_and_his_yes_tells_the_change_again(world, monkeypatch):
+    _level("submit")
+    monkeypatch.setattr(browser_job, "AGENT", _script_sends_her_value)
+    asked = _fill("en")
+    assert asked.get("needs_confirmation"), asked
+    [holder] = world.clients
+    assert holder.of("Fetch.fulfillRequest") == [{"requestId": "r30", "responseCode": 204, "responseHeaders": []}]
+    again, answer = [], holder.answers["Runtime.callFunctionOn"]
+
+    def change(params, session):
+        if params["functionDeclaration"] == browser_job._CHANGED_JS:
+            # The field tells its change again: the page's script reads it again, under his yes.
+            again.append(params["objectId"])
+            holder.handlers["Fetch.requestPaused"]({"requestId": "r31", "resourceType": "Fetch", "frameId": "f1",
+                                                    "request": {"method": "GET", "url": URL + "/check?n=Nabeel"}},
+                                                   session)
+        return answer(params, session)
+    holder.answers["Runtime.callFunctionOn"] = change
+    done = _fill("en", confirmed_job=asked["ids"][0])
+    assert done["ok"] and again == ["o7"] and world.pressed == []
+    assert {"requestId": "r31"} in holder.of("Fetch.continueRequest")
+
+
+def test_on_a_fill_only_site_a_value_of_hers_to_it_is_blocked_and_the_fill_goes_on(world, monkeypatch):
+    _level("fill")
+    monkeypatch.setattr(browser_job, "AGENT", _script_sends_her_value)
+    out = _fill("en")
+    [holder] = world.clients
+    assert {"requestId": "r30", "errorReason": "BlockedByClient"} in holder.of("Fetch.failRequest")
+    assert holder.of("Fetch.fulfillRequest") == [] and not out.get("needs_confirmation")
