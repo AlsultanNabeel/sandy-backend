@@ -212,6 +212,10 @@ def _root(host: str) -> str:
     return _suffixes().privatesuffix(host) or host
 
 
+def _no_fragment(url: str) -> str:
+    return str(url or "").split("#", 1)[0]
+
+
 def root_of(url: str) -> str:
     return _root(urlsplit(str(url or "")).hostname or "")
 
@@ -239,6 +243,8 @@ class Gate:
         self.on_hold: Optional[Callable[[Dict[str, Any]], None]] = None
         # The tab and frame whose one send his yes lets through, until it goes (`approve`).
         self.armed: Optional[Tuple[str, str]] = None
+        # The request he was asked about ({method, address}), when it was one: his yes is for it alone.
+        self.armed_for: Optional[Tuple[str, str]] = None
         self.breach: Optional[str] = None
         self.on_breach: Optional[Callable[[str], None]] = None
         self.blocked: List[Tuple[str, str]] = []
@@ -263,15 +269,17 @@ class Gate:
             self.typed.add(whole)
         self.typed.update(word for word in whole.split() if len(word) >= MIN_WORD)
 
-    def approve(self, session: str, frame: str) -> None:
+    def approve(self, session: str, frame: str, request: Optional[Tuple[str, str]] = None) -> None:
         """His yes, made as the click is: the first send to its own site from this tab
-        (``session``) and frame goes, and none after it (`shut`)."""
+        (``session``) and frame goes, and none after it (`shut`). When he was asked about a request
+        (``request``: its method and address), only that very one goes."""
         self.armed = (str(session or ""), str(frame or ""))
+        self.armed_for = (str(request[0]).upper(), _no_fragment(request[1])) if request else None
         self.last = None
 
     def shut(self) -> None:
         """The moment of his yes is over, whether its send went or not."""
-        self.armed = None
+        self.armed = self.armed_for = None
 
     def stop(self, why: str) -> None:
         if self.breach is None:
@@ -315,8 +323,9 @@ class Gate:
             return GO
         if own:
             if (self.armed is not None and self.armed == (str(session or ""), str(frame or ""))
-                    and resource_type in SENDS):
-                self.armed = None
+                    and resource_type in SENDS
+                    and self.armed_for in (None, (method, _no_fragment(url)))):
+                self.armed = self.armed_for = None
                 self.sent.append((method, url))
                 return GO
             loads = method == "GET" and resource_type in LOADS

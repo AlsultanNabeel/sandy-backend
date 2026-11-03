@@ -875,16 +875,31 @@ def test_a_session_steel_does_not_close_keeps_its_gate_until_it_does(world, monk
 
 # ── What a click made, once she typed, is held for him ──
 
-def _clicks_through(row, gate, client, tab, user_id, asked):
+def _clicks_through(row, gate, client, tab, user_id, asked, held=URL):
     async def run():
         gate.acted("type", "Nabeel")
         gate.filled = [{"field": "Name", "value": "Nabeel"}]       # read before the click (`_Asking`)
         gate.acted("click", target="t1", node=7)    # on what was not known to send: a link, a plain element
+        # What the click sends, as the same click sends it again on his yes (the world's `press`).
         client.handlers["Fetch.requestPaused"]({"requestId": "r20", "resourceType": "Document", "frameId": "f1",
-                                                "request": {"method": "GET", "url": URL + "/next?name=Nabeel"}}, "s1")
+                                                "request": {"method": "POST", "url": held,
+                                                            "postData": "name=Nabeel"}}, "s1")
         await asyncio.sleep(5)
         pytest.fail("the agent went on")
     return run()
+
+
+def test_his_yes_lets_through_only_the_request_he_was_asked_about(world, monkeypatch):
+    _level("submit")
+    # He was asked about a send to /apply; the click, made again, sends elsewhere on the site.
+    monkeypatch.setattr(browser_job, "AGENT", lambda *a: _clicks_through(*a, held=URL + "/apply"))
+    asked = _fill("en")
+    assert asked.get("needs_confirmation") and "/apply" in str(_job(asked["ids"][0]).get("action")), asked
+    _fill("en", confirmed_job=asked["ids"][0])
+    [holder] = world.clients
+    assert [kind for kind, _ in world.pressed] == ["mouseMoved", "mousePressed", "mouseReleased"]
+    assert {"requestId": "r10"} not in holder.of("Fetch.continueRequest")
+    assert {"requestId": "r10", "errorReason": "BlockedByClient"} in holder.of("Fetch.failRequest")
 
 
 def test_a_request_a_click_made_is_answered_at_once_and_his_yes_makes_that_click_again(world, monkeypatch):

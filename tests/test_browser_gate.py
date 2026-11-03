@@ -363,3 +363,12 @@ def test_his_yes_lets_through_a_page_or_a_scripts_request_only(kind):
     assert gate.sent == [] and gate.armed is not None
     # ...the form's own send does.
     assert gate.decide("POST", URL_A, "Document", session="s1", frame="f1") == G.GO and gate.sent == [("POST", URL_A)]
+
+
+def test_his_yes_on_a_request_he_was_asked_about_lets_that_request_go_only():
+    gate = _gate()
+    gate.approve("s1", "f1", ("POST", URL_A + "#top"))
+    assert gate.decide("POST", URL_A + "/other", "Document", session="s1", frame="f1") == G.BLOCK
+    assert gate.decide("PUT", URL_A, "XHR", session="s1", frame="f1") == G.BLOCK
+    assert gate.decide("POST", URL_A, "XHR", session="s1", frame="f1") == G.GO
+    assert gate.sent == [("POST", URL_A)] and gate.armed is None

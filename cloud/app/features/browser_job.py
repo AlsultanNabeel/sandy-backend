@@ -488,7 +488,8 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             where, action = urlsplit(held["url"]), held.get("action") or {}
             asked.update(kind=action.get("kind") or "request", target=action.get("target"),
                          node=action.get("node"), session=gate.sessions.get(action.get("target")) or held["session"],
-                         label=f"{where.hostname}{where.path}", filled=gate.filled)
+                         label=f"{where.hostname}{where.path}", filled=gate.filled,
+                         request=(held["method"], held["url"]))
             _note("browser_asked", {"site": row["site"], "element": asked["label"]})
             stopped.set()
         gate.on_hold = on_hold
@@ -628,19 +629,20 @@ async def _act(row, gate, client, session: str, asked: Dict[str, Any], user_id: 
         point = {"x": spot["x"], "y": spot["y"], "button": "left", "clickCount": 1}
         for kind in ("mouseMoved", "mousePressed"):
             await within(client.send.Input.dispatchMouseEvent(params={"type": kind, **point}, session_id=session))
-        # The one send of his yes, from the moment of the click itself.
-        gate.approve(session, frame)
+        # The one send of his yes, from the moment of the click itself: the request he was asked
+        # about, when it was one.
+        gate.approve(session, frame, asked.get("request"))
         await within(client.send.Input.dispatchMouseEvent(params={"type": "mouseReleased", **point},
                                                           session_id=session))
     elif asked["kind"] != "enter":
         # What a typed value or a key made: the same field tells its change again.
-        gate.approve(session, frame)
+        gate.approve(session, frame, asked.get("request"))
         await within(client.send.Runtime.callFunctionOn(params={
             "functionDeclaration": _CHANGED_JS, "objectId": element}, session_id=session))
     else:
         await within(client.send.Runtime.callFunctionOn(params={
             "functionDeclaration": "function () { this.focus(); }", "objectId": element}, session_id=session))
-        gate.approve(session, frame)
+        gate.approve(session, frame, asked.get("request"))
         for kind in ("keyDown", "keyUp"):
             await within(client.send.Input.dispatchKeyEvent(params={
                 "type": kind, "key": "Enter", "code": "Enter", "windowsVirtualKeyCode": 13,
