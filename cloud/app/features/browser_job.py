@@ -584,7 +584,7 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
     answer = await _first(_answered(row["_id"], user_id), stopped, HOLD_S + 30)
     if answer != APPROVED:
         return {"status": answer or STOPPED, **({} if answer else {"reason": "expired"})}
-    return await _act(row, gate, client, session, asked)
+    return await _act(row, gate, client, session, asked, user_id)
 
 
 async def _answered(job_id: str, user_id: str) -> Optional[str]:
@@ -602,10 +602,12 @@ async def _answered(job_id: str, user_id: str) -> Optional[str]:
     return None
 
 
-async def _act(row, gate, client, session: str, asked: Dict[str, Any]) -> Dict[str, Any]:
+async def _act(row, gate, client, session: str, asked: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     """His yes: the real click (or Enter) on the same element of the same page, or, for a request
     a typed value or a key made, that element's change told again; and what the page answers.
-    Nothing is ever sent from a copy: no element, no send."""
+    Nothing is ever sent from a copy: no element, no send. The emergency stop pressed since his
+    yes, or the fill stopped, and nothing is done."""
+    from app.features import stop_all
     from app.integrations import browser_cdp
     from app.integrations.browser_cdp import within
     if asked.get("node") is None:
@@ -619,6 +621,9 @@ async def _act(row, gate, client, session: str, asked: Dict[str, Any]) -> Dict[s
         # Something else lies over it now: acting there is not what he said yes to.
         return {"status": FAILED, "reason": "moved"}
     frame = spot["frame"]
+    if stop_all.stopped(user_id) or (get(row["_id"]) or {}).get("status") != APPROVED:
+        # Asked last, just before the action: nothing between his yes and it may undo a stop.
+        return {"status": STOPPED}
     if asked["kind"] == "click":
         point = {"x": spot["x"], "y": spot["y"], "button": "left", "clickCount": 1}
         for kind in ("mouseMoved", "mousePressed"):

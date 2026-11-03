@@ -383,7 +383,7 @@ hidden field). His yes (`submit`, `APPROVED`) makes the real click (`Input.dispa
 coordinates though it lie in a frame of the site, `DOM.getContentQuads`; refused, «moved», unless
 the element `DOM.getNodeForLocation` finds under that point, asked in the page's coordinates as
 scrolled, `Page.getLayoutMetrics`, is that very one or inside it) or Enter on that same
-element of the same page (`_act`), and the page that answers is the result; nothing is ever sent
+element of the same page (`_act`; the emergency stop, or the fill no longer `APPROVED`, asked last, just before the action, and nothing is done), and the page that answers is the result; nothing is ever sent
 again from a copy. A `fill` site hands him the page (`HANDED`, what he filled named, the live
 link), with no question its yes could not answer, in the background too. A page handed to him (a `fill`
 site's, or one he took over, `take_over`, `his`) stays open with the gate on it until it closes

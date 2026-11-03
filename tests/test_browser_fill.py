@@ -1163,3 +1163,28 @@ def test_on_a_fill_only_site_a_value_of_hers_to_it_is_blocked_and_the_fill_goes_
     [holder] = world.clients
     assert {"requestId": "r30", "errorReason": "BlockedByClient"} in holder.of("Fetch.failRequest")
     assert holder.of("Fetch.fulfillRequest") == [] and not out.get("needs_confirmation")
+
+
+def test_the_emergency_stop_pressed_after_his_yes_stops_the_click_before_it_is_made(world, monkeypatch):
+    _level("submit")
+    asked = _fill("en")
+    [job] = asked["ids"]
+    real = browser_job._spot
+
+    async def spot(*args):
+        found = await real(*args)
+        # He presses the stop while the element is found: the click comes after it.
+        with active_user_profile_context(A):
+            stop_all.stop("userA")
+        return found
+    monkeypatch.setattr(browser_job, "_spot", spot)
+    try:
+        _fill("en", confirmed_job=job)
+        _wait_for(lambda: world.released == ["st1"])
+        [holder] = world.clients
+        assert world.pressed == [] and holder.of("Input.dispatchKeyEvent") == []
+        assert not [p for p in holder.of("Fetch.continueRequest") if p["requestId"] == "r10"]
+        assert _job(job)["status"] in (browser_job.STOPPED, browser_job.FAILED)
+    finally:
+        with active_user_profile_context(A):
+            stop_all.resume("userA")
