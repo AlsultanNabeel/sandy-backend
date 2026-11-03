@@ -998,3 +998,26 @@ def test_a_yes_that_comes_after_the_no_took_it_is_none(world):
         browser_job.let_go(job)
         assert browser_job.submit(job) is None
     assert _job(job)["status"] == browser_job.STOPPED
+
+
+def test_the_emergency_stop_cuts_the_step_the_agent_is_on(world, monkeypatch):
+    import threading
+    _level("submit")
+    cut = []
+
+    async def agent(row, gate, client, tab, user_id, asked):
+        try:
+            await asyncio.sleep(8)                     # one long step: a model call, a page loading
+        except asyncio.CancelledError:
+            cut.append(time.monotonic())
+            raise
+        return {"status": browser_job.DONE, "result": ""}
+    monkeypatch.setattr(browser_job, "AGENT", agent)
+    threading.Thread(target=_fill, args=("en",)).start()
+    _wait_for(lambda: bool(world.clients))
+    time.sleep(0.5)
+    began = time.monotonic()
+    with active_user_profile_context(A):
+        stop_all.stop("userA")
+    _wait_for(lambda: bool(cut))
+    assert cut and cut[0] - began < 2.5

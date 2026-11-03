@@ -372,6 +372,16 @@ def _ending(job_id: str, outcome: Dict[str, Any]) -> Dict[str, Any]:
     return outcome
 
 
+async def _watching(job_id: str, user_id: str, stopped: asyncio.Event) -> None:
+    """While the agent works: the emergency stop, his «no» or his taking over cuts the step it is
+    on at once, not only before its next one."""
+    from app.features import stop_all
+    while not stopped.is_set():
+        await asyncio.sleep(0.5)
+        if (get(job_id) or {}).get("status") in (STOPPED, HANDED) or stop_all.stopped(user_id):
+            stopped.set()
+
+
 async def _first(work, stopped: asyncio.Event, seconds: float):
     """``work``'s result, or None once the gate stopped the fill (``work`` cancelled then);
     asyncio.TimeoutError past ``seconds``."""
@@ -427,7 +437,11 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             _note("browser_orders", {"site": row["site"]}, ok=False)
             outcome = {"status": FAILED, "reason": "orders"}
             return outcome
-        outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped, RUN_S)
+        watch = asyncio.ensure_future(_watching(row["_id"], user_id, stopped))
+        try:
+            outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped, RUN_S)
+        finally:
+            watch.cancel()
         if gate.breach is None and asked:
             # A request held stopped the agent the same way: from here only a breach stops it.
             stopped.clear()

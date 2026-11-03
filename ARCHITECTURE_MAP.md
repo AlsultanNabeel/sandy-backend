@@ -430,9 +430,11 @@ a tool on the fill's own background trace row (`trace_store.background(…, keep
 fill's owner alone, `…/takeover` stops the agent and gives it with `interactive=true`; it is kept
 sealed and never logged. *Emergency stop* (`features/stop_all.py`, `sandy_users.stopped_at`, forgotten
 by a reset): «وقّفي كل شي» by talk, the call or the app (`/api/stop`) stops every task (no run, no
-failure) and every fill (`browser_job.stop_for`), the browser's tools refuse, reminders still ring;
+failure) and every fill (`browser_job.stop_for`; the step a fill's agent is on is cut at once, `_watching`, as by his «no»
+or his taking over), the browser's tools refuse, reminders still ring;
 one word or tap resumes. Typed in the chat as a message of its own (`stop_all.asks`: the stop and
-nothing else, either language, with or without her name), the loop stops it by the code before
+nothing else, either language, «وقّفي» or «توقّفي», with or without her name, an emoji or a mark
+around it), the loop stops it by the code before
 any held question or model, and lets the question go. The app's Profile › Browser (`Features/Browser/`) holds the stop, the open
 fills and the sites; links in Sandy's replies are tappable (`DesignSystem/Linked.swift`), and
 `sandy://browser/login` and `/live` open their sheets (`DeepLinkRouter`). *Proven on Steel* (2 Nov 2026, `scripts/steel_live_check.py --fill`, 17/17): what the browser draws

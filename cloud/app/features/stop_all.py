@@ -24,10 +24,12 @@ FIELD = "stopped_at"
 
 
 # A chat message that is the stop and nothing else, said to her or not (`asks`).
-_ASKS = re.compile(r"^(?:(?:يا\s+)?ساندي\s+)?(?:وقفي|وقف|اوقفي|وقفو)\s+(?:كل\s*شي|كل\s*اشي|كل\s*شيء)(?:\s+ساندي)?$"
+_ASKS = re.compile(r"^(?:(?:يا\s+)?ساندي\s+)?(?:وقفي|وقف|اوقفي|وقفو|توقفي|توقف|توقفو)"
+                   r"\s+(?:كل\s*شي|كل\s*اشي|كل\s*شيء)(?:\s+ساندي)?$"
                    r"|^(?:sandy\s+)?stop\s+(?:everything|it\s+all|all)(?:\s+now)?(?:\s+sandy)?$", re.I)
 _DIACRITICS = re.compile(r"[\u064b-\u0652\u0640]")
-_MARKS = re.compile(r"[!?.,،؟؛:\s]+")
+# Marks and anything that is no letter or digit (an emoji, a symbol) read as a space.
+_MARKS = re.compile(r"[^\w]+|_+")
 
 
 def asks(message: str) -> bool:
