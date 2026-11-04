@@ -19,8 +19,10 @@ names a row that did not change is never sent (`faithful`).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
 from app.brain import lang
@@ -104,6 +106,33 @@ def compute(before: Any, now: Any) -> Dict[str, Any]:
     out["paragraphs_added"] = [p for p in new_p if p not in old_p]
     out["paragraphs_removed"] = [p for p in old_p if p not in new_p]
     return out
+
+
+# What a «new only» task remembers having seen: each row's key, hashed, with when it was first
+# seen; the newest `SEEN_MAX`, none older than `SEEN_DAYS`, so the state never grows without end.
+SEEN_MAX, SEEN_DAYS = 500, 30
+
+
+def _seen_key(row: Dict[str, Any]) -> str:
+    return hashlib.sha256(_key(row).encode()).hexdigest()[:16]
+
+
+def remember(found: Any, kept: Optional[Dict[str, str]], now: datetime) -> Dict[str, str]:
+    """What it has seen, with what ``found`` has now."""
+    floor = (now - timedelta(days=SEEN_DAYS)).isoformat()
+    out = {k: at for k, at in (kept or {}).items() if isinstance(at, str) and at >= floor}
+    for rows in _rows(found).values():
+        for r in rows:
+            out.setdefault(_seen_key(r), now.isoformat())
+    return dict(sorted(out.items(), key=lambda kv: kv[1], reverse=True)[:SEEN_MAX])
+
+
+def only_new(diff: Dict[str, Any], kept: Optional[Dict[str, str]]) -> Dict[str, Any]:
+    """The change of a «new only» task: rows never seen before, and nothing that went away or
+    changed (a story dropping off a feed is no news, nor one coming back)."""
+    known = kept or {}
+    return {**diff, "added": [r for r in diff["added"] if _seen_key(r) not in known], "removed": [],
+            "changed": [], "numbers": [], "paragraphs_removed": []}
 
 
 def from_events(log: List[Dict[str, Any]]) -> Dict[str, Any]:

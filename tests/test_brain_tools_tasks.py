@@ -92,6 +92,13 @@ _READS = [
 ]
 
 
+def _what(words, language):
+    """The kind of change the yes names: guessed from his words when the model left it out."""
+    from app.brain import tools_tasks
+    kind = tools_tasks._changes({**MOSTAQL, "instructions": words})
+    return lang.PHRASES[f"task_changes_{kind}"][language]
+
+
 @pytest.mark.parametrize("language, words", _ACTS)
 def test_words_that_ask_to_act_make_the_yes_say_a_task_only_reads(brain_db, on, language, words):  # noqa: F811
     out = _run("task_create", language, **{**MOSTAQL, "instructions": words})
@@ -99,7 +106,7 @@ def test_words_that_ask_to_act_make_the_yes_say_a_task_only_reads(brain_db, on, 
     assert out["summary"] == lang.PHRASES["task_confirm_reads_only"][language].format(
         title=MOSTAQL["title"], every=lang.PHRASES["every_span"][language].format(
             span=lang.PHRASES["span_one_hour"][language]),
-        how=lang.PHRASES["delivery_hourly"][language])
+        how=lang.PHRASES["delivery_hourly"][language], what=_what(words, language))
     with active_user_profile_context(A):
         assert tasks.running() == []
 
@@ -111,7 +118,7 @@ def test_a_read_is_asked_plainly(brain_db, on, language, words):  # noqa: F811
     assert out["summary"] == lang.PHRASES["task_confirm"][language].format(
         title=MOSTAQL["title"], every=lang.PHRASES["every_span"][language].format(
             span=lang.PHRASES["span_one_hour"][language]),
-        how=lang.PHRASES["delivery_hourly"][language])
+        how=lang.PHRASES["delivery_hourly"][language], what=_what(words, language))
 
 
 @pytest.mark.parametrize("args", [{"check_tool": "list_delete"}, {"tools": ["device_control"]}])

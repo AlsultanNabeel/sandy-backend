@@ -77,6 +77,17 @@ def clean_delivery(mode: Any = None, hours: Any = None, at: Any = None) -> Dict[
     raise ValueError(f"the way is one of {INSTANT}, {DAILY}, {EVERY}")
 
 
+# What change it tells: only what is new (news, feeds), or anything added, removed or changed
+# (lists, prices, states), the default and every task saved before it was asked.
+NEW, ALL = "new", "all"
+CHANGES = (NEW, ALL)
+
+
+def changes_of(row: Mapping[str, Any]) -> str:
+    saved = (row.get("payload") or {}).get("changes")
+    return saved if saved in CHANGES else ALL
+
+
 def how(row: Mapping[str, Any]) -> Dict[str, Any]:
     """How this task's results are emailed (the default for a row saved before it was asked)."""
     saved = (row.get("payload") or {}).get("delivery") or {}
@@ -141,7 +152,8 @@ def set_every(task_id: str, every_minutes: int) -> bool:
 
 def edit(task_id: str, *, title: Optional[str] = None, instructions: Optional[str] = None,
          probe: Optional[Mapping[str, Any]] = None, every: Optional[int] = None,
-         delivery: Optional[Mapping[str, Any]] = None, language: Optional[str] = None) -> bool:
+         delivery: Optional[Mapping[str, Any]] = None, language: Optional[str] = None,
+         changes: Optional[str] = None) -> bool:
     """One change of a task, whatever asks for it (talk, a call, the Tasks screen): what is not
     given stays. New words or a new check forget what it saw, so the next run starts afresh.
     The caller has checked the values (`probe` reads, `delivery` is clean)."""
@@ -159,6 +171,10 @@ def edit(task_id: str, *, title: Optional[str] = None, instructions: Optional[st
         payload["delivery"] = dict(delivery)
     if language is not None:
         payload["lang"] = language
+    if changes is not None:
+        if changes not in CHANGES:
+            raise ValueError(f"changes is one of {CHANGES}")
+        payload["changes"] = changes
     changed = schedules.update(task_id, text=title or None, payload=payload,
                                recurrence=_rule(every) if every else None)
     if instructions is not None or probe is not None:

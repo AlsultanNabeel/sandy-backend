@@ -345,9 +345,16 @@ def start(task_id: str, uid: str) -> Any:
         logger.warning("[tasks] task %s: could not read at its start: %s", task_id, exc)
         return None
     tasks.save_state(task_id, {"fingerprint": fingerprint(found, tool), "last_seen": found,
-                               "failures": 0,
+                               "failures": 0, **_seen(row or {}, found, None),
                                **({"audit_seen": found} if _scope(spec) is not None else {})})
     return found
+
+
+def _seen(doc: Dict[str, Any], found: Any, before: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """For a «new only» task, what it has seen so far (`task_diff.remember`)."""
+    if tasks.changes_of(doc) != tasks.NEW:
+        return {}
+    return {"seen_keys": task_diff.remember(found, (before or {}).get("seen_keys"), _now())}
 
 
 def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
@@ -404,7 +411,7 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                     # Its first run, or an old task's first on the log: where it starts,
                     # nothing told.
                     tasks.save_state(_id(doc), {"fingerprint": seen, "last_seen": found, "failures": 0,
-                                                "ran_at": _now(),
+                                                "ran_at": _now(), **_seen(doc, found, before),
                                                 **({"cursor": events.last_seq(), "audit_at": _now(),
                                                     "audit_seen": found, "audit_cursor": events.last_seq()}
                                                    if logged else {})})
@@ -422,6 +429,8 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                     return None
                 else:
                     diff = task_diff.compute(before["last_seen"], found)
+                if tasks.changes_of(doc) == tasks.NEW:
+                    diff = task_diff.only_new(diff, before.get("seen_keys"))
                 message = NOTHING if task_diff.empty(diff) else task_diff.template(diff)
                 if message is None:
                     job = None if direct else _submitted(doc, spec, diff, before)
@@ -446,7 +455,7 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
         # What it saw now, and where it stopped in the log, is where the next run starts,
         # whatever was told.
         state = {"fingerprint": seen, "last_seen": found, "failures": 0, "ran_at": _now(),
-                 **({"cursor": cursor} if cursor is not None else {})}
+                 **({"cursor": cursor} if cursor is not None else {}), **_seen(doc, found, before)}
         if message.strip() == NOTHING:
             tasks.save_state(_id(doc), state)
             return None

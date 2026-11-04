@@ -42,6 +42,10 @@ _HOW = {
                                    "(only if he said it; leave it out otherwise)")},
     "notify_hours": {"type": "integer", "description": "لـ every: كل قديش ساعة"},
     "notify_at": {**_S, "description": "لـ daily: الساعة HH:MM بتوقيته"}}
+_CHANGES = {"changes": {"type": "string", "enum": list(tasks.CHANGES), "description": (
+    "شو التغيير المهم: new لأخبار وخلاصات (بلّغي عن الجديد بس، اللي بينزل عن الصفحة مش خبر)، all "
+    "لقوائم وأسعار وحالات (إضافة وإزالة وتغيير). اقترحيه إنتِ (propose it: new for news and feeds, "
+    "all for lists, prices and states)")}}
 TASK_SCHEMAS: List[Dict[str, Any]] = [
     {"name": "task_create",
      "description": ("اعملي مهمة بتشتغل لحالها كل فترة («كل ساعة شوفي…»، «تابعي… وقلّيلي إذا…»، "
@@ -64,7 +68,7 @@ TASK_SCHEMAS: List[Dict[str, Any]] = [
          "tools": {"type": "array", "items": {"type": "string", "enum": list(ALLOWED)},
                    "description": "الأدوات اللي بتحتاجيها بالمهمة"},
          "urgent": {"type": "boolean", "description": "مستعجلة (ما بتستنى)"},
-         **_HOW,
+         **_HOW, **_CHANGES,
          "first_in_minutes": {"type": "integer", "description": "بعد قديش أول مرة (اختياري)"}},
          "required": ["title", "instructions", "every_minutes", "check_tool"]}},
     {"name": "task_list", "description": "المهام اللي شغّالة أو موقّفة («شو المهام الشغّالة؟»).",
@@ -87,7 +91,7 @@ TASK_SCHEMAS: List[Dict[str, Any]] = [
          "check_args": {"type": "object", "description": "مدخلات check_tool الجديد، ثابتة"},
          "language": {"type": "string", "enum": [lang.AR, lang.EN],
                       "description": "لغة إيميلاتها ونتائجها، بس إذا طلب يغيّرها («خلّي إيميلاتها بالإنجليزي»)"},
-         **_HOW}, "required": []}},
+         **_HOW, **_CHANGES}, "required": []}},
     {"name": "task_cancel", "description": ("احذفي مهمة من اللي بتشتغلي فيها لحالك (بتطلع بـ task_list) نهائياً، "
                                             "بس إذا قال احذف أو الغي («الغي مهمة مستقل»). عنصر بقائمة مهامه "
                                             "(«احذفي مهمة الجيم») هو list_delete، مش هون. «وقّفيها»، «pause it» "
@@ -265,6 +269,24 @@ def _asks_to_act(words: str) -> bool:
     return False
 
 
+# His words that watch for what is new (news, a feed, posts), not for every change.
+_NEWS = re.compile(r"(اخبار|خبر|جديد|منشورات|مقالات|خلاصه|news|newest|latest|new posts|posts|stories|"
+                   r"articles|feed|headlines|\bnew\b)", re.IGNORECASE)
+
+
+def said_changes(words: str) -> str:
+    """The kind of change his words watch for, when Sandy left it out: new for news and feeds,
+    else every change."""
+    plain = re.sub(r"[ًٌٍَُِّْـ]", "", words or "").replace("أ", "ا").replace("إ", "ا").replace("ة", "ه")
+    return tasks.NEW if _NEWS.search(plain) else tasks.ALL
+
+
+def _changes(args: Dict[str, Any]) -> str:
+    given = args.get("changes")
+    return given if given in tasks.CHANGES else said_changes(
+        f"{args.get('instructions') or ''} {args.get('notify_when') or ''}")
+
+
 def task_create(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if not offered(ctx.user_id):
         return refused("tasks are not on for this account")
@@ -287,14 +309,16 @@ def task_create(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         delivery = _delivery(args)
     except ValueError as exc:
         return refused(f"notify_how: {exc}; leave it out if he did not say how")
+    changes = _changes(args)
     if not ctx.confirmed:
         acts = _asks_to_act(f"{instructions} {args.get('notify_when') or ''}")
         return needs_confirmation(lang.say("task_confirm_reads_only" if acts else "task_confirm",
-                                           title=title, every=_every(every), how=_how(delivery)))
+                                           title=title, every=_every(every), how=_how(delivery),
+                                           what=lang.say(f"task_changes_{changes}")))
     spec = {"instructions": instructions, "notify_when": without_way(str(args.get("notify_when") or "")),
             "probe": {"tool": check, "args": dict(args.get("check_args") or {})},
             "tools": list(dict.fromkeys([check, *allowed])), "lang": lang.current(),
-            "urgent": bool(args.get("urgent")), "delivery": delivery}
+            "urgent": bool(args.get("urgent")), "delivery": delivery, "changes": changes}
     # It runs once now (`task_runner.start`), so its next run is a whole interval away.
     first = _minutes(args.get("first_in_minutes"))
     tid = tasks.add(title, spec, every_minutes=every,
@@ -393,8 +417,12 @@ def task_update(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
             return refused(f"notify_how: {exc}")
         tasks.set_delivery(row["id"], delivery)
         said.append(lang.say("task_delivery", title=row.get("text", ""), how=_how(delivery)))
+    if args.get("changes") in tasks.CHANGES:
+        tasks.edit(row["id"], changes=args["changes"])
+        said.append(lang.say("task_changes", title=row.get("text", ""),
+                             what=lang.say(f"task_changes_{args['changes']}")))
     if not said:
-        return refused("say pause, resume, every_minutes, notify_how, language or instructions",
+        return refused("say pause, resume, every_minutes, notify_how, changes, language or instructions",
                        reply=lang.say("nothing_changed"))
     return {"ok": True, "changed": 1, "reply": "\n".join(said)}
 
