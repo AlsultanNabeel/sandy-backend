@@ -96,15 +96,27 @@ MARK_HIDDEN_JS = """(() => {
   return document.documentElement.outerHTML;
 })()""" % {"mark": RENDERED_HIDDEN}
 
-# Words that give an assistant orders, in either language: never followed, always told.
+# Words aimed at the assistant, in either language: told, and never followed (nothing on a page
+# ever is; this is the notice, not the protection). Only what speaks to one: a title that names
+# an assistant («weather data for AI assistants»), says «ignore», «system prompt» or «تجاهل» is
+# no order. A masculine «تجاهل التعليمات» is a headline's noun unless it says which ones.
 _ORDERS = re.compile(
-    r"\b(ignore|disregard|forget)\s+(all\s+|any\s+|the\s+)?(previous|prior|above|earlier|your|these)\s+"
-    r"(instructions|prompts?|rules|directions)"
-    r"|\bsystem\s+prompt\b|\bnew\s+instructions\b|\byou\s+are\s+now\b"
-    r"|\b(to|for)\s+(the\s+)?(ai|assistant|chatbot|language\s+model)\b"
-    r"|\b(ai\s+)?assistants?\s*[:,]\s*(please\s+)?(send|delete|forward|email|transfer|open|ignore|tell)"
-    r"|تجاهل[يى]?\s+(كل\s+)?(التعليمات|الأوامر|التوجيهات)|انس[يى]?\s+(كل\s+)?(التعليمات|الأوامر)"
-    r"|تعليمات\s+جديدة|(إلى|الى|للـ?)\s*(المساعد|الذكاء\s+الاصطناعي)|أيها\s+(المساعد|الذكاء)", re.I)
+    r"\b(ignore|disregard|forget|override)\s+(all\s+|any\s+|the\s+)?(of\s+)?(your\s+)?"
+    r"(previous|prior|above|earlier|preceding|these|your)\s+(instructions|prompts?|rules|directions|guidelines)"
+    r"|\b(reveal|print|show|repeat|leak|output)\s+(me\s+)?(your|the)\s+(system\s+prompt|hidden\s+prompt|instructions)"
+    r"|\b(new|updated)\s+instructions\s*:"
+    r"|\byou\s+are\s+now\s+(dan|jailbroken|unrestricted|in\s+developer\s+mode|no\s+longer\s+bound)\b"
+    r"|\bif\s+you\s+are\s+(an?\s+)?(ai|llm|language\s+model|assistant|chatbot|gpt|agent)\b"
+    r"|\b(dear|attention|note\s+to(\s+the)?|hey|hello)\s+(ai|llms?|assistants?|chatbots?|gpt|ai\s+agents?|"
+    r"ai\s+assistants?|language\s+models?)\s*[:,!]"
+    r"|\b(ai\s+|llm\s+)?(assistants?|agents?)\s*[:,]\s*(please\s+)?(send|delete|forward|email|transfer|open|ignore|"
+    r"tell|reply|click|visit|reveal|do)\b"
+    r"|تجاهلي\s+(كل\s+|جميع\s+)?(التعليمات|الأوامر|التوجيهات|تعليماتك)|انسي\s+(كل\s+)?(التعليمات|الأوامر|تعليماتك)"
+    r"|(تجاهل|تجاهلى|انس[ىا]?)\s+((كل|جميع)\s+(التعليمات|الأوامر|التوجيهات)|تعليماتك|أوامرك"
+    r"|(التعليمات|الأوامر|التوجيهات)\s+(السابقة|السابقه|اللي\s+قبل|الماضية|اللي\s+فوق))"
+    r"|تعليمات\s+جديدة\s*:|(إذا|اذا|لو)\s+(كنت|كنتي|إنت|انت|إنتي|انتي)\s+(مساعد|ذكاء\s+اصطناعي|نموذج\s+لغوي|روبوت\s+محادثة)"
+    r"|(إلى|الى|للـ?)\s*(المساعد|الذكاء\s+الاصطناعي)\s*[:،,]|أيها\s+(المساعد|الذكاء)"
+    r"|(اكشف|اكشفي|اعرض|اعرضي|اطبع|اطبعي)\s+(تعليماتك|التعليمات\s+المخفية|موجّه\s+النظام|موجه\s+النظام)", re.I)
 # Hidden words that name an assistant at all.
 _TO_AN_ASSISTANT = re.compile(r"\b(ai|assistant|chatbot|llm|gpt|sandy)\b|ساندي|المساعد|الذكاء\s+الاصطناعي",
                               re.I)
