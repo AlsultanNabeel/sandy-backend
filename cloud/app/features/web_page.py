@@ -174,6 +174,16 @@ def _public(host: str) -> None:
         raise PageError("private", host)
 
 
+# What a site's answer means: the page is not there, or the site would not let her read it.
+_MISSING = (404, 410)
+_REFUSED = (401, 403, 429, 451)
+
+
+def _status_code(status: int) -> str:
+    """The PageError code of a page's failing HTTP status."""
+    return "missing" if status in _MISSING else "refused" if status in _REFUSED else "unreachable"
+
+
 def _fetch_html(url: str) -> Tuple[str, str, bytes]:
     """``(final url, content type, body)`` by a plain request, every hop checked; the body cut
     at `MAX_BYTES`."""
@@ -190,7 +200,7 @@ def _fetch_html(url: str) -> Tuple[str, str, bytes]:
                 url = urljoin(url, resp.headers["location"])
                 continue
             if resp.status_code >= 400:
-                raise PageError("unreachable", site_of(url))
+                raise PageError(_status_code(resp.status_code), site_of(url))
             kind = (resp.headers.get("content-type") or "text/html").split(";")[0].strip().lower()
             if kind not in _PAGE_TYPES:
                 raise PageError("not_page", site_of(url))
@@ -395,6 +405,7 @@ def _by_steel(url: str, user_id: str) -> Dict[str, Any]:
     from app.integrations import steel_client
     data = steel_client.scrape(url)
     page = extract(data["html"], url)
+    page["status"] = data.get("status") or 0
     page["login"] = _wants_login(data["html"], url, page["text"])
     page["title"] = page["title"] or data["title"]
     if not page["links"]:
@@ -439,14 +450,18 @@ def read(url: str, *, user_id: str) -> Dict[str, Any]:
 
     url = check_url(url)
     page: Optional[Dict[str, Any]] = None
+    failed = "unreachable"
     try:
         final, kind, body = _fetch_html(url)
         page = _plain(body, final) if kind == "text/plain" else extract(body, final)
         page["login"] = kind != "text/plain" and _wants_login(body, final, page["text"])
         page["via"] = "http"
     except PageError as exc:
-        if exc.code != "unreachable":
+        # Not there is an answer: its error page is never read as the page. A refusal, or a
+        # failure, may still be read by a browser.
+        if exc.code not in ("unreachable", "refused"):
             raise
+        failed = exc.code
     from app.integrations import steel_client
 
     capped = False
@@ -461,10 +476,16 @@ def read(url: str, *, user_id: str) -> Dict[str, Any]:
         except SteelError as exc:
             logger.warning("[browser] %s could not read %s: %s", step, site_of(url), exc)
             break
+        status = (found or {}).pop("status", 0)
+        if status >= 400:
+            failed = _status_code(status)
+            if failed == "missing":
+                raise PageError("missing", site_of(url))
+            break
         if found is not None and len(found["text"]) > len(str((page or {}).get("text") or "")):
             page = {**found, "via": step}
     if page is None:
-        raise PageError("daily_cap" if capped else "unreachable", site_of(url))
+        raise PageError("daily_cap" if capped else failed, site_of(url))
     if not str(page.get("text") or "").strip() and not page.get("links"):
         raise PageError("empty", site_of(page["url"]))
     return _answer(page)

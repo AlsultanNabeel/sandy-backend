@@ -97,8 +97,8 @@ def closed(session_id: str) -> bool:
 
 
 def scrape(url: str, *, screenshot: bool = False) -> Dict[str, Any]:
-    """The page as Steel's browser saw it: ``{html, title, links, screenshot}`` (the
-    screenshot's link, or "")."""
+    """The page as Steel's browser saw it: ``{html, title, links, screenshot, status}`` (the
+    screenshot's link, or ""; the site's HTTP status, 0 when Steel did not say)."""
     body: Dict[str, Any] = {"url": url, "format": ["html"]}
     if screenshot:
         body["screenshot"] = True
@@ -113,4 +113,5 @@ def scrape(url: str, *, screenshot: bool = False) -> Dict[str, Any]:
     return {"html": str(content.get("html") or ""), "title": str(meta.get("title") or ""),
             "links": [{"title": str(link.get("text") or "").strip(), "url": str(link.get("url") or "")}
                       for link in data.get("links") or [] if isinstance(link, dict)],
-            "screenshot": str(shot.get("url") or "") if isinstance(shot, dict) else ""}
+            "screenshot": str(shot.get("url") or "") if isinstance(shot, dict) else "",
+            "status": int(meta.get("statusCode") or 0) if str(meta.get("statusCode") or "0").isdigit() else 0}
