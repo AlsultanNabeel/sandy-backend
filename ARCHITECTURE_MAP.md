@@ -387,7 +387,14 @@ each fill counts on the day's browser calls (`SANDY_BROWSER_DAILY`). *The questi
 action*: browser-use's agent (our model, `brain/browser_llm.SandyLLM`, every step through
 `background.call("browser_step")`; the site's domains only, no frame of another site
 (`cross_origin_iframes` off), `EXCLUDED` actions off, `MAX_STEPS` 15, its telemetry off) has each
-action looked at before it is done (`_Asking`): a click on what sends (`_SENDS_JS`: a form's
+action looked at before it is done (`_Asking`): a value typed, a box ticked or an option picked must be his (`brain/fill_values.py`,
+since 4 Nov 2026, when a fill typed «123-456-7890» and «نبيل لارج» he never gave: his values read by code from his own messages of
+the conversation, `tools_browser._his_words`, and his profile's name when he says «اسمي», never the model's `details`; as he
+said them, a phone by its digits; a choice of his never typed into a text field, `A_CHOICE`; never one kind of value in a field
+of another, `WRONG_FIELD`; a choice named in the other script by its letters, `_skeleton`, «لارج» → «Large»), read from the
+element itself (`_FIELD_JS`, `_vetted`), else not done and kept on `gate.refused`, asked of him in the question or, with nothing
+to send, as the fill's end (`needs`, `fill_values.asked`); the question shows every field with its value and a required empty
+one said so (`_FILLED_JS`, groups by their ticked options; `fill_values.summary`); a click on what sends (`_SENDS_JS`: a form's
 submit, a button in a form, one that names a send in either language: send, submit, buy, checkout,
 delete, publish, accept, confirm, subscribe, pay, order and their kin, إرسال، تقديم، شراء، حذف، نشر،
 موافق، اشترك، ادفع and theirs) or an Enter in a field is

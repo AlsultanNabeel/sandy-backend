@@ -560,6 +560,11 @@ PHRASES = {
     "browser_forbidden_payment": {"ar": "وقفت: صفحة {site} صفحة دفع، وأنا ما بدفع أبداً.",
                                   "en": "I stopped: the page on {site} is a payment page, and I never pay."},
     # A fill (`features/browser_job`, `tools_browser.page_fill`).
+    "fill_empty": {"ar": "فاضي", "en": "empty"},
+    "fill_empty_required": {"ar": "فاضي وهو مطلوب", "en": "empty, and it is required"},
+    "fill_asked": {"ar": "ما كتبت شي بـ{fields}: ما أعطيتني قيمته. قلّي شو أحط، أو قلّي اتركه.",
+                   "en": "I didn't write anything in {fields}: you didn't give me its value. Tell me what to "
+                         "put, or tell me to leave it."},
     "fill_summary": {"ar": "أبعت النموذج على {site} بهالمعلومات: {fields}",
                      "en": "send the form on {site} with these details: {fields}"},
     "fill_done": {"ar": "انبعت النموذج على {site} ✅ والصفحة بتقول: {result}",

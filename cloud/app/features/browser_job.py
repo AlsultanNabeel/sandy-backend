@@ -35,7 +35,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlsplit
 
 from pymongo.errors import PyMongoError
@@ -63,12 +63,47 @@ LOAD_S = 20
 # The agent's actions a fill never needs: scripts of its own, files, other sites, searches.
 EXCLUDED = ("evaluate", "navigate", "search", "read_file", "replace_file", "write_file", "save_as_pdf",
             "upload_file", "close")
-_SEALED = ("summary", "result", "live")
-# What he filled, read back from the page: never a password or a hidden field.
-_FILLED_JS = """(() => [...document.querySelectorAll("input, select, textarea")]
-  .filter((el) => !["password", "hidden", "submit", "button"].includes((el.type || "").toLowerCase()) && el.value)
-  .map((el) => ({field: ((el.labels && el.labels[0] ? el.labels[0].innerText : "") || el.name || el.id
-                 || el.placeholder || "").trim().replace(/[:：]$/, "").trim(), value: String(el.value).slice(0, 200)})))()"""
+_SEALED = ("summary", "result", "live", "values", "asked")
+# Every field of the page as it is filled, read back from it: its name, its value (the options
+# ticked of a group, the one picked of a list) and whether it is required; never a password or a
+# hidden field.
+_FILLED_JS = """(() => {
+  const name = (el) => ((el.labels && el.labels[0] ? el.labels[0].innerText : "") || el.getAttribute("aria-label")
+    || el.name || el.id || el.placeholder || "").trim().replace(/[:：]$/, "").trim();
+  const out = [], groups = {};
+  for (const el of document.querySelectorAll("input, select, textarea")) {
+    const type = (el.type || "").toLowerCase();
+    if (["password", "hidden", "submit", "button", "reset", "image", "file"].includes(type)) continue;
+    if (type === "radio" || type === "checkbox") {
+      const set = el.closest("fieldset"), legend = set && set.querySelector("legend");
+      const title = (legend ? legend.innerText.trim() : "") || el.name || name(el);
+      const g = groups[title] || (groups[title] = {at: out.push(null) - 1, field: title, value: [], required: false});
+      if (el.checked) g.value.push(name(el));
+      g.required = g.required || el.required;
+      continue;
+    }
+    const value = el.tagName.toLowerCase() === "select" ? [...el.selectedOptions].map((o) => o.text.trim()).join(", ")
+      : String(el.value || "");
+    out.push({field: name(el), value: value.slice(0, 200), required: !!el.required});
+  }
+  for (const g of Object.values(groups)) out[g.at] = {field: g.field, value: g.value.join(", "), required: g.required};
+  return out.filter(Boolean);
+})()"""
+# The field an action is on (a label's own control), and every choice the page offers: what
+# `fill_values` checks a value against.
+_FIELD_JS = """function () {
+  let el = this.nodeType === 1 ? this : this.parentElement;
+  if (el && !el.matches("input, select, textarea, option")) {
+    const label = el.closest("label");
+    if (label && label.control) el = label.control;
+  }
+  const name = (e) => ((e.labels && e.labels[0] ? e.labels[0].innerText : "") || e.getAttribute("aria-label")
+    || e.name || e.id || e.placeholder || e.innerText || "").trim().replace(/[:：]$/, "").trim();
+  const choices = [...document.querySelectorAll("input[type=radio], input[type=checkbox]")].map(name)
+    .concat([...document.querySelectorAll("option")].map((o) => o.text.trim()));
+  return {tag: el.tagName.toLowerCase(), type: (el.type || "").toLowerCase(), label: name(el), name: el.name || "",
+          id: el.id || "", autocomplete: el.autocomplete || "", checked: !!el.checked, choices};
+}"""
 # Whether a click on this element sends: a form's submit, a button in a form, or one that names a send.
 _SENDS_JS = r"""function () {
   const el = this.nodeType === 1 ? this : this.parentElement;
@@ -93,6 +128,7 @@ _IS_JS = "function (at) { return !!at && (at === this || this.contains(at)); }"
 _TASK = (
     "Fill the form on this page for the user. What he wants: {goal}\n"
     "Use only these details of his: {details}\n"
+    "Write and pick only what he gave; leave every other field as it is, never a value of your own.\n"
     "Never type a password, a card number or anything a captcha asks, and never pay. Stay on this "
     "site. When every field he gave is filled, click the form's send button once and stop: the "
     "system asks him first. If something he must give is missing, stop and say what. "
@@ -206,9 +242,13 @@ def _on_pool(job_id: str, user_id: str) -> None:
     _POOL.submit(contextvars.copy_context().run, run)
 
 
-def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) -> str:
-    """A fill of ``args`` ({url, goal, details}) begun; its id. Raises Busy past a limit and
-    SteelError when no session could be opened. It counts on the day's browser calls."""
+def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str,
+          said: Iterable[str] = (), name: str = "") -> str:
+    """A fill of ``args`` ({url, goal, details}) begun; its id. ``said`` are his own words, and
+    ``name`` his own name: the only values it may write (`fill_values.his_values`). Raises Busy
+    past a limit and SteelError when no session could be opened. It counts on the day's browser
+    calls."""
+    from app.brain import fill_values
     from app.blocks import _base
     from app.features import web_page
     from app.integrations import steel_client
@@ -240,7 +280,8 @@ def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) 
         except PyMongoError:
             logger.warning("[browser] could not drop a fill that never began", exc_info=True)
         raise
-    _save(job_id, steel_id=session["id"], live=session["debug_url"])
+    _save(job_id, steel_id=session["id"], live=session["debug_url"],
+          values=json.dumps(fill_values.his_values(said, name), ensure_ascii=False))
     _on_pool(job_id, user_id)
     return job_id
 
@@ -683,12 +724,13 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
     if browser_sites.level(row["site"]) != browser_sites.SUBMIT:
         # Her yes could not send here: no question, the page is his (a held request went nowhere,
         # answered with nothing, and the page stays as it was, filled).
-        _save(row["_id"], status=HANDED, summary=_summary(filled))
+        _save(row["_id"], status=HANDED, summary=_summary(filled, gate.refused))
         now = get(row["_id"]) or {}
         if now.get("detached"):
             _tell(now)
         return {"status": HANDED}
-    _save(row["_id"], status=HELD, summary=_summary(filled), action=asked.get("label", ""), beat_at=_now())
+    _save(row["_id"], status=HELD, summary=_summary(filled, gate.refused), action=asked.get("label", ""),
+          beat_at=_now())
     now = get(row["_id"]) or {}
     if now.get("detached"):
         # No one waits for it: its question goes to his chat now.
@@ -807,9 +849,12 @@ def _answered_page(gate, html: str, url: str) -> Dict[str, Any]:
     return {"status": DONE, "result": web_page.extract(html, url)["text"][:600]}
 
 
-def _summary(filled: List[Dict[str, Any]]) -> str:
-    from app.brain import lang
-    return lang.say("sep").join(f"{f.get('field') or '؟'}: {f.get('value')}" for f in filled if f.get("value"))
+def _summary(filled: List[Dict[str, Any]], refused: Optional[List[Dict[str, str]]] = None) -> str:
+    """Every field with its value, a required empty one said so; and what she did not write
+    because he did not give it, asked of him."""
+    from app.brain import fill_values
+    said = fill_values.summary(filled)
+    return f"{said}\n{fill_values.asked(refused)}" if refused else said
 
 
 def _note(name: str, args: Dict[str, Any], ok: bool = True) -> None:
@@ -838,6 +883,37 @@ async def _sending(name: str, params: Dict[str, Any], browser_session, gate, cli
         focused = await _focus(browser_session, gate, client)
         return {"kind": "enter", **focused} if focused else None
     return None
+
+
+async def _vetted(name: str, params: Dict[str, Any], browser_session, gate, client,
+                  values: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    """Why the agent's value or choice is not his (``{field, why}``), read from the element it
+    is on (`_FIELD_JS`): a value typed, a box ticked, an option picked (`fill_values`)."""
+    from app.brain import fill_values
+    from app.integrations.browser_cdp import within
+    if name not in ("input", "click", "select_dropdown") or params.get("index") is None:
+        return None
+    node = await browser_session.get_element_by_index(int(params["index"]))
+    session = gate.sessions.get(getattr(node, "target_id", None)) if node is not None else None
+    if session is None:
+        return None
+    found = await within(client.send.DOM.resolveNode(params={"backendNodeId": node.backend_node_id},
+                                                     session_id=session))
+    element = (found.get("object") or {}).get("objectId")
+    if not element:
+        return None
+    field = ((await within(client.send.Runtime.callFunctionOn(params={
+        "functionDeclaration": _FIELD_JS, "objectId": element, "returnByValue": True},
+        session_id=session))).get("result") or {}).get("value") or {}
+    if name == "input":
+        why = fill_values.vet_type(values, str(params.get("text") or ""), field)
+    elif name == "select_dropdown":
+        why = fill_values.vet_choose(values, str(params.get("text") or ""), checked=False)
+    elif field.get("type") in ("radio", "checkbox") or field.get("tag") == "option":
+        why = fill_values.vet_choose(values, str(field.get("label") or ""), checked=bool(field.get("checked")))
+    else:
+        return None                       # a click on what is no choice: the gate watches it
+    return {"field": str(field.get("label") or field.get("name") or "؟"), "why": why} if why else None
 
 
 async def _focus(browser_session, gate, client) -> Optional[Dict[str, Any]]:
@@ -891,6 +967,7 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     from app.integrations import browser_cdp, steel_client
 
     site = row["site"]
+    values = json.loads(row.get("values") or "[]")
     session = BrowserSession(cdp_url=steel_client.connect_url(row["steel_id"]),
                              allowed_domains=[site, f"*.{site}"], keep_alive=True, cross_origin_iframes=False)
 
@@ -906,6 +983,12 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
                     return ActionResult(error="Type it without a line break: a line break can send the form.")
                 if name == "click" and params.get("index") is None:
                     return ActionResult(error="Click an element by its index.")
+                why = await _vetted(name, params, browser_session, gate, client, values)
+                if why:
+                    gate.refused.append(why)
+                    _note("browser_refused", {"site": site, "field": why["field"], "why": why["why"]}, ok=False)
+                    return ActionResult(error=("Not done: the user never gave this value. Leave this field as "
+                                               "it is and go on; he is asked for it."))
                 if name in ("click", "send_keys"):
                     # What he filled, read before the page answers (`_hold`).
                     gate.filled = await _filled_now(client, tab)
@@ -989,6 +1072,10 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
         await session.stop()
     if reason:
         return {"status": reason.pop("status"), **reason}
+    if gate.refused and not asked:
+        # It stopped short of sending for what he never gave: he is asked for it, nothing sent.
+        from app.brain import fill_values
+        return {"status": FAILED, "reason": "needs", "asked": fill_values.asked(gate.refused)}
     return {"status": DONE, "result": str(history.final_result() or "")}
 
 
@@ -1161,6 +1248,8 @@ def told(row: Dict[str, Any]) -> str:
     if status == HANDED:
         return lang.say("fill_handed", site=site)
     reason = row.get("reason") or ""
+    if reason == "needs" and row.get("asked"):
+        return row["asked"]
     if reason in _TOLD:
         return lang.say(_TOLD[reason], site=site)
     if reason in (browser_guard.PASSWORD, browser_guard.CARD, browser_guard.CAPTCHA, browser_guard.PAYMENT):

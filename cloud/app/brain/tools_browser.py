@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from pymongo.errors import PyMongoError
 
@@ -295,6 +295,24 @@ def live_link(job_id: str) -> str:
     return f"sandy://browser/live?job={job_id}"
 
 
+# How many of his last messages in the conversation a fill reads his values from.
+SAID_TURNS = 6
+
+
+def _his_words(ctx: TurnCtx) -> List[str]:
+    """His own words a fill may write: this message and his last ones in the conversation, never
+    the model's (`fill_values`)."""
+    from app.brain import stm
+    said = [m.get("content") for m in stm.load(ctx.thread_id, ctx.user_id) if m.get("role") == "user"]
+    return [str(m) for m in [*said[-SAID_TURNS:], ctx.message] if m]
+
+
+def _his_name(user_id: str) -> str:
+    from app.features import users_store
+    onboarding = (users_store.get_user(user_id) or {}).get("onboarding") or {}
+    return str(onboarding.get("preferred_name") or "").strip()
+
+
 def page_fill(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     """A form filled on his behalf, sent only on his yes (`features/browser_job`)."""
     from app.features import browser_job, browser_sites, web_page
@@ -316,7 +334,7 @@ def page_fill(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return _level_refused(ctx, "fill_level_read", site)
     try:
         job = browser_job.start({**args, "url": url}, user_id=ctx.user_id, thread_id=ctx.thread_id,
-                                language=lang.current())
+                                language=lang.current(), said=_his_words(ctx), name=_his_name(ctx.user_id))
     except browser_job.Busy as exc:
         said = {"daily_cap": "page_daily_cap", "unproven": "fill_failed"}.get(exc.code, f"fill_{exc.code}")
         return _no(lang.say(said, site=site))

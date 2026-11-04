@@ -463,8 +463,13 @@ def test_closing_a_fill_that_already_went_does_nothing(world):
 
 # ── The question is on the action ──
 
-def _tools(monkeypatch, sends):
-    """The agent's tools as a fill builds them, with what browser-use itself would do recorded."""
+BUTTON = {"tag": "button", "type": "submit", "label": "go", "name": "", "id": "", "checked": False, "choices": []}
+
+
+def _tools(monkeypatch, sends, field=None, said=(), name=""):
+    """The agent's tools as a fill builds them, with what browser-use itself would do recorded;
+    ``field`` is the element an action is on, ``said`` his words and ``name`` his name."""
+    from app.brain import fill_values
     import browser_use
     from browser_use.tools.service import Tools
 
@@ -493,14 +498,16 @@ def _tools(monkeypatch, sends):
     monkeypatch.setattr(Tools, "act", act)
     monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
     client = FakeCDP({"DOM.resolveNode": {"object": {"objectId": "o7"}},
-                      "Runtime.callFunctionOn": {"result": {"value": sends}},
+                      "Runtime.callFunctionOn": lambda params, session: {"result": {"value": (
+                          field or BUTTON) if params["functionDeclaration"] == browser_job._FIELD_JS else sends}},
                       "Runtime.evaluate": {"result": {"objectId": "o8"}},
                       "DOM.describeNode": {"node": {"backendNodeId": 8, "nodeName": "INPUT",
                                                     "attributes": ["name", "email"]}}})
     gate = browser_gate.Gate("forms.example.com")
     gate.sessions["t1"] = "s1"
     asked = {}
-    row = {"_id": "j1", "site": "forms.example.com", "steel_id": "st1", "goal": "apply", "args": {}}
+    row = {"_id": "j1", "site": "forms.example.com", "steel_id": "st1", "goal": "apply", "args": {},
+           "values": json.dumps(fill_values.his_values(list(said), name), ensure_ascii=False)}
     asyncio.run(browser_job._agent(row, gate, client, "s1", "userA", asked))
     client.gate = gate
     page = NS(agent_focus_target_id="t1")
@@ -518,8 +525,41 @@ def test_a_click_that_sends_is_not_made_and_he_is_asked(monkeypatch):
     run, asked, done, client = _tools(monkeypatch, sends=True)
     result = run(click={"index": 3})
     assert result.is_done and done == [] and asked == {"kind": "click", "target": "t1", "node": 7, "label": "go"}
-    [call] = client.of("Runtime.callFunctionOn")
-    assert call["functionDeclaration"] == browser_job._SENDS_JS and call["objectId"] == "o7"
+    [call] = [c for c in client.of("Runtime.callFunctionOn") if c["functionDeclaration"] == browser_job._SENDS_JS]
+    assert call["objectId"] == "o7"
+
+
+CHOICES = ["Small", "Medium", "Large", "Bacon", "Extra Cheese", "Onion", "Mushroom"]
+
+
+def _field(label, kind="text", name="", checked=False):
+    return {"tag": "input", "type": kind, "label": label, "name": name, "id": "", "checked": checked,
+            "choices": CHOICES}
+
+
+@pytest.mark.parametrize("said, action, field", [
+    (["حطي اسمي"], {"input": {"index": 2, "text": "123-456-7890"}}, _field("Telephone", "tel", "custtel")),
+    (["حطي اسمي ولارج"], {"input": {"index": 2, "text": "نبيل لارج"}}, _field("Customer name", name="custname")),
+    (["حطي اسمي ولارج"], {"input": {"index": 2, "text": "لارج"}}, _field("Customer name", name="custname")),
+    (["حطي اسمي"], {"click": {"index": 3}}, _field("Bacon", "checkbox", "topping")),
+    (["fill it, name Nabeel, size large"], {"click": {"index": 3}}, _field("Medium", "radio", "size")),
+    (["fill it, name Nabeel"], {"select_dropdown": {"index": 4, "text": "Express"}}, _field("Delivery", "select-one"))])
+def test_what_he_never_gave_is_never_written_or_picked_and_he_is_asked(monkeypatch, said, action, field):
+    run, asked, done, client = _tools(monkeypatch, sends=False, field=field, said=said, name="نبيل")
+    result = run(**action)
+    assert done == [] and "never gave" in result.error and not result.is_done
+    assert client.gate.refused and client.gate.refused[0]["field"] == field["label"]
+
+
+@pytest.mark.parametrize("said, action, field", [
+    (["حطي اسمي ولارج"], {"input": {"index": 2, "text": "نبيل"}}, _field("Customer name", name="custname")),
+    (["حطي اسمي ولارج"], {"click": {"index": 3}}, _field("Large", "radio", "size")),
+    (["fill it, name Nabeel, size medium"], {"input": {"index": 2, "text": "Nabeel"}}, _field("Customer name")),
+    (["fill it, name Nabeel, size medium"], {"click": {"index": 3}}, _field("Medium", "radio", "size")),
+    (["حطي اسمي"], {"click": {"index": 3}}, _field("Bacon", "checkbox", "topping", checked=True))])
+def test_what_he_gave_is_written_and_picked(monkeypatch, said, action, field):
+    run, asked, done, client = _tools(monkeypatch, sends=False, field=field, said=said, name="نبيل")
+    assert run(**action) == "done by browser-use" and done == [action] and client.gate.refused == []
 
 
 def test_what_he_filled_is_read_before_each_click_while_the_page_can_be(monkeypatch):
@@ -1349,3 +1389,23 @@ def test_a_process_stopped_with_a_session_open_closes_it_before_it_exits(tmp_pat
     assert done.returncode == -15, done.stderr.decode()[-800:]              # it ended by the signal
     assert log.read_text() == f"closed st-live {browser_job.CLOSE_S}\n"         # after closing, not before
     assert b"cannot schedule new futures" not in done.stderr
+
+
+def test_a_fill_takes_its_values_from_his_words_and_his_name_never_from_the_models(world, brain_db):  # noqa: F811
+    _level("submit")
+    brain_db["sandy_users"].update_one({"_id": "userA"}, {"$set": {"onboarding": {"preferred_name": "نبيل"}}})
+    with active_user_profile_context(A), lang.using("ar"):
+        ctx = TurnCtx(user_id="userA", thread_id="t1", message="حطي اسمي ولارج")
+        asked = tools.execute("page_fill", {**ARGS, "details": "الاسم: نبيل، اللقب: لارج، الهاتف: 123-456-7890"}, ctx)
+        values = json.loads(browser_job.get(asked["ids"][0])["values"])
+    said = {v["text"] for v in values}
+    assert {"نبيل", "لارج"} <= said and not any("123" in v or "اللقب" in v for v in said)
+
+
+@pytest.mark.parametrize("language, words", [("ar", "ما كتبت شي بـ«Telephone»"), ("en", "I didn't write anything in «Telephone»")])
+def test_a_fill_that_stopped_for_what_he_never_gave_asks_him_for_it(language, words):
+    from app.brain import fill_values
+    with lang.using(language):
+        row = {"status": browser_job.FAILED, "reason": "needs", "site": "httpbin.org",
+               "asked": fill_values.asked([{"field": "Telephone", "why": fill_values.NOT_HIS}])}
+        assert words in browser_job.told(row)
