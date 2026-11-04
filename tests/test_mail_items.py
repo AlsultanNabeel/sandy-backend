@@ -123,3 +123,10 @@ def test_a_watched_listing_is_told_by_the_code_with_its_items(brain_db, monkeypa
     assert row["items"] == [{"op": "added", "title": "Fourth story here", "url": "https://feed.example/p/6"}]
     assert "evil.example" not in json.dumps(row, default=str) and "](" not in row["body"]
     assert "«Fourth story here»" in row["body"] and "Source: feed.example" in row["body"]
+
+
+@pytest.mark.parametrize("language, words", [("ar", "جديد على news.example: «Running Rust on a microcontroller»"),
+                                             ("en", "New on news.example: «Running Rust on a microcontroller»")])
+def test_the_subject_names_the_first_item(brain_db, links, language, words):  # noqa: F811
+    subject, _, _ = _compose(language, _rows(language, EN_TITLES))
+    assert words in subject

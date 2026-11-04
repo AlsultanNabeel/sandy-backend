@@ -185,7 +185,8 @@ def _one_line(text: str) -> str:
 def _subject(rows: List[Dict[str, Any]]) -> str:
     """What is new, from the newest result's first line, and how many more came with it."""
     newest = _unmarked(str(rows[-1].get("body") or rows[-1].get("title") or "")).strip().splitlines() or [""]
-    line = _one_line(newest[0])[:90]
+    # A watched page's: its kind of change and its first item («جديد على …: «…»»).
+    line = _one_line(" ".join(newest[:2]) if rows[-1].get("items") else newest[0])[:90]
     if len(rows) == 1:
         return lang.say("mail_result_subject", line=line)
     return lang.say("mail_results_subject", line=line, n=len(rows) - 1)
