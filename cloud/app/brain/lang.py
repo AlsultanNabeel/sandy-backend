@@ -611,6 +611,7 @@ PHRASES = {
                          "en": "The browser is busy right now; try again in a bit."},
     "fill_cost": {"ar": "وقّفت التعبئة على {site}: وصلت حدّها من الكلفة، وما انبعت شي.",
                   "en": "I stopped filling the form on {site}: it reached its cost limit, and nothing was sent."},
+    "fill_progress": {"ar": "⏳ لسا بعبّي على {site}{where}.", "en": "⏳ Still filling the form on {site}{where}."},
     "fill_where": {"ar": "، {steps} خطوات لهلّق", "en": ", {steps} steps so far"},
     "fill_where_field": {"ar": "، {steps} خطوات لهلّق، وآخر حقل «{field}»",
                          "en": ", {steps} steps so far, last at «{field}»"},

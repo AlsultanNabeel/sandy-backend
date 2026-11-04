@@ -51,7 +51,10 @@ KEEP = timedelta(days=1)
 RUNNING, HELD, APPROVED, DONE, FAILED, STOPPED, HANDED = (
     "running", "held", "approved", "done", "failed", "stopped", "handed")
 OPEN = (RUNNING, HELD, APPROVED, HANDED)
-WAIT_S = 80
+# How long the chat waits for a fill before it goes on in the background, and how often a fill
+# in the background writes in his chat where it is (never spoken, never pushed).
+WAIT_S = 20
+PROGRESS_S = 20
 # A fill's own work, its time waiting for his yes aside: three minutes in all, twenty seconds a
 # step (a model call and the page). Past either it stops, its session closes, and he is told.
 RUN_S = 3 * 60
@@ -667,10 +670,12 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             outcome = {"status": FAILED, "reason": "orders"}
             return outcome
         watch = asyncio.ensure_future(_watching(row["_id"], user_id, stopped))
+        told = asyncio.ensure_future(_progressing(row["_id"]))
         try:
             outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped, RUN_S)
         finally:
             watch.cancel()
+            told.cancel()
         if gate.breach is None and asked:
             # A request held stopped the agent the same way: from here only a breach stops it.
             stopped.clear()
@@ -691,6 +696,23 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         beat.cancel()
         if client is not None:
             await client.stop()
+
+
+async def _progressing(job_id: str) -> None:
+    """While a fill in the background works: about every `PROGRESS_S` a short line in the chat
+    he asked from, where it is (`state_line`); written only, never spoken nor pushed."""
+    from app.api.conversations_api import say_in
+    from app.brain import lang
+    while True:
+        await asyncio.sleep(PROGRESS_S)
+        now = get(job_id) or {}
+        if now.get("status") != RUNNING:
+            return
+        if now.get("detached") and now.get("thread_id"):
+            with lang.using(now.get("lang") or lang.AR):
+                say_in(get_db(), str(now.get("user_id") or ""), now["thread_id"],
+                       lang.say("fill_progress", site=now.get("site", ""), where=_where(now)),
+                       live={"job": job_id})
 
 
 def _where(row: Dict[str, Any]) -> str:

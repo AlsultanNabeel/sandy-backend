@@ -460,8 +460,9 @@ signal did before. As a worker boots (`close_orphans`, from `bootstrap`, in the 
 that no live process of ours holds is closed at once: one no row knows, past `ORPHAN_S` (60 s, a signed-in read's own before that), and one whose row's
 `holder` (`HOLDER`: dyno, its server's master by pid and start, pid; saved by `_run`) is this dyno's earlier server or a worker gone; another dyno's while it beats is left. His «no», a new request instead of an answer, or a second unclear one (taken in one write, as his
 yes is: when «اه» and «لأ» come at once only one of them is) closes the session at once (`confirm.let_go`, `tools.LET_GO`), in the chat and on the call. Every
-call to the browser has `browser_cdp.CALL_S` (20 s) at most. A connection whose opening handshake times out is tried again, `CONNECT_TRIES` (3) in all, and each attempt that failed is closed, never left half open. The tool waits `WAIT_S` (80 s); past
-it the fill is `detached`, and once it is held or stops it tells him in the chat he asked from
+call to the browser has `browser_cdp.CALL_S` (20 s) at most. A connection whose opening handshake times out is tried again, `CONNECT_TRIES` (3) in all, and each attempt that failed is closed, never left half open. The tool waits `WAIT_S` (20 s since 4 Nov 2026, was 80); past
+it the fill is `detached`, and while it works it writes a short line in that chat about every `PROGRESS_S` (20 s) of where it is
+(`_progressing`, its steps and the field it is on; written only, never spoken nor pushed), and once it is held or stops it tells him in the chat he asked from
 (`conversations_api.say_in`: its question, kept as the thread's `pending` so his next message
 answers it, or its result) and on his phone, each state once whoever tells it (`told`); never as a task's result. Each action on the page is
 a tool on the fill's own background trace row (`trace_store.background(…, keep=True)`). *Live view*:

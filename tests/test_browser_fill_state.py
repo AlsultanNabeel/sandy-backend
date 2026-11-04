@@ -79,3 +79,7 @@ def test_talk_of_a_fills_state_a_tool_read_stands(on):
                                   "The form has three fields."])
 def test_words_about_a_form_that_claim_no_state_are_left_alone(text):
     assert not honesty.fill_state_talk(text)
+
+
+def test_the_progress_lines_come_about_every_twenty_seconds_and_wait_only_twenty_before_going_on():
+    assert browser_job.PROGRESS_S == 20 and browser_job.WAIT_S == 20

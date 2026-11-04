@@ -1476,3 +1476,18 @@ def test_a_stuck_step_is_told_in_his_language(language, words):
     with lang.using(language):
         said = browser_job.told({"status": browser_job.FAILED, "reason": "step_slow", "site": "forms.example.com"})
     assert words in said
+
+
+@pytest.mark.parametrize("language, words", [("ar", "لسا بعبّي"), ("en", "Still filling")])
+def test_a_fill_in_the_background_writes_where_it_is_in_his_chat_and_never_pushes_it(world, monkeypatch, brain_db, language, words):  # noqa: F811
+    _level("submit")
+    world.mode = "slow"
+    pushed = []
+    monkeypatch.setattr(browser_job, "_push", lambda uid, body: pushed.append(body))
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
+    monkeypatch.setattr(browser_job, "PROGRESS_S", 0.5)
+    _fill(language, thread=C9)
+    _wait_for(lambda: any(words in m["text"] for m in (brain_db["conversations"].find_one({"_id": C9}) or {})
+                          .get("messages") or []), seconds=5)
+    said = [m["text"] for m in brain_db["conversations"].find_one({"_id": C9})["messages"]]
+    assert any(words in t for t in said) and not any(words in p for p in pushed)
