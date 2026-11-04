@@ -52,7 +52,10 @@ RUNNING, HELD, APPROVED, DONE, FAILED, STOPPED, HANDED = (
     "running", "held", "approved", "done", "failed", "stopped", "handed")
 OPEN = (RUNNING, HELD, APPROVED, HANDED)
 WAIT_S = 80
-RUN_S = 300
+# A fill's own work, its time waiting for his yes aside: three minutes in all, twenty seconds a
+# step (a model call and the page). Past either it stops, its session closes, and he is told.
+RUN_S = 3 * 60
+STEP_S = 20
 # A held fill waits for his yes as long as its question does (`pending.TTL_MINUTES`).
 HOLD_S = 10 * 60
 # A page handed to him stays open, the gate on it, this long at most.
@@ -1033,12 +1036,14 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     reason: Dict[str, str] = {}
 
     steps = [0]
+    began = [time.monotonic()]
 
     def on_step(state, output, n):
         # The agent's own count of its steps (it asks whether to stop more than once a step).
         steps[0] = int(n or 0)
 
     async def should_stop() -> bool:
+        began[0] = time.monotonic()           # asked as each step begins
         if asked or gate.breach is not None:
             return True
         if steps[0] > MAX_STEPS:
@@ -1063,11 +1068,29 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     agent = Agent(task=_TASK.format(goal=row.get("goal") or "", details=details), llm=SandyLLM(user_id),
                   browser_session=session, tools=_Asking(exclude_actions=list(EXCLUDED)), use_vision="auto",
                   use_judge=False, enable_planning=False, register_should_stop_callback=should_stop,
-                  register_new_step_callback=on_step,
+                  register_new_step_callback=on_step, step_timeout=STEP_S + 5,
                   max_failures=3, directly_open_url=False)
+    run = asyncio.ensure_future(agent.run(max_steps=MAX_STEPS))
+
+    async def stuck() -> None:
+        # A step past `STEP_S` (a model call or a page that never answers) stops the fill.
+        while not run.done():
+            await asyncio.sleep(min(1.0, STEP_S / 4))
+            if time.monotonic() - began[0] > STEP_S:
+                reason.update(status=FAILED, reason="step_slow")
+                _note("browser_step_slow", {"site": site}, ok=False)
+                run.cancel()
+                return
+    watch = asyncio.ensure_future(stuck())
     try:
-        history = await agent.run(max_steps=MAX_STEPS)
+        try:
+            history = await run
+        except asyncio.CancelledError:
+            if reason.get("reason") != "step_slow":
+                raise
+            history = None
     finally:
+        watch.cancel()
         # Our connection only: the session itself stays open for his yes (keep_alive).
         await session.stop()
     if reason:
@@ -1251,6 +1274,10 @@ def told(row: Dict[str, Any]) -> str:
     reason = row.get("reason") or ""
     if reason == "needs" and row.get("asked"):
         return row["asked"]
+    if reason == "slow":
+        return lang.say("fill_slow", site=site, minutes=lang.number(RUN_S // 60))
+    if reason == "step_slow":
+        return lang.say("fill_step_slow", site=site, seconds=lang.number(STEP_S))
     if reason in _TOLD:
         return lang.say(_TOLD[reason], site=site)
     if reason in (browser_guard.PASSWORD, browser_guard.CARD, browser_guard.CAPTCHA, browser_guard.PAYMENT):

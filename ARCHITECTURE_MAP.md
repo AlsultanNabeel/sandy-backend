@@ -386,7 +386,8 @@ once never both get past a limit; a handed page counts too), and
 each fill counts on the day's browser calls (`SANDY_BROWSER_DAILY`). *The question is on the
 action*: browser-use's agent (our model, `brain/browser_llm.SandyLLM`, every step through
 `background.call("browser_step")`; the site's domains only, no frame of another site
-(`cross_origin_iframes` off), `EXCLUDED` actions off, `MAX_STEPS` 15, its telemetry off) has each
+(`cross_origin_iframes` off), `EXCLUDED` actions off, `MAX_STEPS` 15, its telemetry off; since 4 Nov 2026 `RUN_S` three minutes of its own work in all and `STEP_S` twenty
+seconds a step, `_agent`'s own watch: past either it stops (`slow`, `step_slow`), its session closes, and he is told it did not finish and why, nothing sent) has each
 action looked at before it is done (`_Asking`): a value typed, a box ticked or an option picked must be his (`brain/fill_values.py`,
 since 4 Nov 2026, when a fill typed «123-456-7890» and «نبيل لارج» he never gave: his values read by code from his own messages of
 the conversation, `tools_browser._his_words`, and his profile's name when he says «اسمي», never the model's `details`; as he

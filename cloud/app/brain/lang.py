@@ -611,6 +611,13 @@ PHRASES = {
                          "en": "The browser is busy right now; try again in a bit."},
     "fill_cost": {"ar": "وقّفت التعبئة على {site}: وصلت حدّها من الكلفة، وما انبعت شي.",
                   "en": "I stopped filling the form on {site}: it reached its cost limit, and nothing was sent."},
+    "fill_slow": {"ar": "ما خلصت التعبئة على {site}: أخدت أكتر من {minutes} دقايق، فوقّفتها وسكّرت الصفحة. ما انبعت شي.",
+                  "en": "I didn't finish the form on {site}: it took longer than {minutes} minutes, so I stopped "
+                        "and closed the page. Nothing was sent."},
+    "fill_step_slow": {"ar": "ما خلصت التعبئة على {site}: خطوة علقت أكتر من {seconds} ثانية، فوقّفتها وسكّرت "
+                             "الصفحة. ما انبعت شي.",
+                       "en": "I didn't finish the form on {site}: a step got stuck for more than {seconds} "
+                             "seconds, so I stopped and closed the page. Nothing was sent."},
     "fill_steps": {"ar": "وقّفت التعبئة على {site}: خلصت الخطوات المسموحة، وما انبعت شي.",
                    "en": "I stopped filling the form on {site}: it used all the steps it may take, and nothing "
                          "was sent."},

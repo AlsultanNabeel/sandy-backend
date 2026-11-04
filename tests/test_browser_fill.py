@@ -1411,3 +1411,68 @@ def test_a_fill_that_stopped_for_what_he_never_gave_asks_him_for_it(language, wo
         row = {"status": browser_job.FAILED, "reason": "needs", "site": "httpbin.org",
                "asked": fill_values.asked([{"field": "Telephone", "why": fill_values.NOT_HIS}])}
         assert words in browser_job.told(row)
+
+
+# ── Time limits: three minutes of work in all, twenty seconds a step; his yes is not counted ──
+
+@pytest.mark.parametrize("language, words", [("ar", "ما خلصت التعبئة على forms.example.com"),
+                                             ("en", "I didn't finish the form on forms.example.com")])
+def test_a_fill_past_its_time_is_closed_and_says_plainly_it_did_not_finish(world, monkeypatch, language, words):
+    _level("submit")
+    world.mode = "slow"                                    # three seconds of work
+    monkeypatch.setattr(browser_job, "RUN_S", 0.5)
+    out = _fill(language)
+    assert out["ok"] is False and words in out["reply"] and ("ما انبعت شي" in out["reply"] or "Nothing was sent" in out["reply"])
+    job = _job(_last_job())
+    assert job["status"] == browser_job.FAILED and job["reason"] == "slow" and world.released == ["st1"]
+
+
+def _last_job():
+    with active_user_profile_context(A):
+        return browser_job._coll().find_one(sort=[("created_at", -1)])["_id"]
+
+
+def test_the_fills_limits_are_three_minutes_and_twenty_seconds_a_step():
+    assert browser_job.RUN_S == 180 and browser_job.STEP_S == 20
+
+
+def test_a_step_that_hangs_stops_the_fill_and_says_why(monkeypatch):
+    import browser_use
+    from browser_use.tools.service import Tools
+
+    from app.brain import browser_gate
+    monkeypatch.setattr(browser_job, "STEP_S", 0.3)
+    built = {}
+
+    class Session:
+        def __init__(self, **kw):
+            self.event_bus = NS(on=lambda kind, fn: None)
+
+        async def stop(self):
+            pass
+
+    class Agent:
+        def __init__(self, **kw):
+            built.update(kw)
+
+        async def run(self, max_steps):
+            await built["register_should_stop_callback"]()     # a step begins
+            await asyncio.sleep(5)                              # and never ends
+    monkeypatch.setattr(browser_use, "Agent", Agent)
+    monkeypatch.setattr(browser_use, "BrowserSession", Session)
+    monkeypatch.setattr(Tools, "act", lambda *a, **kw: None)
+    monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
+    monkeypatch.setattr(browser_job, "get", lambda job: {})
+    client = FakeCDP({"Runtime.evaluate": {"result": {"value": "{}"}}})
+    row = {"_id": "j1", "site": "forms.example.com", "steel_id": "st1", "goal": "x", "args": {}, "values": "[]"}
+    began = time.monotonic()
+    out = asyncio.run(browser_job._agent(row, browser_gate.Gate("forms.example.com"), client, "s1", "userA", {}))
+    assert out == {"status": browser_job.FAILED, "reason": "step_slow"} and time.monotonic() - began < 3
+    assert built["step_timeout"] >= browser_job.STEP_S
+
+
+@pytest.mark.parametrize("language, words", [("ar", "خطوة علقت"), ("en", "a step got stuck")])
+def test_a_stuck_step_is_told_in_his_language(language, words):
+    with lang.using(language):
+        said = browser_job.told({"status": browser_job.FAILED, "reason": "step_slow", "site": "forms.example.com"})
+    assert words in said
