@@ -263,7 +263,7 @@ def page_read(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     _read_now(ctx, page)
     out: Dict[str, Any] = {"ok": True, "note": _NOTE, "source": page["url"], "page": {
         "url": page["url"], "title": page["title"], "text": page["text"][:SHOWN_TEXT],
-        "links": page["links"][:SHOWN_LINKS]}}
+        "links": page["links"][:SHOWN_LINKS], "items": page["items"][:SHOWN_LINKS]}}
     if page["warning"]:
         notice = lang.say("page_warning", site=web_page.site_of(page["url"]))
         notices = ctx.artifacts.setdefault("notices", [])

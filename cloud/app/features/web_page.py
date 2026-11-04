@@ -29,7 +29,7 @@ import logging
 import re
 import socket
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 import requests
 from soupsieve import SelectorSyntaxError
@@ -53,8 +53,10 @@ TIMEOUT_S = (5, 10)
 THIN = 200
 MAX_TEXT = 20_000
 MAX_LINKS = 100
-# A page with this many links in its content is a listing: a task compares its links.
+# A page with this many items (`_items`) is a listing: a task compares its items.
 LISTING_LINKS = 5
+# Blocks of the same shape side by side, at least this many, are a page's repeated content.
+MIN_BLOCKS = 3
 # A page with a password field and less text than this is a sign-in page (`_wants_login`).
 LOGIN_TEXT = 600
 _PAGE_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
@@ -126,6 +128,21 @@ _AGO = re.compile(
     r"|يوم|يومين|أيام|ايام|أسبوع|أسبوعين|أسابيع|شهر|شهرين|أشهر)"
     r"|\b(\d+|an?|one)\s*(s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|weeks?)\s+ago\b"
     r"|\bjust\s+now\b", re.I)
+
+
+# What a link says when it is an action or a menu, not content, in either language (its numbers
+# and the time that moves by itself aside: «12 comments», «منذ ساعة»).
+_ACTIONS = re.compile(
+    r"^(hide|unhide|vote|upvote|downvote|flag|reply|login|log in|sign in|sign up|register|share|save|"
+    r"edit|delete|report|more|next|prev|previous|comments?|discuss|past|web|search|add to cart|buy now|"
+    r"quick view|read more|إخفاء|اخفاء|تصويت|رد|ردود|دخول|تسجيل الدخول|تسجيل|مشاركة|شارك|حفظ|تعديل|حذف|"
+    r"إبلاغ|ابلاغ|المزيد|التالي|السابق|تعليقات|تعليق|ابحث|بحث|أضف إلى السلة|اضف الى السلة|اقرأ المزيد)$", re.I)
+_NOISE = re.compile(r"[\d\u0660-\u0669.,:;·|•()\[\]\-–—#+/]+")
+_LETTER = re.compile(r"[^\W\d_]")
+# A link that searches for what is on the page, elsewhere or on the site: never an item.
+_SEARCH_FIELDS = {"q", "query", "search", "s", "keyword", "keywords", "k", "term"}
+# Words that are a site's name («example.com»): where an item is from, not the item.
+_HOSTLIKE = re.compile(r"^[\w-]+(\.[\w-]+)+(/\S*)?$")
 
 
 class PageError(Exception):
@@ -351,6 +368,66 @@ def _hidden(tag: Any) -> bool:
     return bool(_HIDDEN_CLASSES & {str(c).lower() for c in classes})
 
 
+def _words_of(a: Any) -> str:
+    return re.sub(r"\s+", " ", a.get_text(" ", strip=True))
+
+
+def _meaningful(words: str) -> bool:
+    """A link's words that name something: letters, not an action or a menu's word."""
+    bare = re.sub(r"\s+", " ", _NOISE.sub(" ", _AGO.sub(" ", words))).strip()
+    return len(_LETTER.findall(bare)) >= 3 and not _ACTIONS.match(bare)
+
+
+def _searches(url: str) -> bool:
+    query = urlsplit(url).query
+    return any(k.lower() in _SEARCH_FIELDS and v.strip() for k, v in parse_qsl(query, keep_blank_values=True))
+
+
+def _picked(blocks: List[Any], base_url: str) -> List[Dict[str, str]]:
+    """Each block's own link: the one whose words mean most, never one every other block says
+    the same (an action, a menu), a search, or the page itself."""
+    found = []
+    for block in blocks:
+        anchors = [block] if block.name == "a" and block.get("href") else block.find_all("a", href=True)
+        found.append([(_words_of(a), urljoin(base_url, str(a["href"]).strip())) for a in anchors])
+    said: Dict[str, int] = {}
+    for links in found:
+        for words in {w.lower() for w, _ in links}:
+            said[words] = said.get(words, 0) + 1
+    out, seen = [], set()
+    for links in found:
+        ok = [(w, u) for w, u in links
+              if u.startswith(("http://", "https://")) and u.split("#")[0] != base_url.split("#")[0]
+              and said[w.lower()] * 2 <= len(blocks) and _meaningful(w) and not _searches(u)]
+        if not ok:
+            continue
+        words, url = max(ok, key=lambda p: (not _HOSTLIKE.match(p[0]), len(p[0].split()), len(p[0])))
+        if url not in seen:
+            seen.add(url)
+            out.append({"title": words[:200], "url": url})
+    return out
+
+
+def _items(root: Any, base_url: str) -> List[Dict[str, str]]:
+    """The page's main repeated content, a title and its link per block, read the same way on
+    any site: of the blocks of one shape (tag and class) side by side, `MIN_BLOCKS` or more, the
+    run whose own links say the most."""
+    best: List[Dict[str, str]] = []
+    score = 0
+    for parent in [root, *root.find_all(True)]:
+        groups: Dict[Tuple[str, Tuple[str, ...]], List[Any]] = {}
+        for child in parent.find_all(True, recursive=False):
+            groups.setdefault((child.name, tuple(sorted(child.get("class") or []))), []).append(child)
+        for blocks in groups.values():
+            if len(blocks) < MIN_BLOCKS:
+                continue
+            picked = _picked(blocks, base_url)
+            said = sum(len(i["title"].split()) for i in picked)
+            if len(picked) >= MIN_BLOCKS and said > score:
+                best, score = picked, said
+    return best[:MAX_LINKS]
+
+
 def _paragraphs(text: str) -> List[str]:
     out = []
     for block in re.split(r"\n\s*\n", text):
@@ -361,8 +438,9 @@ def _paragraphs(text: str) -> List[str]:
 
 
 def extract(markup: Any, base_url: str) -> Dict[str, Any]:
-    """A page's ``{url, title, text, links, hidden}``: its words in paragraphs, the links of its
-    content (none from its navigation), and what it hides from the eye."""
+    """A page's ``{url, title, text, links, items, hidden}``: its words in paragraphs, the links
+    of its content (none from its navigation), its repeated items (`_items`) and what it hides
+    from the eye."""
     soup = BeautifulSoup(markup or "", "html.parser")
     title = re.sub(r"\s+", " ", soup.title.get_text()).strip() if soup.title else ""
     _styled(soup)
@@ -395,17 +473,18 @@ def extract(markup: Any, base_url: str) -> Dict[str, Any]:
         if href not in seen:
             seen.add(href)
             links.append({"title": words[:200], "url": href})
+    items = _items(root, base_url)
     for tag in root.find_all(_BLOCKS):
         tag.insert_before("\n\n")
         tag.insert_after("\n\n")
     text = "\n\n".join(_paragraphs(root.get_text(" ")))
     return {"url": base_url, "title": title, "text": text[:MAX_TEXT], "links": links[:MAX_LINKS],
-            "hidden": "\n".join(hidden)[:MAX_TEXT]}
+            "items": items, "hidden": "\n".join(hidden)[:MAX_TEXT]}
 
 
 def _plain(body: bytes, url: str) -> Dict[str, Any]:
     text = "\n\n".join(_paragraphs(body.decode("utf-8", errors="replace")))
-    return {"url": url, "title": "", "text": text[:MAX_TEXT], "links": [], "hidden": ""}
+    return {"url": url, "title": "", "text": text[:MAX_TEXT], "links": [], "items": [], "hidden": ""}
 
 
 def warned(page: Dict[str, Any]) -> bool:
@@ -466,7 +545,7 @@ def _by_screenshot(url: str, user_id: str) -> Optional[Dict[str, Any]]:
         {"type": "text", "text": _SHOT_PROMPT}, {"type": "image_url", "image_url": {"url": image}}]}],
         priority=background.DIRECT, user_id=user_id, max_tokens=900, temperature=0)
     words = (answer.choices[0].message.content or "").strip()
-    return {"url": url, "title": "", "text": words[:MAX_TEXT], "links": [], "hidden": ""} if words else None
+    return {"url": url, "title": "", "text": words[:MAX_TEXT], "links": [], "items": [], "hidden": ""} if words else None
 
 
 def read(url: str, *, user_id: str) -> Dict[str, Any]:
@@ -521,6 +600,7 @@ def read(url: str, *, user_id: str) -> Dict[str, Any]:
 
 def _answer(page: Dict[str, Any]) -> Dict[str, Any]:
     out = {k: page[k] for k in ("url", "title", "text", "links", "via")}
+    out["items"] = page.get("items") or []
     out["warning"] = warned(page)
     out["login"] = bool(page.get("login"))
     return out
@@ -584,12 +664,12 @@ def _still(words: str) -> str:
 
 
 def for_compare(page: Dict[str, Any]) -> Dict[str, Any]:
-    """What a task compares of a page: a listing's links (their words and address), else its
+    """What a task compares of a page: a listing's items (their words and address), else its
     words, either without what moves by itself («منذ دقيقتين», «2 hours ago»)."""
     out: Dict[str, Any] = {"url": page.get("url", ""), "warning": bool(page.get("warning"))}
-    links = page.get("links") or []
-    if len(links) >= LISTING_LINKS:
-        out["links"] = [{"title": _still(link.get("title")), "url": link.get("url", "")} for link in links]
+    items = page.get("items") or []
+    if len(items) >= LISTING_LINKS:
+        out["links"] = [{"title": _still(item.get("title")), "url": item.get("url", "")} for item in items]
     else:
         out["text"] = "\n\n".join(_still(p) for p in _paragraphs(str(page.get("text") or "")))
     return out

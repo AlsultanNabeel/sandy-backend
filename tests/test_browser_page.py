@@ -335,10 +335,10 @@ def test_no_key_sends_nothing(monkeypatch):
 
 def _listing(rows, ago="منذ 3 دقائق"):
     return {"url": "https://jobs.example/", "title": "Jobs", "text": "", "warning": False,
-            "links": [{"title": f"{r} {ago}", "url": f"https://jobs.example/p/{i}"} for i, r in enumerate(rows)]}
+            "items": [{"title": f"{r} {ago}", "url": f"https://jobs.example/p/{i}"} for i, r in enumerate(rows)]}
 
 
-def test_a_listing_is_compared_by_its_links_without_the_time_that_moves():
+def test_a_listing_is_compared_by_its_items_without_the_time_that_moves():
     before = web_page.for_compare(_listing(["a", "b", "c", "d", "e"]))
     after = web_page.for_compare(_listing(["a", "b", "c", "d", "e"], ago="منذ ساعة"))
     english = web_page.for_compare(_listing(["a", "b", "c", "d", "e"], ago="2 hours ago"))
