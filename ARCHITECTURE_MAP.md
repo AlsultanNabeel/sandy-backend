@@ -189,6 +189,10 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    `ctx.for_later`, the device's name and the command it sends), never the model's words: an
    update and a delete with no id name the same newest row, «AC» and «ac» one device. The refusal is for the model alone (an `error`, no `reply`), so the
    honesty check never shows it and the model's answer says what stands.
+   What she says of a fill's state stands on a tool that read it (`honesty.fill_state`, since 4 Nov 2026, when she said «في مشكلة
+   بالتعبئة» of a fill that was working): a sentence with a word of the fill and one of its state (`fill_state_talk`, both
+   languages) and no `page_fill` or `fill_status` in the turn is taken out and the real state, read from the rows by the code
+   (`tools_browser.fill_lines`, `browser_job.state_line`: its steps and the field it is on, `progress`), put in its place.
 3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
    is Arabic when it has a real Arabic word outside a quoted name («ضيفي Nescafe Gold Blend»;
    letters only, `lang.LETTERS`: «؟» or «٢٢» names no language),

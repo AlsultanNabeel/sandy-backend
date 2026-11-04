@@ -242,6 +242,9 @@ class Gate:
         self.filled: List[Dict[str, Any]] = []
         # What the agent tried to write or pick that he never gave (`fill_values`): asked of him.
         self.refused: List[Dict[str, str]] = []
+        # The field the agent's last action was on, and the last one it wrote in (`state_line`).
+        self.last_field = ""
+        self.at = ""
         self.on_hold: Optional[Callable[[Dict[str, Any]], None]] = None
         # The tab and frame whose one send his yes lets through, until it goes (`approve`).
         self.armed: Optional[Tuple[str, str]] = None

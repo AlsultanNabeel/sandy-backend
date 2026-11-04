@@ -68,8 +68,17 @@ STOP_SCHEMAS = [
      "description": "رجّعي كل اللي وقّفتيه بـ stop_everything («رجّعي كل شي»، «resume everything»).",
      "parameters": {"type": "object", "properties": {}, "required": []}},
 ]
+STATUS_SCHEMA: Dict[str, Any] = {
+    "name": "fill_status",
+    "description": ("اقري حالة تعبئاته المفتوحة الحقيقية قبل ما تحكي عنها («وين صارت التعبئة؟»، «ليش طوّلت؟»، "
+                    "«how is the form going?»). ما تحكي عن حالة تعبئة إلا من هون أو من page_fill "
+                    "(never say how a fill is going without reading it here)."),
+    "parameters": {"type": "object", "properties": {}, "required": []},
+}
 # Every tool behind the switch, as offered.
-SCHEMAS = [SCHEMA, FILL_SCHEMA, *STOP_SCHEMAS]
+SCHEMAS = [SCHEMA, FILL_SCHEMA, STATUS_SCHEMA, *STOP_SCHEMAS]
+# The tools whose answer is a fill's real state: what she says of one stands on them.
+FILL_STATE_TOOLS = ("page_fill", "fill_status")
 # The phrases that name the site.
 _NAMES_SITE = ("blocked", "not_page", "unreachable", "empty", "missing", "refused", "no_session")
 # Tools whose answers are not his data; what any other tool gave back is (`saw`).
@@ -312,6 +321,21 @@ def _his_name(user_id: str) -> str:
     from app.features import users_store
     onboarding = (users_store.get_user(user_id) or {}).get("onboarding") or {}
     return str(onboarding.get("preferred_name") or "").strip()
+
+
+def fill_lines(user_id: str) -> str:
+    """His open fills' real states, a line each, read from their rows; or that there is none."""
+    from app.features import browser_job
+    rows = [browser_job.get(j["id"]) for j in browser_job.open_jobs()]
+    lines = [browser_job.state_line(r) for r in rows if r]
+    return "\n".join(lines) if lines else lang.say("fill_state_none")
+
+
+def fill_status(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
+    """What his fills are doing now, as their rows say it: what she says of one stands on this."""
+    if not offered(ctx.user_id):
+        return refused("the browser is not on for this account")
+    return {"ok": True, "reply": fill_lines(ctx.user_id)}
 
 
 def page_fill(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:

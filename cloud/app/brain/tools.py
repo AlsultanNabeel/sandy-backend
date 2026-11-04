@@ -197,7 +197,7 @@ HANDLERS: Dict[str, Callable[[Dict[str, Any], TurnCtx], Dict[str, Any]]] = {
     "undo": B.undo, "log_update": B.log_update, "room_restore": X.room_restore,
     "task_create": T.task_create, "task_list": T.task_list, "task_update": T.task_update,
     "task_cancel": T.task_cancel, "page_read": BW.page_read,
-    "page_fill": BW.page_fill, "stop_everything": BW.stop_everything, "resume_everything": BW.resume_everything,
+    "page_fill": BW.page_fill, "fill_status": BW.fill_status, "stop_everything": BW.stop_everything, "resume_everything": BW.resume_everything,
 }
 
 

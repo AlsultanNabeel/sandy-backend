@@ -338,7 +338,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
     if not (outcome.get("error") or outcome.get("stopped")):
         # Nothing is said to be done that no tool of the turn did (`honesty`).
         question = confirm.ask(outcome["pending"]) if outcome.get("pending") else ""
-        text = honesty.correct(outcome["text"], ctx.worked, ctx.results, question)
+        text = _stood(honesty.correct(outcome["text"], ctx.worked, ctx.results, question), ctx, question)
         # In the message's language (`language_guard`); the held question is ours, already in it.
         body = _without(question, text)
         rewritten = language_guard.ensure(body, complete,
@@ -346,8 +346,8 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
                                                                   lang.named()))
         if rewritten != body:
             # The rewrite is the model's words too: what it says was done is checked again.
-            body = _without(question, honesty.correct(_joined(rewritten, question), ctx.worked,
-                                                      ctx.results, question))
+            body = _without(question, _stood(honesty.correct(_joined(rewritten, question), ctx.worked,
+                                                             ctx.results, question), ctx, question))
         outcome = {**outcome, "text": _joined(body, question)}
         # What a tool must tell him whatever the model wrote (a page that gives orders, where
         # a page's words came from, `tools_browser`), before the held question, which stays last.
@@ -393,6 +393,15 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
                              "image_bytes": ctx.artifacts.get("image_bytes"),
                              "caption": ctx.artifacts.get("caption", "")},
     }
+
+
+def _stood(text: str, ctx: TurnCtx, question: str) -> str:
+    """What the reply says of a fill's state stands on a tool that read it (`honesty.fill_state`),
+    for an account with the browser on."""
+    if not tools_browser.offered(ctx.user_id):
+        return text
+    return honesty.fill_state(text, ctx.results, question, lambda: tools_browser.fill_lines(ctx.user_id),
+                              tools_browser.FILL_STATE_TOOLS)
 
 
 # A link to watch a fill, as the model may write it («[هون](sandy://browser/live?job=…)», or bare).

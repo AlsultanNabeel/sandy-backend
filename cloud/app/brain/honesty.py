@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from app.brain import lang
 
@@ -167,6 +167,37 @@ def correct(text: str, worked: Iterable[str], results: List[Tuple[str, Dict[str,
         return text
     logger.warning("[honesty] reply claimed %s with no tool behind it; replaced", sorted(missing))
     return honest(text, worked, results, question)
+
+
+# A sentence that says how a fill is going: a word of the fill and a word of its state, in either
+# language (`_norm`ed). On 4 Nov she said «في مشكلة بالتعبئة» of a fill that was working.
+_FILL_WORD = re.compile(r"تعبئه|نموذج|فورم|بعبي|عبيت|\bform\b|\bfill(?:ing)?\b", re.I)
+_STATE_WORD = re.compile(r"مشكله|علقت|عالقه|خلصت|ما زالت|مازالت|لسا|لسه|مفتوحه|فشلت|تاخير|طولت|شغاله|بتشتغل|"
+                         r"واقفه|وقفت|\b(problem|issue|stuck|finished|still|failed|open|running|working|delay(?:ed)?|"
+                         r"taking|hung|stopped)\b", re.I)
+
+
+def _plain(text: str) -> str:
+    s = re.sub(r"[\u064B-\u0652\u0640]", "", text).lower()
+    return s.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا").replace("ة", "ه").replace("ى", "ي")
+
+
+def fill_state_talk(text: str) -> bool:
+    """Whether ``text`` says how a fill is going."""
+    return any(_FILL_WORD.search(_plain(s)) and _STATE_WORD.search(_plain(s)) for s in _sentences(text))
+
+
+def fill_state(text: str, results: List[Tuple[str, Dict[str, Any]]], question: str,
+               read: Callable[[], str], tools: Iterable[str]) -> str:
+    """The reply with what it says of a fill's state standing on a tool of the turn that read it
+    (``tools``); else each such sentence taken out and the real state, as ``read`` reads it, in
+    their place. The held question stays last."""
+    body = text[: -len(question)] if question and text.endswith(question) else text
+    if not fill_state_talk(body) or any(name in set(tools) for name, _ in results):
+        return text
+    logger.warning("[honesty] reply spoke of a fill's state no tool read; replaced")
+    kept = "".join(s for s in _sentences(body) if not fill_state_talk(s)).strip()
+    return "\n".join(t for t in (kept, read(), question) if t)
 
 
 def voice_correction(text: str, worked: Iterable[str],

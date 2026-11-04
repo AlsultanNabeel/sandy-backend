@@ -693,6 +693,31 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             await client.stop()
 
 
+def _where(row: Dict[str, Any]) -> str:
+    """How far a running fill is, in words: its steps and the field it is on, when known."""
+    from app.brain import lang
+    progress = row.get("progress") or {}
+    steps, field = int(progress.get("steps") or 0), str(progress.get("field") or "")
+    if not steps:
+        return ""
+    if field:
+        return lang.say("fill_where_field", steps=lang.number(steps), field=field)
+    return lang.say("fill_where", steps=lang.number(steps))
+
+
+def state_line(row: Dict[str, Any]) -> str:
+    """A fill's real state, in a line of his language, as its row says it."""
+    from app.brain import lang
+    status, site = row.get("status"), row.get("site", "")
+    if status in (RUNNING, APPROVED):
+        return lang.say("fill_state_running", site=site, where=_where(row))
+    if status == HELD:
+        return lang.say("fill_state_held", site=site)
+    if status == HANDED:
+        return lang.say("fill_state_handed", site=site)
+    return told(row)
+
+
 async def _handing(row: Dict[str, Any], gate, stopped: asyncio.Event, user_id: str) -> Dict[str, Any]:
     """A page handed to him: open, the gate still on it, until he is done with it (his stop),
     the gate stops it, or `HANDED_S` is up. Once he takes it over (`his`), what he sends to the
@@ -908,6 +933,7 @@ async def _vetted(name: str, params: Dict[str, Any], browser_session, gate, clie
     field = ((await within(client.send.Runtime.callFunctionOn(params={
         "functionDeclaration": _FIELD_JS, "objectId": element, "returnByValue": True},
         session_id=session))).get("result") or {}).get("value") or {}
+    gate.last_field = str(field.get("label") or field.get("name") or "")
     if name == "input":
         why = fill_values.vet_type(values, str(params.get("text") or ""), field)
     elif name == "select_dropdown":
@@ -987,6 +1013,8 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
                 if name == "click" and params.get("index") is None:
                     return ActionResult(error="Click an element by its index.")
                 why = await _vetted(name, params, browser_session, gate, client, values)
+                if not why and name in ("input", "select_dropdown"):
+                    gate.at = str(gate.last_field or gate.at)
                 if why:
                     gate.refused.append(why)
                     _note("browser_refused", {"site": site, "field": why["field"], "why": why["why"]}, ok=False)
@@ -1039,8 +1067,10 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     began = [time.monotonic()]
 
     def on_step(state, output, n):
-        # The agent's own count of its steps (it asks whether to stop more than once a step).
+        # The agent's own count of its steps (it asks whether to stop more than once a step),
+        # and where it is, for what she says of it (`state_line`).
         steps[0] = int(n or 0)
+        _save(row["_id"], progress={"steps": steps[0], "field": gate.at})
 
     async def should_stop() -> bool:
         began[0] = time.monotonic()           # asked as each step begins
