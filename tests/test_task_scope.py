@@ -300,3 +300,17 @@ def test_what_he_adds_in_the_same_moment_the_task_is_made_is_news(world):
         world.db["sandy_schedules"].update_one({"_id": doc["id"]}, {"$set": {"created_at": at}})
     _run(schedules_get(doc["id"]))
     assert world.sent == ["انضاف «رمان» لـ«قائمة التسوق»"]
+
+
+def test_what_he_added_in_the_same_moment_just_before_the_task_was_made_is_not_news(world):
+    # The other side of the same millisecond (CI, 4 Nov 2026): what was written before the task is
+    # before it, whatever the clock says. The log's own count tells them apart, never the time.
+    with active_user_profile_context(A):
+        items.add("shopping", "رمان")
+        at = world.db["sandy_events"].find_one(sort=[("seq", -1)])["at"]
+    doc = _task({"tool": "recall", "args": {"list": "shopping"}})
+    with active_user_profile_context(A):
+        tasks.save_state(doc["id"], {"last_seen": {"rows": []}, "fingerprint": "x"})
+        world.db["sandy_schedules"].update_one({"_id": doc["id"]}, {"$set": {"created_at": at}})
+    _run(schedules_get(doc["id"]))
+    assert world.sent == []

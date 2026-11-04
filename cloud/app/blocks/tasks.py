@@ -118,8 +118,15 @@ def every_minutes(row: Mapping[str, Any]) -> int:
 
 
 def add(title: str, spec: Mapping[str, Any], *, every_minutes: int, first_at: datetime) -> str:
-    """The new task's id ("" with no tenant). Bad payload raises KindError."""
-    return schedules.add(KIND, title, first_at, dict(spec), recurrence=_rule(every_minutes))
+    """The new task's id ("" with no tenant). Bad payload raises KindError. Where his log is as
+    it is made is kept (`made_seq`): what was written before it is before it, and what comes
+    after is after it, even in the same millisecond."""
+    from app.blocks import events
+    made_seq = events.last_seq()
+    tid = schedules.add(KIND, title, first_at, dict(spec), recurrence=_rule(every_minutes))
+    if tid:
+        save_state(tid, {"made_seq": made_seq})
+    return tid
 
 
 def get(task_id: str) -> Optional[Dict[str, Any]]:

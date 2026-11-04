@@ -137,14 +137,18 @@ def _of(scope: Dict[str, Any], log: List[Dict[str, Any]]) -> List[Dict[str, Any]
 LOG_FROM = datetime(2026, 11, 1, tzinfo=timezone.utc)
 
 
-def _where_it_starts(doc: Dict[str, Any]) -> Optional[int]:
+def _where_it_starts(doc: Dict[str, Any], before: Dict[str, Any]) -> Optional[int]:
     """The log's place for a task on the log with no pointer: None for one made before
-    `LOG_FROM` (it moves to the log quietly), else where the log was when it was made."""
+    `LOG_FROM` (it moves to the log quietly), else where the log was as it was made
+    (`made_seq`, counted, so the same millisecond never decides it; by its time for a task
+    saved before that was kept)."""
     made = doc.get("created_at")
     if not isinstance(made, datetime):
         return None
     made = made if made.tzinfo else made.replace(tzinfo=timezone.utc)
-    return None if made < LOG_FROM else events.seq_at(made)
+    if made < LOG_FROM:
+        return None
+    return before["made_seq"] if isinstance(before.get("made_seq"), int) else events.seq_at(made)
 
 
 def _gone_by(ran_at: Any) -> bool:
@@ -402,7 +406,7 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                 scope = _scope(spec)
                 logged = scope is not None
                 if logged and cursor is None:
-                    cursor = _where_it_starts(doc)
+                    cursor = _where_it_starts(doc, before)
                 if logged and cursor is not None and _gone_by(before.get("ran_at")):
                     # Paused past what the log keeps: a hole in it is never told as news.
                     at = events.last_seq()
