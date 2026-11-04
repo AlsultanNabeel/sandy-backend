@@ -301,7 +301,8 @@ struct ChatView: View {
     @ViewBuilder
     private func messageRow(_ m: ChatMessage) -> some View {
         // Equatable row: a streamed chunk re-renders only the growing bubble.
-        ChatBubbleRow(isUser: m.role == "user", text: m.text, failed: m.failed, attachments: m.attachments)
+        ChatBubbleRow(isUser: m.role == "user", text: m.text, failed: m.failed, attachments: m.attachments,
+                      liveJob: m.liveJob)
             .equatable()
             .contextMenu { menu(for: m) }
             .accessibilityAction(named: lang.s("chat.copy")) { UIPasteboard.general.string = m.text }
@@ -452,6 +453,8 @@ private struct ChatBubbleRow: View, Equatable {
     let text: String
     var failed = false
     var attachments: [ChatAttachment] = []
+    /// A fill the reply named: «خليني أشوف» under it, the app's own button.
+    var liveJob: String?
 
     var body: some View {
         HStack(alignment: .bottom, spacing: Theme.Spacing.sm) {
@@ -473,6 +476,15 @@ private struct ChatBubbleRow: View, Equatable {
             ForEach(attachments.filter(\.isImage)) { AttachmentPicture(attachment: $0) }
             ForEach(attachments.filter { !$0.isImage }) { AttachmentFileChip(attachment: $0) }
             if !text.isEmpty { bubble }
+            if let liveJob, !isUser {
+                Button {
+                    DeepLinkRouter.shared.ask(.browserLive(liveJob))
+                } label: {
+                    Label(LanguageManager.shared.s("chat.watchFill"), systemImage: "eye")
+                        .font(Theme.Typography.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            }
         }
     }
 

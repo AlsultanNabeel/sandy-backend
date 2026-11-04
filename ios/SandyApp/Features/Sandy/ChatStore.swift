@@ -88,10 +88,12 @@ final class ChatStore: ObservableObject {
         let role: String
         let text: String
         var attachments: [ChatAttachment]?
+        var liveJob: String?
     }
 
     private func saveLines(_ api: APIClient, id: String) {
-        DiskCache.save(messages.map { Line(role: $0.role, text: $0.text, attachments: $0.attachments) },
+        DiskCache.save(messages.map { Line(role: $0.role, text: $0.text, attachments: $0.attachments,
+                                           liveJob: $0.liveJob) },
                        key: "chat." + id, userId: api.currentUserId)
     }
 
@@ -103,7 +105,8 @@ final class ChatStore: ObservableObject {
             messages = r.messages
             saveLines(api, id: id)
         } else if let lines = DiskCache.load([Line].self, key: "chat." + id, userId: api.currentUserId) {
-            messages = lines.map { ChatMessage(role: $0.role, text: $0.text, attachments: $0.attachments ?? []) }
+            messages = lines.map { ChatMessage(role: $0.role, text: $0.text, attachments: $0.attachments ?? [],
+                                               liveJob: $0.liveJob) }
         } else {
             return
         }
@@ -232,6 +235,7 @@ final class ChatStore: ObservableObject {
             do {
                 let reply: String
                 var drawn: [ChatAttachment] = []
+                var liveJob: String?
                 do {
                     let result = try await withConnectionRetry(onRetry: {
                         // المحاولة الجديدة بتبدأ الرد من أوله: نشيل الفقاعة
@@ -275,6 +279,7 @@ final class ChatStore: ObservableObject {
                     }
                     reply = result.reply
                     drawn = result.image.map { [$0] } ?? []
+                    liveJob = result.liveJob
                     if let made = result.undo { ChatStep.offerUndo(made, api: api) }
                 } catch let e as APIError where e.kind == .connection && !bestPartial.isEmpty {
                     // كل المحاولات انقطعت بس وصل جزء من الرد: نحتفظ فيه.
@@ -284,15 +289,17 @@ final class ChatStore: ObservableObject {
                 if let id = sandyID, let idx = messages.firstIndex(where: { $0.id == id }) {
                     messages[idx].text = reply
                     messages[idx].attachments = drawn
+                    messages[idx].liveJob = liveJob
                 } else if sandyID == nil {
-                    messages.append(ChatMessage(role: "sandy", text: reply, attachments: drawn))
+                    messages.append(ChatMessage(role: "sandy", text: reply, attachments: drawn, liveJob: liveJob))
                 }
                 saveLines(api, id: cid)
                 // حفظ الرد وتحديث القائمة بالخلفية — الرد ظاهر، وصوت ساندي ما
                 // بيستنّاهم. بالترتيب: رسالة المستخدم قبل الرد (منها العنوان).
                 Task {
                     _ = await saveUser.value
-                    try? await api.appendMessage(cid: cid, role: "sandy", text: reply, attachments: drawn)
+                    try? await api.appendMessage(cid: cid, role: "sandy", text: reply, attachments: drawn,
+                                                 liveJob: liveJob)
                     await self.loadList(api: api)
                 }
                 Announce.say(String(format: LanguageManager.shared.s("a11y.replyArrived"), reply))

@@ -1211,7 +1211,9 @@ def _tell(row: Dict[str, Any]) -> None:
         else:
             body = told(row)
         if thread:
-            say_in(get_db(), uid, thread, body)
+            # A page still open is his to watch: the app's button under her message.
+            watch = {"job": str(row.get("_id") or row.get("id"))} if row["status"] in (HELD, HANDED) else None
+            say_in(get_db(), uid, thread, body, live=watch)
         _push(uid, body)
 
 
@@ -1243,8 +1245,7 @@ def told(row: Dict[str, Any]) -> str:
         return lang.say("fill_stopped", site=site)
     if status == HANDED and row.get("summary"):
         # A fill-only site's page, filled and handed to him.
-        from app.brain.tools_browser import live_link
-        return lang.say("fill_only", site=site, fields=row["summary"], link=live_link(row.get("id") or row["_id"]))
+        return lang.say("fill_only", site=site, fields=row["summary"])
     if status == HANDED:
         return lang.say("fill_handed", site=site)
     reason = row.get("reason") or ""

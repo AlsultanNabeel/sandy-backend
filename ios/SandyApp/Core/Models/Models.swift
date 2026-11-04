@@ -12,6 +12,9 @@ struct ChatMessage: Identifiable {
     /// A line of the user's: the id its send went under, so «أعد المحاولة» sends it again as
     /// the same message (the server answers a turn it already ran from its ledger).
     var clientMsgId: String?
+    /// The fill a reply of Sandy's named: «خليني أشوف» under it, from the reply's `live`, never
+    /// a link in its words.
+    var liveJob: String?
 }
 
 /// What a reply deleted or changed, for the «تراجع» shown after it (`POST /api/undo`).

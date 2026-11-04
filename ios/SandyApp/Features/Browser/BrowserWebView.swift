@@ -7,12 +7,18 @@ struct BrowserWebView: UIViewRepresentable {
     let url: URL
     let store: WKWebsiteDataStore
     var onLoad: ((WKWebView) -> Void)?
+    /// A live stream that plays as it opens, with no tap (Steel's view of a fill is a video).
+    var playsAtOnce = false
 
     func makeCoordinator() -> Coordinator { Coordinator(onLoad: onLoad) }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = store
+        if playsAtOnce {
+            config.allowsInlineMediaPlayback = true
+            config.mediaTypesRequiringUserActionForPlayback = []
+        }
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
         context.coordinator.view = view
@@ -122,11 +128,15 @@ struct BrowserLoginView: View {
 }
 
 /// «Sandy's browser»: Steel's view of a fill, to watch; «Let me take it from here» stops Sandy
-/// and the view is his to drive.
+/// and the view is his to drive. Once the fill is no longer open (done, stopped, closed by the
+/// gate or the sweep) the view gives way to a line in his language and a way back, never
+/// Steel's own «Browser Disconnected» page: it asks every few seconds while it is open.
 struct LiveBrowserView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
+    @Environment(\.dismiss) private var dismiss
     let jobId: String
+    static let checkEvery: Duration = .seconds(5)
     @State private var live: BrowserLive?
     @State private var gone = false
     @State private var store = WKWebsiteDataStore.nonPersistent()
@@ -134,7 +144,7 @@ struct LiveBrowserView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let live, let url = URL(string: live.url) {
-                BrowserWebView(url: url, store: store)
+                BrowserWebView(url: url, store: store, playsAtOnce: true)
                     .allowsHitTesting(live.control)
                 if !live.control {
                     Button {
@@ -147,10 +157,20 @@ struct LiveBrowserView: View {
                     .padding(Theme.Spacing.md)
                 }
             } else if gone {
-                Text(lang.s("browser.liveGone"))
-                    .foregroundColor(Theme.Colors.secondaryText)
-                    .padding(Theme.Spacing.lg)
-                Spacer()
+                VStack(spacing: Theme.Spacing.md) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.largeTitle)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                        .accessibilityHidden(true)
+                    Text(lang.s("browser.liveGone"))
+                        .font(Theme.Typography.body)
+                        .foregroundColor(Theme.Colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                    Button(lang.s("browser.back")) { dismiss() }
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(Theme.Spacing.lg)
+                .frame(maxHeight: .infinity)
             } else {
                 ProgressView().frame(maxHeight: .infinity)
             }
@@ -159,6 +179,12 @@ struct LiveBrowserView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             do { live = try await state.api.browserLive(job: jobId) } catch { gone = true }
+            // While it is shown: the fill closed is a line and a way back, not Steel's page.
+            while !gone, !Task.isCancelled {
+                try? await Task.sleep(for: Self.checkEvery)
+                guard let open = try? await state.api.browserJobs() else { continue }
+                if !open.contains(where: { $0.id == jobId }) { gone = true }
+            }
         }
     }
 

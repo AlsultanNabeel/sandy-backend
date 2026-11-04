@@ -106,15 +106,24 @@ def ensure_conversation(mongo_db, uid: str, cid: str) -> bool:
         return coll.find_one({"_id": cid}, {"_id": 1}) is not None
 
 
-def say_in(mongo_db, uid: str, cid: str, text: str) -> bool:
+def live_of(value: Any) -> Optional[dict]:
+    """A message's fill to watch, as it is kept: ``{job}`` with a well-formed id, else None."""
+    job = value.get("job") if isinstance(value, dict) else None
+    return {"job": job} if valid_client_id(job) else None
+
+
+def say_in(mongo_db, uid: str, cid: str, text: str, live: Optional[dict] = None) -> bool:
     """A message of Sandy's in one of his conversations, said on her own (a fill that went on in
-    the background tells what came of it where he asked for it); False when it cannot be."""
+    the background tells what came of it where he asked for it, ``live`` the fill he can watch
+    from it); False when it cannot be."""
     if not text or not ensure_conversation(mongo_db, uid, cid):
         return False
     coll = _conversations(mongo_db, uid)
+    message = {"role": "sandy", "text": text[:_MAX_MESSAGE_CHARS], "ts": _now()}
+    if live_of(live):
+        message["live"] = live_of(live)
     try:
-        coll.update_one({"_id": cid}, {"$push": {"messages": {"role": "sandy", "text": text[:_MAX_MESSAGE_CHARS],
-                                                             "ts": _now()}},
+        coll.update_one({"_id": cid}, {"$push": {"messages": message},
                                        "$set": {"updated_at": _now()}})
         return True
     except PyMongoError:
@@ -453,6 +462,9 @@ def register_conversations_api(app, mongo_db=None):
             message["client_msg_id"] = cmid
         if files:
             message["attachments"] = files
+        if role == "sandy" and live_of(body.get("live")):
+            # The fill her reply named, for its «خليني أشوف» when the chat is opened again.
+            message["live"] = live_of(body.get("live"))
         update = {
             "$push": {"messages": message},
             "$set": {"updated_at": _now()},

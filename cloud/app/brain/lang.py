@@ -570,9 +570,9 @@ PHRASES = {
     "fill_done": {"ar": "انبعت النموذج على {site} ✅ والصفحة بتقول: {result}",
                   "en": "The form on {site} was sent ✅ and the page says: {result}"},
     "fill_only": {"ar": "عبّيت النموذج على {site} ({fields}) وما بعتته، لأنه مسموحلي أعبّي بس بهالموقع. "
-                        "بتقدر تبعته إنت من «متصفح ساندي»: {link}",
+                        "بتقدر تبعته إنت من «متصفح ساندي».",
                   "en": "I filled the form on {site} ({fields}) and didn't send it: on this site I may only "
-                        "fill. You can send it yourself from «Sandy's browser»: {link}"},
+                        "fill. You can send it yourself from «Sandy's browser»."},
     "fill_level_read": {"ar": "ما عندي إذن أعبّي على {site}: مسموحلي أقرا بس. إذا بدك، غيّر الإذن إنت من "
                               "شاشة المواقع: {link}",
                         "en": "I don't have permission to fill on {site}: I may only read there. If you want, "
@@ -583,10 +583,9 @@ PHRASES = {
                               "change it yourself on the Sites screen: {link}"},
     "browser_bad_site": {"ar": "هاد مش اسم موقع. اكتب النطاق، مثلاً «example.com».",
                          "en": "That isn't a site name. Type the domain, for example «example.com»."},
-    "fill_background": {"ar": "التعبئة على {site} طوّلت، فبكمّلها بالخلفية وببعتلك لما أخلص أو لما بدها موافقتك. "
-                              "بتقدر تتفرّج من هون: {link}",
+    "fill_background": {"ar": "التعبئة على {site} طوّلت، فبكمّلها بالخلفية وببعتلك لما أخلص أو لما بدها موافقتك.",
                         "en": "The form on {site} is taking a while, so I'll carry on in the background and tell "
-                              "you when I'm done or need your yes. You can watch here: {link}"},
+                              "you when I'm done or need your yes."},
     "fill_stopped": {"ar": "وقّفت التعبئة على {site}.", "en": "I stopped filling the form on {site}."},
     "fill_handed": {"ar": "صفحة {site} صارت إلك، كمّل إنت.", "en": "The page on {site} is yours now; carry on."},
     "fill_failed": {"ar": "ما زبطت التعبئة على {site}. جرّب كمان شوي، أو كمّل إنت من «متصفح ساندي».",

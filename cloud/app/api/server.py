@@ -223,6 +223,9 @@ def create_app(*, mongo_db=None):
         if state.get("undo"):
             # The «تراجع» the app shows under this reply for a few seconds (`POST /api/undo`).
             result["undo"] = state["undo"]
+        if state.get("live"):
+            # The fill it named: the app's «خليني أشوف» under the reply, never a link in its words.
+            result["live"] = state["live"]
         img_bytes = made.get("image_bytes")
         if img_bytes:
             # Kept as an attachment: the chat shows it, and its history brings it back.

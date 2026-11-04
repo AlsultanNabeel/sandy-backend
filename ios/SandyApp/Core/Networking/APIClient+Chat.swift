@@ -27,7 +27,13 @@ private struct ConversationDetailResponse: Decodable {
         let role: String?
         let text: String?
         let attachments: [ChatAttachment]?
+        let live: ChatLive?
     }
+}
+
+/// The fill a reply names (`{job}`), as the server sends and keeps it.
+struct ChatLive: Codable, Hashable {
+    let job: String
 }
 
 private struct AttachmentSaved: Decodable { let item: ChatAttachment? }
@@ -39,9 +45,11 @@ private struct MessageAppend: Encodable {
     let attachments: [ChatAttachment]?
     /// The send's id on a user line: a rewind takes back that line's turn and no other.
     let clientMsgId: String?
+    /// The fill a reply of Sandy's named, kept for its «خليني أشوف».
+    let live: ChatLive?
 
     enum CodingKeys: String, CodingKey {
-        case role, text, attachments
+        case role, text, attachments, live
         case clientMsgId = "client_msg_id"
     }
 }
@@ -84,7 +92,7 @@ extension APIClient {
         attachments: [ChatAttachment] = [],
         onStep: (@MainActor (String) -> Void)? = nil,
         onChunk: @MainActor @escaping (String) -> Void
-    ) async throws -> (reply: String, image: ChatAttachment?, undo: ChatUndo?) {
+    ) async throws -> (reply: String, image: ChatAttachment?, undo: ChatUndo?, liveJob: String?) {
         guard let url = URL(string: baseURL + "/api/agent/stream") else {
             throw APIError(message: L10nErrors.s("badAddress"))
         }
@@ -135,6 +143,7 @@ extension APIClient {
         var sawDone = false
         var image: ChatAttachment?
         var undo: ChatUndo?
+        var liveJob: String?
         do {
             for try await line in bytes.lines {
                 guard line.hasPrefix("data: "),
@@ -156,6 +165,10 @@ extension APIClient {
                     if let made = obj["undo"] as? [String: Any], let turn = made["turn"] as? String {
                         undo = ChatUndo(turn: turn, label: made["label"] as? String ?? "")
                     }
+                    // A fill it named: «خليني أشوف» under the reply.
+                    if let live = obj["live"] as? [String: Any], let job = live["job"] as? String, !job.isEmpty {
+                        liveJob = job
+                    }
                     sawDone = true
                     break
                 }
@@ -174,7 +187,7 @@ extension APIClient {
         if !sawDone {
             throw APIError(message: L10nErrors.s("replyCut"), kind: .connection)
         }
-        return (finalReply, image, undo)
+        return (finalReply, image, undo, liveJob)
     }
 
     // MARK: - المرفقات
@@ -244,17 +257,18 @@ extension APIClient {
             guard let role = m.role else { return nil }
             let files = m.attachments ?? []
             guard !(m.text ?? "").isEmpty || !files.isEmpty else { return nil }
-            return ChatMessage(role: role, text: m.text ?? "", attachments: files)
+            return ChatMessage(role: role, text: m.text ?? "", attachments: files, liveJob: m.live?.job)
         }
         return (r.title ?? "", msgs)
     }
 
     func appendMessage(cid: String, role: String, text: String,
-                       attachments: [ChatAttachment] = [], clientMsgId: String? = nil) async throws {
+                       attachments: [ChatAttachment] = [], clientMsgId: String? = nil,
+                       liveJob: String? = nil) async throws {
         try await send("/api/conversations/\(cid)/messages", method: "POST",
                        body: MessageAppend(role: role, text: text,
                                            attachments: attachments.isEmpty ? nil : attachments,
-                                           clientMsgId: clientMsgId))
+                                           clientMsgId: clientMsgId, live: liveJob.map(ChatLive.init)))
     }
 
     /// Drops the last reply (and, unless `keepUser`, the line it answered) on the server and

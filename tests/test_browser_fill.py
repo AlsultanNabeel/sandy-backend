@@ -234,7 +234,8 @@ def test_his_yes_on_a_fill_that_is_gone_says_so(world):
 def test_a_fill_only_site_hands_him_the_page_and_never_sends(world, language, words):
     _level("fill")
     out = _fill(language)
-    assert out["ok"] and words in out["reply"] and "sandy://browser/live?job=" in out["reply"]
+    # The page to send it from is the app's button, never a link in the words.
+    assert out["ok"] and words in out["reply"] and "sandy://" not in out["reply"]
     assert _job(out["job"])["status"] == browser_job.HANDED
 
 
@@ -281,7 +282,7 @@ def test_a_slow_fill_goes_on_in_the_background_and_asks_in_his_chat(world, monke
     world.mode = "slow"
     monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
     out = _fill("en", thread=C9)
-    assert out["ok"] and "in the background" in out["reply"] and "sandy://browser/live?job=" in out["reply"]
+    assert out["ok"] and "in the background" in out["reply"] and "sandy://" not in out["reply"]
     _wait_for(lambda: pending.load(C9, "userA", brain_db))
     held = pending.load(C9, "userA", brain_db)
     assert held["steps"][0]["tool"] == "page_fill" and held["steps"][0]["ids"] == [out["job"]]
@@ -821,7 +822,8 @@ def test_a_fill_only_site_never_asks_a_question_its_yes_cannot_answer(world, mon
     _wait_for(lambda: (brain_db["conversations"].find_one({"_id": C9}) or {}).get("messages"))
     chat = brain_db["conversations"].find_one({"_id": C9, "user_id": "userA"})
     said = chat["messages"][-1]["text"]
-    assert "didn't send it" in said and "sandy://browser/live?job=" in said and "Are you sure" not in said
+    assert "didn't send it" in said and "sandy://" not in said and "Are you sure" not in said
+    assert chat["messages"][-1]["live"] == {"job": out["job"]}
     assert pending.load(C9, "userA", brain_db) is None and _job(out["job"])["status"] == browser_job.HANDED
 
 

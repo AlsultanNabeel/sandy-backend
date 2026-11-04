@@ -11,6 +11,7 @@ import base64
 import contextvars
 import json
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -357,6 +358,8 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
         if notices:
             body = "\n\n".join(t for t in (_without(question, outcome["text"]), *notices) if t)
             outcome = {**outcome, "text": _joined(body, question)}
+    # The fill he can watch is the app's own button (`live`): a link the model wrote is taken out.
+    outcome = {**outcome, "text": _unlinked(outcome.get("text") or "")}
     shown = None
     try:
         # Stopped from the app: memory keeps what was shown, marked as cut.
@@ -384,11 +387,22 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
         "pending_state": outcome["pending"],
         "routed_by": "fast_path" if outcome.get("fast") else "brain",
         "tools_used": outcome["tools"],
+        "live": ctx.artifacts.get("live"),
         "error": "brain turn failed" if outcome.get("error") else None,
         "execution_result": {"handled": True, "reply": text,
                              "image_bytes": ctx.artifacts.get("image_bytes"),
                              "caption": ctx.artifacts.get("caption", "")},
     }
+
+
+# A link to watch a fill, as the model may write it («[هون](sandy://browser/live?job=…)», or bare).
+_LIVE_LINK = re.compile(r"\[([^\]\n]*)\]\(\s*sandy://browser/live[^)\s]*\s*\)|<?sandy://browser/live\S*?>?(?=[\s.,،)]|$)")
+
+
+def _unlinked(text: str) -> str:
+    """The reply without a link to watch a fill: its words kept, the link left to the button."""
+    cut = _LIVE_LINK.sub(lambda m: m.group(1) or "", text)
+    return re.sub(r"[ \t]+([.,،:])", r"\1", re.sub(r"[ \t]{2,}", " ", cut)).strip() if cut != text else text
 
 
 def _undo_offer(turn: str) -> Optional[Dict[str, Any]]:

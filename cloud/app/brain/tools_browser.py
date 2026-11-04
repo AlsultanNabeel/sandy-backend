@@ -290,9 +290,10 @@ def resume_everything(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     return {"ok": True, "reply": lang.say("resume_done")}
 
 
-def live_link(job_id: str) -> str:
-    """Where the app shows «Sandy's browser» for a fill."""
-    return f"sandy://browser/live?job={job_id}"
+def _watched(ctx: TurnCtx, job: str) -> None:
+    """The fill he can watch: the app's «خليني أشوف» under the reply (`live`), never a link in
+    its words."""
+    ctx.artifacts["live"] = {"job": job}
 
 
 # How many of his last messages in the conversation a fill reads his values from.
@@ -340,7 +341,7 @@ def page_fill(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return _no(lang.say(said, site=site))
     except (SteelError, RuntimeError):
         return _no(lang.say("page_unreachable", site=site))
-    return _with_source(ctx, _outcome(browser_job.wait(job, browser_job.WAIT_S) or {}))
+    return _with_source(ctx, _outcome(ctx, browser_job.wait(job, browser_job.WAIT_S) or {}))
 
 
 def _with_source(ctx: TurnCtx, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -349,7 +350,7 @@ def _with_source(ctx: TurnCtx, result: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def _outcome(row: Dict[str, Any]) -> Dict[str, Any]:
+def _outcome(ctx: TurnCtx, row: Dict[str, Any]) -> Dict[str, Any]:
     from app.features import browser_job
     from app.brain.ctx import needs_confirmation
 
@@ -357,8 +358,10 @@ def _outcome(row: Dict[str, Any]) -> Dict[str, Any]:
     status = row.get("status")
     if status == browser_job.RUNNING:
         browser_job.detach(job)
-        return {"ok": True, "reply": lang.say("fill_background", site=site, link=live_link(job)), "job": job}
+        _watched(ctx, job)
+        return {"ok": True, "reply": lang.say("fill_background", site=site), "job": job}
     if status == browser_job.HANDED and row.get("summary"):
+        _watched(ctx, job)
         return {"ok": True, "reply": browser_job.told(row), "job": job}
     if status == browser_job.HELD:
         return needs_confirmation(lang.say("fill_summary", site=site, fields=row.get("summary") or ""), ids=[job])
@@ -387,7 +390,8 @@ def _send(ctx: TurnCtx, job: str) -> Dict[str, Any]:
     if row.get("status") == browser_job.APPROVED:
         # Still answering: it tells him itself once it has.
         browser_job.detach(job)
-        return {"ok": True, "reply": lang.say("fill_background", site=row["site"], link=live_link(job)), "job": job}
+        _watched(ctx, job)
+        return {"ok": True, "reply": lang.say("fill_background", site=row["site"]), "job": job}
     if row.get("status") == browser_job.DONE:
         return {"ok": True, "reply": browser_job.told(row), "source": row.get("url", "")}
     return _no(browser_job.told(row))

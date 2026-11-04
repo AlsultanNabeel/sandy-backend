@@ -462,7 +462,12 @@ answers it, or its result) and on his phone, each state once whoever tells it (`
 a tool on the fill's own background trace row (`trace_store.background(…, keep=True)`). *Live view*:
 `/api/browser/jobs/<id>/live` gives Steel's `debugUrl` with `interactive=false` (watch only) to the
 fill's owner alone, `…/takeover` stops the agent and gives it with `interactive=true`; it is kept
-sealed and never logged. *Emergency stop* (`features/stop_all.py`, `sandy_users.stopped_at`, forgotten
+sealed and never logged. The fill to watch is never a link in words (since 4 Nov 2026, when the model's «[هون](sandy://browser/live?job=…).»
+was read with «).» into the id): the tool names it in `ctx.artifacts["live"]` (`tools_browser._watched`), the turn hands `live` ({job}) with the
+reply (`/api/agent`, its stream's `done`), a link the model writes anyway is taken out (`loop._unlinked`), the app keeps it on the message
+(`conversations_api.live_of`, and `say_in(…, live=)` for what a fill says on its own) and shows «خليني أشوف» under it (`ChatBubbleRow`); the
+view plays Steel's stream with no tap (`BrowserWebView(playsAtOnce:)`: `allowsInlineMediaPlayback`, no media needing a tap; Steel has no autoplay
+option of its own) and, every five seconds while shown, gives way to a line and «رجوع» once the fill is no longer open (`LiveBrowserView`). *Emergency stop* (`features/stop_all.py`, `sandy_users.stopped_at`, forgotten
 by a reset): «وقّفي كل شي» by talk, the call or the app (`/api/stop`) stops every task (no run, no
 failure) and every fill (`browser_job.stop_for`; the step a fill's agent is on is cut at once, `_watching`, as by his «no»
 or his taking over), the browser's tools refuse, reminders still ring;
