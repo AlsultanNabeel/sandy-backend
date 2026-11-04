@@ -10,9 +10,10 @@ fails is logged and never loses the result. None of it speaks: Sandy never talks
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from pymongo.errors import PyMongoError
 
@@ -36,12 +37,22 @@ _SEALED = ("body", "state")
 
 def opened(row: Dict[str, Any]) -> Dict[str, Any]:
     from app.utils.ltm_crypto import decrypt_field
-    return {**row, **{k: decrypt_field(row[k]) for k in _SEALED if isinstance(row.get(k), str)}}
+    out = {**row, **{k: decrypt_field(row[k]) for k in _SEALED if isinstance(row.get(k), str)}}
+    if isinstance(row.get("items"), str):
+        try:
+            out["items"] = json.loads(decrypt_field(row["items"]) or "[]")
+        except ValueError:
+            out["items"] = []
+    return out
 
 
-def deliver(task_id: str, title: str, body: str, language: str, state: str = "") -> str:
+def deliver(task_id: str, title: str, body: str, language: str, state: str = "",
+            items: Optional[List[Dict[str, str]]] = None, notes: Optional[List[str]] = None,
+            site: str = "") -> str:
     """Keep the result and send it through every channel; its id ("" with no tenant).
-    ``state`` is how things are now, in a line (`task_diff.describe`)."""
+    ``state`` is how things are now, in a line (`task_diff.describe`); ``items`` a watched
+    page's changed items ``{op, title, url}``, which the email links (``site`` the page's,
+    ``notes`` the lines told after them: its source, its warning)."""
     coll = _base.coll(RESULTS)
     if coll is None:
         return ""
@@ -49,7 +60,12 @@ def deliver(task_id: str, title: str, body: str, language: str, state: str = "")
     row = {"_id": _base.new_id(), "task_id": str(task_id), "title": str(title or ""),
            "body": str(body or ""), "lang": language, "at": datetime.now(timezone.utc),
            "state": str(state or ""), "seen": False}
-    coll.insert_one({**row, **{k: encrypt_field(row[k]) for k in _SEALED}})
+    if items:
+        row.update(items=list(items), notes=list(notes or []), site=site)
+    sealed = {k: encrypt_field(row[k]) for k in _SEALED}
+    if items:
+        sealed["items"] = encrypt_field(json.dumps(row["items"], ensure_ascii=False))
+    coll.insert_one({**row, **sealed})
     from app.services import schedule_sync
     schedule_sync.changed("task")       # the Tasks screen shows it at once
     out = {**row, "id": row["_id"]}

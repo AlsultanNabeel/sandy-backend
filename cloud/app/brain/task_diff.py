@@ -200,6 +200,36 @@ def template(diff: Dict[str, Any]) -> Optional[str]:
     return "\n".join(lines)
 
 
+# A watched page's items told at most, then «and N more» (the email links the task).
+MAX_TOLD = 15
+PAGE_OPS = ("added", "removed", "changed")
+
+
+def page_items(diff: Dict[str, Any]) -> Optional[List[Dict[str, str]]]:
+    """A listing's change as its items, ``{op, title, url}``, for the code to tell and the email
+    to link; None when the change is not only a page's items."""
+    if diff["numbers"] or diff["paragraphs_added"] or diff["paragraphs_removed"]:
+        return None
+    rows = [*(("added", r) for r in diff["added"]), *(("removed", r) for r in diff["removed"]),
+            *(("changed", c["after"]) for c in diff["changed"])]
+    if not rows or not all(r.get("url") and r.get("title") and not r.get("list") for _, r in rows):
+        return None
+    return [{"op": op, "title": str(r["title"]), "url": str(r["url"])} for op, r in rows]
+
+
+def page_body(items: List[Dict[str, str]], site: str) -> str:
+    """The items in plain words, in his language: each kind of change, its titles, «and N more»."""
+    shown, lines = items[:MAX_TOLD], []
+    for op in PAGE_OPS:
+        group = [i for i in shown if i["op"] == op]
+        if group:
+            lines.append(lang.say(f"page_{op}", site=site))
+            lines += [f"«{i['title']}»" for i in group]
+    if len(items) > MAX_TOLD:
+        lines.append(lang.say("mail_more", n=lang.number(len(items) - MAX_TOLD)))
+    return "\n".join(lines)
+
+
 def _grouped(key: str, rows: List[Dict[str, Any]], *, by_list: bool = False) -> List[str]:
     """One line per row, or one line for several rows with the same change (and list)."""
     groups: Dict[str, List[Dict[str, Any]]] = {}

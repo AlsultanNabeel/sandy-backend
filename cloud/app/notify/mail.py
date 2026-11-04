@@ -38,7 +38,7 @@ from email.message import EmailMessage
 from typing import Any, Dict, List, Optional
 
 from app.blocks import _base, tasks
-from app.brain import lang
+from app.brain import lang, task_diff
 from app.features import users_store
 
 logger = logging.getLogger(__name__)
@@ -184,7 +184,7 @@ def _one_line(text: str) -> str:
 
 def _subject(rows: List[Dict[str, Any]]) -> str:
     """What is new, from the newest result's first line, and how many more came with it."""
-    newest = str(rows[-1].get("body") or rows[-1].get("title") or "").strip().splitlines() or [""]
+    newest = _unmarked(str(rows[-1].get("body") or rows[-1].get("title") or "")).strip().splitlines() or [""]
     line = _one_line(newest[0])[:90]
     if len(rows) == 1:
         return lang.say("mail_result_subject", line=line)
@@ -257,10 +257,44 @@ def _lines_html(text: str) -> str:
                    for ln in _guillemets(text).splitlines() if ln.strip())
 
 
+# A model's Markdown is never the email's: its links keep their words, its marks go.
+_MD_LINK = re.compile(r"\[([^\]\n]+)\]\([^)\s]*\)")
+_MD_MARKS = re.compile(r"\*\*|__|`|^#{1,6}\s+", re.M)
+# A watched page's items shown, then «and N more» linking the task.
+MAX_ITEMS = task_diff.MAX_TOLD
+
+
+def _unmarked(text: str) -> str:
+    return _MD_MARKS.sub("", _MD_LINK.sub(r"\1", text))
+
+
+def _web(url: str) -> bool:
+    return str(url or "").lower().startswith(("https://", "http://"))
+
+
+def _items_plain(row: Dict[str, Any]) -> List[str]:
+    """The items in the plain copy: each title, its address on the line after it."""
+    items, site, lines = row.get("items") or [], str(row.get("site") or ""), []
+    for op in task_diff.PAGE_OPS:
+        group = [i for i in items[:MAX_ITEMS] if i.get("op") == op]
+        if group:
+            lines.append(lang.say(f"page_{op}", site=site))
+            for i in group:
+                lines.append(f"• «{_one_line(i.get('title'))}»")
+                if _web(i.get("url")):
+                    lines.append(f"  {i['url']}")
+    if len(items) > MAX_ITEMS:
+        lines.append(lang.say("mail_more", n=lang.number(len(items) - MAX_ITEMS)))
+    return lines + [str(n) for n in row.get("notes") or []]
+
+
 def _block(row: Dict[str, Any], titled: bool) -> str:
     """One result: what changed, when (his clock), how things are now, and its two links."""
     lines = [f"«{_one_line(row.get('title'))}»"] if titled else []
-    lines.append(str(row.get("body") or "").strip())
+    if row.get("items"):
+        lines += _items_plain(row)
+    else:
+        lines.append(_unmarked(str(row.get("body") or "").strip()))
     lines.append(lang.say("mail_at", time=_when(row.get("at"))))
     if row.get("state"):
         lines.append(lang.say("mail_now", state=row["state"]))
@@ -305,6 +339,36 @@ def _buttons(row: Dict[str, Any]) -> str:
             f'{_button(links[1], lang.say("mail_stop_task"), False)}</div>')
 
 
+def _item_html(item: Dict[str, Any]) -> str:
+    """One item: a link by its title, in its own direction; only a web address is a link."""
+    title = f'<bdi>{html.escape(_one_line(item.get("title")))}</bdi>'
+    if not _web(item.get("url")):
+        return f'<span dir="auto">{title}</span>'
+    return f'<a href="{html.escape(item["url"], quote=True)}" dir="auto">{title}</a>'
+
+
+def _items_html(row: Dict[str, Any]) -> str:
+    """A watched page's items, built here from (title, url), every word escaped."""
+    side = "rtl" if lang.current() == lang.AR else "ltr"
+    start = "right" if side == "rtl" else "left"
+    items, site, parts = row.get("items") or [], str(row.get("site") or ""), []
+    for op in task_diff.PAGE_OPS:
+        group = [i for i in items[:MAX_ITEMS] if i.get("op") == op]
+        if group:
+            parts.append(f'<div dir="{side}" style="font-weight:600">'
+                         f'{html.escape(lang.say(f"page_{op}", site=site))}</div>')
+            parts.append(f'<ul dir="{side}" style="margin:4px 0 8px;padding-{start}:20px">'
+                         + "".join(f'<li style="margin:3px 0">{_item_html(i)}</li>' for i in group) + "</ul>")
+    if len(items) > MAX_ITEMS:
+        more = html.escape(lang.say("mail_more", n=lang.number(len(items) - MAX_ITEMS)))
+        links = _links(row)
+        parts.append(f'<div dir="{side}">' + (f'<a href="{html.escape(links[0], quote=True)}">{more}</a>'
+                                              if links else more) + "</div>")
+    notes = "\n".join(str(n) for n in row.get("notes") or [])
+    return "".join(parts) + (f'<div style="font-size:13px;color:#555;margin-top:6px">{_lines_html(notes)}</div>'
+                             if notes else "")
+
+
 def _html(rows: List[Dict[str, Any]], titled: bool) -> str:
     """The same email, simple and tidy in Sandy's colours: a card per result."""
     rtl = lang.current() == lang.AR
@@ -319,7 +383,7 @@ def _html(rows: List[Dict[str, Any]], titled: bool) -> str:
             f'<div style="background:#fff;border-radius:14px;padding:16px 18px;margin:0 0 12px;'
             f'border-{side}:4px solid {_ACCENT}">{title}'
             f'<div style="font-size:16px;line-height:1.6;color:#111">'
-            f'{_lines_html(str(r.get("body") or "").strip())}</div>'
+            f'{_items_html(r) if r.get("items") else _lines_html(_unmarked(str(r.get("body") or "").strip()))}</div>'
             f'<div style="font-size:12px;color:#888;margin-top:8px">'
             f'{_lines_html(lang.say("mail_at", time=_when(r.get("at"))))}</div>{state}'
             f'{_buttons(r)}</div>')

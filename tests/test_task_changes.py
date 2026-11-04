@@ -5,7 +5,6 @@ prices and states, what was added, removed and changed. Sandy proposes it, the c
 from his words when she did not, and the yes before it is saved names it. In both languages."""
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as NS
 
@@ -40,15 +39,11 @@ def world(on, monkeypatch):
         return url, "text/html", pages[url].encode()
     monkeypatch.setattr(web_page, "_fetch_html", fetch)
     monkeypatch.setattr(web_page.config, "STEEL_API_KEY", "")
-    handed, sent = [], []
-
-    def model(what, messages, **kw):
-        if what == "task":
-            handed.append(json.loads(messages[-1]["content"])["changed"])
-        return NS(choices=[NS(message=NS(content=f"news {len(handed)}", tool_calls=None))])
-    monkeypatch.setattr(background, "call", model)
-    monkeypatch.setattr(notify, "CHANNELS", [lambda r: sent.append(r["body"])])
-    return NS(pages=pages, handed=handed, sent=sent)
+    sent = []
+    monkeypatch.setattr(background, "call", lambda what, messages, **kw: NS(choices=[NS(message=NS(
+        content="ok", tool_calls=None))]))
+    monkeypatch.setattr(notify, "CHANNELS", [lambda r: sent.append(r)])
+    return NS(pages=pages, sent=sent)
 
 
 def _task(changes):
@@ -67,29 +62,29 @@ def _tick(world, doc, rows):
         return task_runner.run(doc, "userA")
 
 
-def _titles(changed, key):
-    return sorted(r.get("title") for r in changed.get(key) or [])
+def _titles(row, op):
+    return sorted(i["title"] for i in row.get("items") or [] if i["op"] == op)
 
 
 def test_new_only_tells_what_is_new_and_not_what_dropped_off(world):
     doc = _task(tasks.NEW)
     _tick(world, doc, ["foxtrot", "alpha", "bravo", "charlie", "delta"])        # echo dropped off
-    assert len(world.handed) == 1
-    assert _titles(world.handed[0], "added") == ["foxtrot story"] and not world.handed[0].get("removed")
+    assert len(world.sent) == 1
+    assert _titles(world.sent[0], "added") == ["foxtrot story"] and not _titles(world.sent[0], "removed")
 
 
 def test_new_only_never_tells_one_that_comes_back(world):
     doc = _task(tasks.NEW)
     _tick(world, doc, ["foxtrot", "alpha", "bravo", "charlie", "delta"])
     _tick(world, doc, ["echo", "foxtrot", "alpha", "bravo", "charlie"])          # echo is back
-    assert len(world.handed) == 1 and len(world.sent) == 1
+    assert len(world.sent) == 1
 
 
 def test_every_change_tells_what_was_added_and_removed(world):
     doc = _task(tasks.ALL)
     _tick(world, doc, ["foxtrot", "alpha", "bravo", "charlie", "delta"])
-    assert _titles(world.handed[0], "added") == ["foxtrot story"]
-    assert _titles(world.handed[0], "removed") == ["echo story"]
+    assert _titles(world.sent[0], "added") == ["foxtrot story"]
+    assert _titles(world.sent[0], "removed") == ["echo story"]
 
 
 def test_a_task_without_it_tells_every_change(world):

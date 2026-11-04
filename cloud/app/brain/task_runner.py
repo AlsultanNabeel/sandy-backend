@@ -350,6 +350,11 @@ def start(task_id: str, uid: str) -> Any:
     return found
 
 
+def _site(found: Any) -> str:
+    from app.features.web_page import site_of
+    return site_of(str(found.get("url") or "")) if isinstance(found, dict) else ""
+
+
 def _seen(doc: Dict[str, Any], found: Any, before: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """For a «new only» task, what it has seen so far (`task_diff.remember`)."""
     if tasks.changes_of(doc) != tasks.NEW:
@@ -375,7 +380,7 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
     with lang.using(spec.get("lang") or lang.for_user(uid)), \
             trace_store.background(uid, "task", task_id=_id(doc)):
         try:
-            message, found, seen, diff, direct = None, None, None, None, False
+            message, found, seen, diff, direct, listed = None, None, None, None, False, None
             cursor = before.get("cursor")
             if before.get("batch_id"):
                 # A batch this task submitted: its answer, once Azure has it.
@@ -431,7 +436,13 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
                     diff = task_diff.compute(before["last_seen"], found)
                 if tasks.changes_of(doc) == tasks.NEW:
                     diff = task_diff.only_new(diff, before.get("seen_keys"))
-                message = NOTHING if task_diff.empty(diff) else task_diff.template(diff)
+                # A listing's items are told by the code, linked in the email: never the model's words.
+                listed = task_diff.page_items(diff) if tool == "page_read" and not task_diff.empty(diff) else None
+                message = (NOTHING if task_diff.empty(diff) else
+                           task_diff.page_body(listed, _site(found)) if listed else task_diff.template(diff))
+                if listed and (_review(spec, diff, message, uid) or NOTHING).strip() == NOTHING:
+                    # The model only says whether its items are worth telling him, never in its words.
+                    message = NOTHING
                 if message is None:
                     job = None if direct else _submitted(doc, spec, diff, before)
                     if job:
@@ -460,13 +471,14 @@ def run(doc: Dict[str, Any], uid: str) -> Optional[str]:
             tasks.save_state(_id(doc), state)
             return None
         tasks.save_state(_id(doc), {**state, "last_result": message})
-        if isinstance(found, dict) and tool == "page_read":
+        notes: List[str] = []
+        site = _site(found) if tool == "page_read" else ""
+        if site:
             # Where it came from, and a page that tries to give orders: told with the result.
-            from app.features.web_page import site_of
-            site = site_of(str(found.get("url") or ""))
-            if site and site not in message:
-                message = f"{message}\n\n{lang.say('sources_line', sites=site)}"
+            if listed or site not in message:
+                notes.append(lang.say("sources_line", sites=site))
             if found.get("warning"):
-                message = f"{message}\n\n{lang.say('page_warning', site=site)}"
-        return notify.deliver(_id(doc), str(doc.get("text") or ""), message, lang.current(),
-                              state=task_diff.describe(found))
+                notes.append(lang.say("page_warning", site=site))
+        return notify.deliver(_id(doc), str(doc.get("text") or ""), "\n\n".join([message, *notes]),
+                              lang.current(), state=task_diff.describe(found), items=listed, notes=notes,
+                              site=site)
