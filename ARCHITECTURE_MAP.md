@@ -441,7 +441,12 @@ and «طلّعها» on a site (`browser_sites.sign_out`, that site's fills) clo
 session at once (`stop_for`), not when Steel would a quarter hour later. A fill beats (`beat_at`, `BEAT_S`) while it
 holds its session; every minute (`schedule_runner`, `browser_job.sweep`) a session no one holds
 any more (no beat for `STALE_S`, a page handed to him included, a fill that ended
-without closing) is closed and billed on his account, never past `SESSION_MS`. A process that ends (a restart, a deploy: SIGTERM, SIGINT or SIGQUIT, `close_on_exit` from `bootstrap` in every worker) closes every session it holds at Steel first (`close_held`, `_HELD`, on a one-worker pool of its own, `_EXIT`, `EXIT_S` 10 s at most), each fill failed «restart», and only then does what the signal did before. His «no», a new request instead of an answer, or a second unclear one (taken in one write, as his
+without closing) is closed and billed on his account, never past `SESSION_MS`. A process that ends (a restart, a deploy: SIGTERM, SIGINT or SIGQUIT, `close_on_exit` from `bootstrap` in every worker) closes every session it holds at Steel first (`close_held`, `_HELD`, right in the signal's handler, once however many signals come, `_CLOSED`: no pool,
+since at the interpreter's exit pools take no more work, and on 4 Nov 2026 the deploy's second SIGTERM failed there with «cannot schedule new futures after
+shutdown»; `CLOSE_S` 3 s each, `EXIT_S` 10 s for all, a session that did not close logged by its id), each fill failed «restart», and only then does what the
+signal did before. As a worker boots (`close_orphans`, from `bootstrap`, in the background) every session open at Steel on our account (`steel_client.live_sessions`)
+that no live process of ours holds is closed at once: one no row knows, past `ORPHAN_S` (60 s, a signed-in read's own before that), and one whose row's
+`holder` (`HOLDER`: dyno, its server's master by pid and start, pid; saved by `_run`) is this dyno's earlier server or a worker gone; another dyno's while it beats is left. His «no», a new request instead of an answer, or a second unclear one (taken in one write, as his
 yes is: when «اه» and «لأ» come at once only one of them is) closes the session at once (`confirm.let_go`, `tools.LET_GO`), in the chat and on the call. Every
 call to the browser has `browser_cdp.CALL_S` (20 s) at most. A connection whose opening handshake times out is tried again, `CONNECT_TRIES` (3) in all, and each attempt that failed is closed, never left half open. The tool waits `WAIT_S` (80 s); past
 it the fill is `detached`, and once it is held or stops it tells him in the chat he asked from

@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
 import time
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace as NS
 
 import pytest
@@ -37,7 +39,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
     monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
     brain_db["sandy_users"].insert_one({"_id": "userA"})
     browser_sites.init_browser_sites(brain_db)
-    w = NS(snapshot=FORM, clients=[], opened=[], released=[], mode="submit", sent_notes=[], pressed=[], here=True,
+    w = NS(snapshot=FORM, clients=[], opened=[], released=[], timeouts=[], mode="submit", sent_notes=[], pressed=[], here=True,
            order=[], refuse=0, shut=set(), points=[], quad=[0, 0, 20, 0, 20, 40, 0, 40], scrolled=0,
            filled=[{"field": "Name", "value": "Nabeel"}, {"field": "Email", "value": "n@example.com"}],
            result="<html><body><main><p>Thanks Nabeel, your application 77 was received.</p></main></body></html>")
@@ -127,8 +129,9 @@ def world(monkeypatch, brain_db):  # noqa: F811
     monkeypatch.setattr(steel_client, "create_session", lambda: w.opened.append(1) or {
         "id": f"st{len(w.opened)}", "debug_url": "https://api.steel.dev/v1/sessions/st1/player"})
 
-    def release(sid, seconds=0):
+    def release(sid, seconds=0, timeout=None):
         w.released.append(sid)
+        w.timeouts.append(timeout)
         w.order.append("release")
         if w.refuse:
             w.refuse -= 1
@@ -1126,6 +1129,108 @@ def test_a_process_that_ends_closes_every_session_it_holds_first(world, signals)
     assert world.released == ["st1"]           # once: the fill found it closed already
 
 
+def test_a_stop_that_comes_once_the_pools_are_shut_still_closes_the_session_first(world, signals, monkeypatch):
+    # Deploy, 4 Nov 2026: the worker's second SIGTERM came while Python was already ending, its
+    # thread pools shut, and the close was handed to one: «cannot schedule new futures after
+    # shutdown», and the session stayed open for the sweep. It is closed in the handler itself.
+    import concurrent.futures.thread as pools
+    _level("submit")
+    asked = _fill("en")
+    seen = []
+    signals.signal(signals.SIGTERM, lambda signum, frame: seen.append(list(world.released)))
+    browser_job.close_on_exit()
+    monkeypatch.setattr(pools, "_shutdown", True)          # as at the interpreter's exit
+    signals.raise_signal(signals.SIGTERM)
+    assert seen == [["st1"]] and world.timeouts[0] == browser_job.CLOSE_S
+    assert _job(asked["ids"][0])["closed_at"]
+
+
+def test_a_second_stop_closes_nothing_twice_and_still_does_what_it_did(world, signals):
+    _level("submit")
+    _fill("en")
+    seen = []
+    signals.signal(signals.SIGTERM, lambda signum, frame: seen.append(1))
+    browser_job.close_on_exit()
+    signals.raise_signal(signals.SIGTERM)
+    signals.raise_signal(signals.SIGTERM)
+    assert world.released.count("st1") == 1 and seen == [1, 1]
+
+
+def test_a_session_that_does_not_close_in_time_is_logged_by_its_id(world, signals, caplog):
+    _level("submit")
+    _fill("en")
+    world.refuse = 1                                         # Steel does not take this release
+    signals.signal(signals.SIGTERM, lambda signum, frame: None)
+    browser_job.close_on_exit()
+    with caplog.at_level("WARNING"):
+        signals.raise_signal(signals.SIGTERM)
+    assert any("st1" in r.getMessage() for r in caplog.records)
+
+
+# ── On boot: every session at Steel no live process of ours holds is closed at once ──
+
+def _steel_sessions(monkeypatch, sessions):
+    monkeypatch.setattr(steel_client, "live_sessions", lambda: list(sessions))
+
+
+def _old(seconds=600):
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+
+
+def _held_row(brain_db, steel_id, holder, beat_s=1):  # noqa: F811
+    now = datetime.now(timezone.utc)
+    brain_db[browser_job.COLLECTION].insert_one({
+        "_id": f"job-{steel_id}", "user_id": "userA", "steel_id": steel_id, "status": browser_job.HELD,
+        "closed_at": None, "created_at": now - timedelta(minutes=3), "beat_at": now - timedelta(seconds=beat_s),
+        "updated_at": now, "holder": holder})
+
+
+def test_on_boot_a_session_no_live_process_holds_is_closed_at_once(world, brain_db, monkeypatch):  # noqa: F811
+    me = browser_job.HOLDER
+    sibling = {**me, "pid": os.getppid()}                    # alive, under the same master
+    dead_master = {**me, "master": me["master"] + "-before", "pid": 9}
+    other_dyno = {**me, "dyno": "web.2", "pid": 9}
+    _steel_sessions(monkeypatch, [
+        {"id": "orphan", "created_at": _old()},              # ours at Steel, nowhere in our rows
+        {"id": "young", "created_at": _old(5)},              # a signed-in read just begun somewhere
+        {"id": "dead", "created_at": _old()}, {"id": "sib", "created_at": _old()},
+        {"id": "far", "created_at": _old()}, {"id": "far-stale", "created_at": _old()}])
+    _held_row(brain_db, "dead", dead_master)
+    _held_row(brain_db, "sib", sibling)
+    _held_row(brain_db, "far", other_dyno)
+    _held_row(brain_db, "far-stale", other_dyno, beat_s=browser_job.STALE_S + 5)
+    assert browser_job.close_orphans() == 3
+    assert sorted(world.released) == ["dead", "far-stale", "orphan"]
+    dead = brain_db[browser_job.COLLECTION].find_one({"_id": "job-dead"})
+    assert dead["closed_at"] and dead["status"] == browser_job.FAILED and dead["reason"] == "restart"
+
+
+def test_a_fill_this_process_runs_is_held_under_it(world):
+    _level("submit")
+    asked = _fill("en")
+    assert _job(asked["ids"][0])["holder"] == browser_job.HOLDER
+
+
+def test_steel_lists_the_live_sessions_and_a_close_has_a_short_timeout(monkeypatch):
+    got = []
+    monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
+    monkeypatch.setattr(steel_client.requests, "get", lambda url, **kw: got.append((url, kw)) or NS(
+        ok=True, status_code=200, json=lambda: {"sessions": [{"id": "a", "createdAt": "2026-11-04T10:00:00Z"}]}))
+    assert steel_client.live_sessions() == [{"id": "a", "created_at": "2026-11-04T10:00:00Z"}]
+    assert "status=live" in got[0][0] or got[0][1].get("params") == {"status": "live"}
+    monkeypatch.setattr(steel_client.requests, "post", lambda url, **kw: got.append((url, kw)) or NS(
+        status_code=200, json=lambda: {}))
+    monkeypatch.setattr(steel_client.trace_store, "note_fee", lambda *a: None)
+    assert steel_client.release("a", timeout=3) and got[-1][1]["timeout"] == 3
+
+
+def test_every_worker_closes_orphans_as_it_boots():
+    import inspect
+
+    from app import bootstrap
+    assert "close_orphans" in inspect.getsource(bootstrap.bootstrap)
+
+
 def test_every_worker_closes_its_sessions_before_it_ends():
     import inspect
 
@@ -1208,3 +1313,39 @@ def _calls(user_id):
     """Today's calls to Steel on his usage row."""
     row = usage_store.get_db()[usage_store._DAILY].find_one({"_id": usage_store._day_key(user_id)}) or {}
     return int(row.get("browser") or 0)
+
+
+CHILD = r"""
+import concurrent.futures.thread as pools, os, signal, sys
+sys.path[:0] = [sys.argv[1]]
+import mongomock
+from app import db as appdb
+from app.features import browser_job
+from app.integrations import steel_client
+appdb.configure(mongomock.MongoClient().db)
+steel_client.config.STEEL_API_KEY = "k"
+out = open(sys.argv[2], "a")
+def release(sid, seconds=0, timeout=None):
+    out.write(f"closed {sid} {timeout}\n")
+    out.flush()                              # the signal ends the process: nothing buffered
+    return True
+steel_client.release = release
+appdb.get_db()[browser_job.COLLECTION].insert_one({"_id": "j1", "steel_id": "st-live", "status": browser_job.HELD,
+                                                   "closed_at": None, "user_id": "userA"})
+browser_job._HELD["j1"] = {"row": {"_id": "j1", "steel_id": "st-live"}, "user_id": "userA"}
+browser_job.close_on_exit()
+pools._shutdown = True                       # the interpreter is ending: its pools take no work
+os.kill(os.getpid(), signal.SIGTERM)
+out.write("still running\n")
+"""
+
+
+def test_a_process_stopped_with_a_session_open_closes_it_before_it_exits(tmp_path):
+    import subprocess
+    import sys
+    log = tmp_path / "closed.txt"
+    cloud = str(next(p for p in __import__("pathlib").Path(__file__).resolve().parents if (p / "cloud").is_dir()) / "cloud")
+    done = subprocess.run([sys.executable, "-c", CHILD, cloud, str(log)], capture_output=True, timeout=60)
+    assert done.returncode == -15, done.stderr.decode()[-800:]              # it ended by the signal
+    assert log.read_text() == f"closed st-live {browser_job.CLOSE_S}\n"         # after closing, not before
+    assert b"cannot schedule new futures" not in done.stderr

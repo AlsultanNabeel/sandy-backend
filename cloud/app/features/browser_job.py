@@ -34,7 +34,6 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeout
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
@@ -264,10 +263,11 @@ def detach(job_id: str) -> None:
         _tell(row)
 
 
-def _release(row: Dict[str, Any]) -> bool:
+def _release(row: Dict[str, Any], timeout: Optional[float] = None) -> bool:
     """Its session closed, billed once from when it opened, by whoever gets there first (its
-    holder, his no, the stop); True once Steel has it closed."""
+    holder, his no, the stop); True once Steel has it closed. ``timeout`` for each call to Steel."""
     from app.integrations import steel_client
+    wait = {"timeout": timeout} if timeout else {}
     db = get_db()
     steel_id = str(row.get("steel_id") or "")
     if db is None or not steel_id:
@@ -280,13 +280,13 @@ def _release(row: Dict[str, Any]) -> bool:
         claimed = row
     if claimed is None:
         # Another closed it already: asked again, never billed again, so its holder knows.
-        return steel_client.closed(steel_id) or steel_client.release(steel_id)
+        return steel_client.closed(steel_id, **wait) or steel_client.release(steel_id, **wait)
     began = row.get("created_at")
     if isinstance(began, datetime) and began.tzinfo is None:
         began = began.replace(tzinfo=timezone.utc)
     seconds = max(0.0, (_now() - began).total_seconds()) if isinstance(began, datetime) else 0.0
     # Steel closes a session itself after `SESSION_MS`: never billed past that.
-    return steel_client.release(steel_id, min(seconds, steel_client.SESSION_MS / 1000))
+    return steel_client.release(steel_id, min(seconds, steel_client.SESSION_MS / 1000), **wait)
 
 
 # While Steel has not closed a session, its holder asks again this often, the gate still on it.
@@ -348,20 +348,45 @@ async def _beating(job_id: str) -> None:
 # The fills whose session this process holds, by id ({row, user_id}): closed before it ends.
 _HELD: Dict[str, Dict[str, Any]] = {}
 _HELD_LOCK = threading.Lock()
-# How long a process that is ending waits for its sessions to close, on a worker of its own.
+# A process that is ending gives each session this long to close at Steel, and all of them
+# `EXIT_S`: what is left is logged by its id, for the next boot (`close_orphans`) to close.
+CLOSE_S = 3
 EXIT_S = 10
-_EXIT = ThreadPoolExecutor(max_workers=1, thread_name_prefix="SandyFillExit")
+# Closed once, whatever number of stop signals come (gunicorn's worker gets its master's too).
+_CLOSED = threading.Event()
+
+
+def _master() -> str:
+    """The server this process runs under: its master's pid and when that master began (a
+    restarted dyno's master has the same pid, never the same start)."""
+    ppid = os.getppid()
+    try:
+        with open(f"/proc/{ppid}/stat", encoding="ascii") as f:
+            began = f.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        began = ""
+    return f"{ppid}:{began}"
+
+
+# Which process holds a fill's session (`holder` on its row): its dyno, its server, its pid.
+# Read as this module is imported, in the worker itself (the server does not preload the app).
+HOLDER = {"dyno": os.getenv("DYNO", ""), "master": _master(), "pid": os.getpid()}
 
 
 def close_held() -> int:
     """Before this process ends (a restart, a deploy): every session it holds is closed at Steel
-    now, its fill failed, not left open for the sweep of another process. How many."""
+    now, in the caller's own thread (no pool: at the interpreter's exit they take no more work),
+    `CLOSE_S` for each and `EXIT_S` for all; its fill failed. How many were closed."""
     from app.features import trace_store
     db = get_db()
-    with _HELD_LOCK:
-        held = list(_HELD.values())
+    held = list(_HELD.values())
+    ends, done = time.monotonic() + EXIT_S, 0
     for h in held:
         row = h["row"]
+        steel_id = str(row.get("steel_id") or "")
+        if time.monotonic() >= ends:
+            logger.warning("[browser] session %s was not closed: the process ran out of time", steel_id)
+            continue
         if db is not None:
             try:
                 db[COLLECTION].update_one({"_id": row["_id"], "status": {"$in": list(OPEN)}},
@@ -369,26 +394,31 @@ def close_held() -> int:
             except PyMongoError:
                 logger.warning("[browser] could not mark a fill ended by a restart", exc_info=True)
         with trace_store.background(h["user_id"], "browser_exit", keep=True):
-            _release(row)
+            if _release(row, timeout=CLOSE_S):
+                done += 1
+            else:
+                logger.warning("[browser] session %s did not close before the process ended", steel_id)
     if held:
-        logger.info("[browser] %d open session(s) closed before the process ended", len(held))
-    return len(held)
+        logger.info("[browser] %d of %d open session(s) closed before the process ended", done, len(held))
+    return done
 
 
 def close_on_exit() -> None:
-    """The process's stop signals close the sessions it holds first (`close_held`, `EXIT_S` at
-    most), then do what they did. On the main thread only, where signals are handled."""
+    """The process's stop signals close the sessions it holds first (`close_held`, right in the
+    handler), then do what they did. On the main thread only, where signals are handled."""
     import signal
     if threading.current_thread() is not threading.main_thread():
         return
+    _CLOSED.clear()
 
     def closing(before):
         def handler(signum, frame):
-            # On a worker of its own: a lock the interrupted main thread holds never hangs it.
-            try:
-                _EXIT.submit(contextvars.copy_context().run, close_held).result(EXIT_S)
-            except FuturesTimeout:
-                logger.warning("[browser] the open sessions were still closing as the process ended")
+            if not _CLOSED.is_set():
+                _CLOSED.set()
+                try:
+                    close_held()
+                except (PyMongoError, OSError, RuntimeError):  # the process is ending: it goes on
+                    logger.exception("[browser] closing the open sessions failed")
             if callable(before):
                 before(signum, frame)
             elif before == signal.SIG_DFL:
@@ -399,10 +429,92 @@ def close_on_exit() -> None:
         signal.signal(sig, closing(signal.getsignal(sig)))
 
 
+# A session at Steel none of our rows knows is a read's own (`web_page.read_signed_in`) until
+# it is this old; past it, no process of ours holds it.
+ORPHAN_S = 60
+
+
+def _aware(at: Any) -> Optional[datetime]:
+    if isinstance(at, str) and at:
+        try:
+            at = datetime.fromisoformat(at.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(at, datetime):
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def _pid_alive(pid: Any) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _held_elsewhere(row: Dict[str, Any], now: datetime) -> bool:
+    """Whether a live process of ours other than this one holds the row's session: on another
+    dyno while it beats; on this one only under the same server, its worker alive."""
+    h = row.get("holder") or {}
+    if h.get("dyno") != HOLDER["dyno"]:
+        beat = _aware(row.get("beat_at"))
+        return beat is not None and now - beat < timedelta(seconds=STALE_S)
+    if h.get("master") != HOLDER["master"] or h.get("pid") == HOLDER["pid"]:
+        return False          # this dyno's server before, or this very process, which holds nothing yet
+    return _pid_alive(h.get("pid"))
+
+
+def close_orphans() -> int:
+    """As a worker boots: every session open at Steel on our account that no live process of ours
+    holds is closed at once, not left for the sweep (a process that ended without closing it).
+    How many were closed."""
+    from app.features import trace_store
+    from app.integrations import steel_client
+    db = get_db()
+    if db is None or not steel_client.configured():
+        return 0
+    try:
+        live = steel_client.live_sessions()
+    except steel_client.SteelError as exc:
+        logger.warning("[browser] could not list Steel's open sessions at boot: %s", exc)
+        return 0
+    now, done = _now(), 0
+    for s in live:
+        try:
+            row = db[COLLECTION].find_one({"steel_id": s["id"], "closed_at": None})
+        except PyMongoError:
+            logger.warning("[browser] could not read the fill of session %s", s["id"], exc_info=True)
+            continue
+        if row is None:
+            began = _aware(s.get("created_at"))
+            if began is not None and now - began < timedelta(seconds=ORPHAN_S):
+                continue
+            closed = steel_client.release(s["id"], timeout=CLOSE_S)
+        elif _held_elsewhere(row, now):
+            continue
+        else:
+            try:
+                db[COLLECTION].update_one({"_id": row["_id"], "status": {"$in": list(OPEN)}},
+                                          {"$set": {"status": FAILED, "reason": "restart", "updated_at": now}})
+            except PyMongoError:
+                logger.warning("[browser] could not mark a fill ended by a restart", exc_info=True)
+            with trace_store.background(str(row.get("user_id") or ""), "browser_orphan", keep=True):
+                closed = _release(row, timeout=CLOSE_S)
+        if closed:
+            done += 1
+        else:
+            logger.warning("[browser] session %s left open at boot did not close", s["id"])
+    if done:
+        logger.info("[browser] %d session(s) no process held closed at boot", done)
+    return done
+
+
 def _run(job_id: str, user_id: str) -> None:
     row = get(job_id) or {}
     with _HELD_LOCK:
         _HELD[job_id] = {"row": row, "user_id": user_id}
+    _save(job_id, holder=HOLDER)
     try:
         _drive_and_tell(job_id, user_id, row)
     finally:

@@ -107,7 +107,7 @@ def test_a_sign_in_that_ran_out_sends_him_to_sign_in_again(on, plain, live, lang
 
 def test_the_sessions_time_is_billed_on_the_trace(monkeypatch):
     monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
-    monkeypatch.setattr(steel_client, "_post", lambda path, body: {})
+    monkeypatch.setattr(steel_client, "_post", lambda path, body, **kw: {})
     trace = trace_store.Trace("userA", "chat")
     with trace_store.using(trace):
         steel_client.release("st1", seconds=360)
