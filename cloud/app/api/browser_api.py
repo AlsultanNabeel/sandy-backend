@@ -70,9 +70,14 @@ def register_browser_api(app) -> None:
     @app.route("/api/browser/sites/<site>", methods=["PATCH"])
     @_switched
     def browser_site_level(site, claims):
+        from app.features import web_page
         body = request.get_json(silent=True) or {}
+        new = str(body.get("level") or "")
+        name = browser_sites.site_of(site)
+        if new != browser_sites.READ and (web_page.blocked_site(name) or web_page.no_session_site(name)):
+            return jsonify({"error": "blocked", "message": lang.say("page_no_session", site=name)}), 400
         try:
-            kept = browser_sites.set_level(site, str(body.get("level") or ""))
+            kept = browser_sites.set_level(site, new)
         except ValueError:
             return jsonify({"error": "bad_level", "message": lang.say("browser_bad_level")}), 400
         if not kept:
@@ -84,8 +89,8 @@ def register_browser_api(app) -> None:
     def browser_site_session(site, claims):
         from app.features import web_page
         name = browser_sites.site_of(site)
-        if not name or web_page.blocked_site(name):
-            return jsonify({"error": "blocked", "message": lang.say("page_blocked", site=name)}), 400
+        if not name or web_page.blocked_site(name) or web_page.no_session_site(name):
+            return jsonify({"error": "blocked", "message": lang.say("page_no_session", site=name)}), 400
         try:
             kept = browser_sites.save_session(name, request.get_json(silent=True))
         except ValueError:

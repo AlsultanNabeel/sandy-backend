@@ -323,9 +323,11 @@ steps, each only when the one before read too little (`THIN`, 200 characters): a
 `POST /v1/scrape` with `STEEL_API_KEY`), then Steel's screenshot read by the vision model
 (`background.call("page_shot")`; Steel keeps the picture at a public link, so this is for public
 pages only). Every link is checked before it is opened and at every redirect (`check_url`): http or
-https, no name and password, ports 80 and 443, never a site of `BLOCKED` (the ones with an official
-connection, Gmail, Google accounts, GitHub, Facebook, Messenger, Instagram, and payment pages; more
-from `SANDY_BROWSER_BLOCKED`), never an address that is not public (`_public`; DNS rebinding between
+https, no name and password, ports 80 and 443, never a site of `BLOCKED` (payment pages; more from
+`SANDY_BROWSER_BLOCKED`); the ones with an official connection (`NO_SESSION`: Gmail, Google accounts,
+GitHub, Facebook, Messenger, Instagram) are read as anyone reads them and nothing more, since 4 Nov 2026: no session
+is opened on them (`check_url(…, session=True)` in `read_signed_in`, `browser_job.start` and `page_fill`), their
+sign-in page is `no_session`, never a login link, and the app keeps no sign-in and no level above read for them, never an address that is not public (`_public`; DNS rebinding between
 the check and the connect is the risk left). Why a page was not read is told apart (`PageError.code`, `lang` «page_<code>», since 4 Nov 2026): `missing` (404, 410, from the plain request or Steel's `status`: never another step, its error page never read as the page — ar.wikipedia's «/wiki/ESP32» was read as its «no such article» page and she said «ما لقيت»; the reply offers a search by name on the site, none is made), `refused` (401, 403, 429, 451: Steel is still tried, and refusing too it stays a refusal), no permission (`blocked`, `private`, `fill_level_read`: «ما عندي إذن») and `unreachable`, a technical failure. A page is `{url, title, text, links, via, warning}`:
 its words in paragraphs and its content's links (navigation, header, footer and aside dropped).
 What it hides never reaches the model: read from its markup for a plain request or Steel's

@@ -90,8 +90,8 @@ def test_no_link_asks_for_one(on, web, language, words):
 
 
 @pytest.mark.parametrize("language, url, words", [
-    ("ar", "https://github.com/me", "ما بفتح github.com"),
-    ("en", "https://www.facebook.com/x", "I don't open facebook.com"),
+    ("ar", "https://www.paypal.com/me", "ما عندي إذن أفتح paypal.com"),
+    ("en", "https://checkout.stripe.com/x", "I don't have permission to open checkout.stripe.com"),
     ("ar", "https://gone.example/", "ما قدرت أفتح gone.example"),
     ("en", "https://gone.example/", "I couldn't open gone.example")])
 def test_a_page_that_cannot_be_read_says_why_in_his_language(on, web, language, url, words):

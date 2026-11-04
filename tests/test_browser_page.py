@@ -64,11 +64,9 @@ def test_a_link_that_is_not_a_plain_page_is_refused(url):
     assert e.value.code == "bad_url"
 
 
-@pytest.mark.parametrize("url", ["https://mail.google.com/mail/u/0", "https://gmail.com", "https://github.com/x/y",
-                                 "https://gist.github.com/x", "https://www.facebook.com/p", "https://m.facebook.com",
-                                 "https://www.instagram.com/x", "https://www.paypal.com/checkout",
-                                 "https://accounts.google.com/signin"])
-def test_the_sites_with_an_official_connection_and_payment_pages_are_never_opened(url, web):
+@pytest.mark.parametrize("url", ["https://www.paypal.com/checkout", "https://checkout.stripe.com/x",
+                                 "https://pay.google.com/"])
+def test_payment_pages_are_never_opened(url, web):
     with pytest.raises(web_page.PageError) as e:
         web_page.read(url, user_id="userA")
     assert e.value.code == "blocked" and web.opened == []
@@ -105,7 +103,7 @@ def test_a_redirect_to_an_internal_address_is_refused_before_it_is_followed(web)
 
 def test_a_redirect_to_a_blocked_site_is_refused(web):
     web.hosts["public.example"] = "93.184.216.34"
-    web.pages["https://public.example/go"] = Resp(status=301, location="https://github.com/login")
+    web.pages["https://public.example/go"] = Resp(status=301, location="https://www.paypal.com/signin")
     with pytest.raises(web_page.PageError) as e:
         web_page.read("https://public.example/go", user_id="userA")
     assert e.value.code == "blocked"

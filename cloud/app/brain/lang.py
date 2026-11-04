@@ -604,9 +604,13 @@ PHRASES = {
     # A page read (`features/web_page`, `brain/tools_browser`).
     "page_no_url": {"ar": "أي صفحة؟ ابعتلي الرابط.", "en": "Which page? Send me the link."},
     "page_bad_url": {"ar": "هاد مش رابط صفحة بقدر أفتحه.", "en": "That isn't a page link I can open."},
-    "page_blocked": {"ar": "ما بفتح {site} بالمتصفح: إله ربط رسمي، وهو مش موجود لسا، أو هو صفحة دفع.",
-                     "en": "I don't open {site} in the browser: it has an official connection, which "
-                           "isn't here yet, or it's a payment page."},
+    "page_blocked": {"ar": "ما عندي إذن أفتح {site}: هاي صفحة دفع، وصفحات الدفع ما بفتحها أبداً.",
+                     "en": "I don't have permission to open {site}: it's a payment page, and I never "
+                           "open those."},
+    "page_no_session": {"ar": "ما عندي إذن أدخل على {site} أو أعبّي فيه: إله ربط رسمي لسا مش موجود. "
+                              "بقدر أقرا صفحاته العامة بس.",
+                        "en": "I don't have permission to sign in or fill on {site}: it has an official "
+                              "connection, which isn't here yet. I can only read its public pages."},
     "page_private": {"ar": "ما عندي إذن أفتح هاد العنوان: هو عنوان داخلي.",
                      "en": "I don't have permission to open that address: it's an internal one."},
     "page_missing": {"ar": "الصفحة مش موجودة على {site}. بدك أدوّر عليها بالاسم على {site} نفسه؟",

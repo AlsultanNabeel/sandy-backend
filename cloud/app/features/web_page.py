@@ -8,9 +8,10 @@ Three steps, each only when the one before read too little (`_thin`):
               Steel keeps the picture at a public link
 
 Every link is checked before it is opened, and again at every redirect (`check_url`): http or
-https only, no name and password in it, the usual ports, never a site of `BLOCKED` (those with
-an official connection, which a page read never stands in for, and payment pages), and never an
-internal address (`_public`). A name that resolves to a public address when checked and to
+https only, no name and password in it, the usual ports, never a site of `BLOCKED` (payment
+pages), and never an internal address (`_public`). The sites of `NO_SESSION` (an official connection is the way to
+his account there, none is built yet) are read as anyone reads them: never signed in, with a
+kept session or for a fill (`check_url(…, session=True)`), and their sign-in page is refused. A name that resolves to a public address when checked and to
 another when the request connects (DNS rebinding) is the risk left; the check is made before
 every request.
 
@@ -38,11 +39,12 @@ from app import config
 
 logger = logging.getLogger(__name__)
 
-# Never opened: an official connection is the way to these (none is built yet), or they take
-# payment. `SANDY_BROWSER_BLOCKED` adds more. A site blocks its subdomains too.
-BLOCKED = ("gmail.com", "mail.google.com", "accounts.google.com", "myaccount.google.com",
-           "github.com", "facebook.com", "fb.com", "messenger.com", "instagram.com",
-           "paypal.com", "checkout.stripe.com", "pay.google.com")
+# Never opened: they take payment. `SANDY_BROWSER_BLOCKED` adds more. A site covers its subdomains.
+BLOCKED = ("paypal.com", "checkout.stripe.com", "pay.google.com")
+# Read only as anyone reads them, with no session: an official connection is the way to his
+# account on these (none is built yet). No sign-in, no kept session, no fill.
+NO_SESSION = ("gmail.com", "mail.google.com", "accounts.google.com", "myaccount.google.com",
+              "github.com", "facebook.com", "fb.com", "messenger.com", "instagram.com")
 MAX_REDIRECTS = 5
 MAX_BYTES = 2_000_000
 MAX_SHOT_BYTES = 5_000_000
@@ -129,13 +131,23 @@ def site_of(url: str) -> str:
         return ""
 
 
+def _under(host: str, sites) -> bool:
+    return any(host == s or host.endswith("." + s) for s in sites)
+
+
 def blocked_site(host: str) -> bool:
     extra = tuple(s.strip().lower() for s in config.SANDY_BROWSER_BLOCKED.split(",") if s.strip())
-    return any(host == s or host.endswith("." + s) for s in (*BLOCKED, *extra))
+    return _under(host, (*BLOCKED, *extra))
 
 
-def check_url(url: str) -> str:
-    """The link as it will be opened; PageError when it may not be."""
+def no_session_site(host: str) -> bool:
+    """Read publicly only: never signed in, never a session, never a fill."""
+    return _under(host, NO_SESSION)
+
+
+def check_url(url: str, *, session: bool = False) -> str:
+    """The link as it will be opened; PageError when it may not be. ``session``: it is opened
+    signed in, or for a fill, which a site of `NO_SESSION` never is."""
     url = str(url or "").strip().strip("<>«»\"'")
     if url and "://" not in url:
         url = "https://" + url
@@ -151,6 +163,8 @@ def check_url(url: str) -> str:
         raise PageError("bad_url")
     if blocked_site(host):
         raise PageError("blocked", host.removeprefix("www."))
+    if session and no_session_site(host):
+        raise PageError("no_session", host.removeprefix("www."))
     return parts.geturl()
 
 
@@ -486,6 +500,8 @@ def read(url: str, *, user_id: str) -> Dict[str, Any]:
             page = {**found, "via": step}
     if page is None:
         raise PageError("daily_cap" if capped else failed, site_of(url))
+    if page.get("login") and no_session_site(site_of(page["url"])):
+        raise PageError("no_session", site_of(page["url"]))
     if not str(page.get("text") or "").strip() and not page.get("links"):
         raise PageError("empty", site_of(page["url"]))
     return _answer(page)
@@ -512,7 +528,7 @@ def read_signed_in(url: str, state: Dict[str, Any], *, user_id: str) -> Dict[str
     import asyncio
 
     from app.integrations import steel_client
-    url = check_url(url)
+    url = check_url(url, session=True)
     if not steel_client.configured():
         raise PageError("unreachable", site_of(url))
     if not take_call(user_id):

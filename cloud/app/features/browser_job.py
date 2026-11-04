@@ -213,7 +213,7 @@ def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str) 
     from app.blocks import _base
     from app.features import web_page
     from app.integrations import steel_client
-    url = web_page.check_url(str(args.get("url") or ""))
+    url = web_page.check_url(str(args.get("url") or ""), session=True)
     if not _proven():
         raise Busy("unproven")
     if not web_page.take_call(user_id):
