@@ -158,7 +158,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
 
 def _level(level):
     with active_user_profile_context(A):
-        browser_sites.set_level("forms.example.com", level)
+        browser_sites.set_level("forms.example.com", level, hand=browser_sites.Hand({"role": "user", "user_id": A["chat_id"]}))
 
 
 def _fill(language="ar", confirmed_job=None, thread="t1"):

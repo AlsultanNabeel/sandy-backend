@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+# Set while a tool runs (`tools.execute`): what only he may do refuses under it
+# (`browser_sites.set_level`).
+IN_TOOL: ContextVar[bool] = ContextVar("in_tool", default=False)
 
 
 @dataclass

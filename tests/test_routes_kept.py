@@ -92,7 +92,7 @@ KEPT = {
     # The browser's screens: the sites, «Sandy's browser» and the emergency stop.
     "/api/stop": {"GET", "POST", "DELETE"},
     "/api/browser/sites": {"GET"},
-    "/api/browser/sites/<site>": {"PATCH"},
+    "/api/browser/sites/<path:site>": {"PATCH"},
     "/api/browser/sites/<site>/session": {"POST", "DELETE"},
     "/api/browser/jobs": {"GET"},
     "/api/browser/jobs/<job_id>/live": {"GET"},

@@ -349,7 +349,13 @@ carries the warning line, and every page read or fill names its source at the en
 (`sources_line`, by the code, unless the reply already names it; a watched page's result too).
 
 **Session two (2 Nov 2026).** *Sites* (`features/browser_sites.py`, `sandy_browser_sites`, scoped):
-per site his `level`, `read` by default, `fill` (never sends) or `submit` (sends on his yes), and
+per site his `level`, `read` by default, `fill` (never sends) or `submit` (sends on his yes), his alone to set
+from the app (`PATCH /api/browser/sites/<path:site>`, a site not listed yet added by its name, `valid_site`: a public
+domain, never an address or a bare word; since 4 Nov 2026): `set_level` takes his signed-in session (`Hand`, made
+from the route's claims, the one caller; `tests/test_browser_site_levels.py` reads every module of the app for any
+other) and refuses while any tool runs (`ctx.IN_TOOL`, set by `tools.execute`), and no tool takes a level; a fill
+refused for the level says why and ends the reply with `sandy://browser/site?site=…` (`tools_browser._level_refused`,
+by the code), which opens the Sites screen on that site (`BrowserView(focus:)`, offered to add when not listed), and
 his sign-in: what the app sent after he signed in by hand in a web view on a store of its own
 (`BrowserLoginView`), only that site's cookies and storage (`clean_state`: known fields, the
 site's own domains, nothing named like a password), sealed with Fernet on a key derived by HKDF

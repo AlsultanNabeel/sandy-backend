@@ -4,7 +4,10 @@
 
   {site, level, session, session_at, updated_at}
 
-`level` is his to set: `read` (the default: she reads, nothing else), `fill` (she fills a form
+`level` is his alone to set, from the app's «Sites» screen: `set_level` takes his own signed-in
+session (`Hand`, made by `PATCH /api/browser/sites/<site>` from its claims, the one caller), and
+refuses while any tool runs (`ctx.IN_TOOL`), so no tool, the call, a task or a fill ever changes
+one. `read` (the default: she reads, nothing else), `fill` (she fills a form
 and never sends it, whatever he answers) or `submit` (she sends, and only on his yes). `session`
 is what the phone sent after he signed in by hand there (`clean_state`: that site's cookies and
 its storage, the known fields only, nothing named like a password), sealed with a key of its own
@@ -98,7 +101,36 @@ def _write(site: str, *, put: Optional[Dict[str, Any]] = None,
         return False
 
 
-def set_level(site: str, new: str) -> bool:
+_LABEL = re.compile(r"(?!-)[a-z0-9-]{1,63}(?<!-)")
+
+
+def valid_site(site: str) -> bool:
+    """A site's name as he types it: a public domain, never an address or a bare word."""
+    try:
+        name = site.encode("idna").decode("ascii") if site else ""
+    except UnicodeError:
+        return False
+    labels = name.split(".")
+    return (len(labels) >= 2 and len(name) <= 253 and all(_LABEL.fullmatch(p) for p in labels)
+            and not labels[-1].isdigit() and len(labels[-1]) >= 2)
+
+
+class Hand:
+    """His own signed-in session, from the app's route: the only way a level is changed."""
+
+    def __init__(self, claims: Dict[str, Any]):
+        if claims.get("role") == "guest" or not claims.get("user_id"):
+            raise PermissionError("a level is changed only from his own signed-in session")
+        self.user_id = str(claims["user_id"])
+
+
+def set_level(site: str, new: str, *, hand: Hand) -> bool:
+    from app.brain.ctx import IN_TOOL
+    from app.utils.user_profiles import current_user_id
+    if not isinstance(hand, Hand) or hand.user_id != (current_user_id() or ""):
+        raise PermissionError("a level is changed only from his own signed-in session")
+    if IN_TOOL.get():
+        raise PermissionError("a level is never changed while a tool runs")
     if new not in LEVELS:
         raise ValueError(f"level is one of {LEVELS}")
     return _write(site_of(site), put={"level": new})

@@ -127,6 +127,7 @@ struct MainTabView: View {
                 switch sheet {
                 case .login(let page): BrowserLoginView(url: page)
                 case .live(let job): NavigationStack { LiveBrowserView(jobId: job) }
+                case .site(let site): NavigationStack { BrowserView(focus: site) }
                 }
             }
             .environmentObject(state)
@@ -179,6 +180,8 @@ struct MainTabView: View {
             if state.showsBrowser { browserSheet = .login(page) }
         case .browserLive(let job):
             if state.showsBrowser { browserSheet = .live(job) }
+        case .browserSite(let site):
+            if state.showsBrowser { browserSheet = .site(site) }
         }
     }
 
@@ -296,11 +299,13 @@ private struct SandyOrb: View {
 enum BrowserSheet: Identifiable {
     case login(URL)
     case live(String)
+    case site(String)
 
     var id: String {
         switch self {
         case .login(let url): return "login:" + url.absoluteString
         case .live(let job): return "live:" + job
+        case .site(let site): return "site:" + site
         }
     }
 }

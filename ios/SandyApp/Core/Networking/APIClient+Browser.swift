@@ -15,6 +15,14 @@ struct BrowserSite: Decodable, Identifiable, Hashable {
     static let read = "read", fill = "fill", submit = "submit"
     static let levels = [read, fill, submit]
 
+    /// The site a name or a link he types belongs to: its host, lowercase, without «www.»
+    /// (the server reads it the same way, `browser_sites.site_of`).
+    static func name(of typed: String) -> String {
+        let raw = typed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let host = URLComponents(string: raw.contains("://") ? raw : "https://" + raw)?.host ?? raw
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
     enum CodingKeys: String, CodingKey {
         case site, level
         case signedIn = "signed_in", sessionAt = "session_at"

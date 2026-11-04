@@ -27,6 +27,11 @@ def on(monkeypatch, brain_db):  # noqa: F811
     return brain_db
 
 
+def _hand(who="A"):
+    """His own signed-in session, as the app's route makes it."""
+    return S.Hand({"role": "user", "user_id": (A if who == "A" else B)["chat_id"]})
+
+
 def _as(who):
     return active_user_profile_context(A if who == "A" else B)
 
@@ -34,7 +39,7 @@ def _as(who):
 def test_a_site_is_read_only_until_he_says_otherwise(on):
     with _as("A"):
         assert S.level("app.example.com") == S.READ
-        assert S.set_level("https://www.app.example.com/x", S.SUBMIT)
+        assert S.set_level("https://www.app.example.com/x", S.SUBMIT, hand=_hand())
         assert S.level("app.example.com") == S.SUBMIT
     with _as("B"):
         assert S.level("app.example.com") == S.READ
@@ -43,7 +48,7 @@ def test_a_site_is_read_only_until_he_says_otherwise(on):
 def test_an_unknown_level_is_refused(on):
     with _as("A"):
         with pytest.raises(ValueError):
-            S.set_level("app.example.com", "pay")
+            S.set_level("app.example.com", "pay", hand=_hand())
 
 
 def test_a_sign_in_is_kept_sealed_and_opened_only_for_its_account_and_site(on):
@@ -97,7 +102,7 @@ def test_a_key_named_like_a_password_never_reaches_the_server(on):
 
 def test_signing_out_forgets_the_sign_in_and_keeps_the_level(on):
     with _as("A"):
-        S.set_level("app.example.com", S.FILL)
+        S.set_level("app.example.com", S.FILL, hand=_hand())
         S.save_session("app.example.com", STATE)
         assert [s["signed_in"] for s in S.sites()] == [True]
         assert S.sign_out("app.example.com")

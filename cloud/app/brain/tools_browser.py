@@ -188,6 +188,22 @@ def login_link(url: str) -> str:
     return f"sandy://browser/login?url={quote(url, safe='')}"
 
 
+def site_link(site: str) -> str:
+    """Where the app opens the Sites screen on that site, for him to change what she may do."""
+    from urllib.parse import quote
+    return f"sandy://browser/site?site={quote(site, safe='')}"
+
+
+def _level_refused(ctx: TurnCtx, key: str, site: str) -> Dict[str, Any]:
+    """Refused for the site's level: why, and the link to change it, whatever the model writes
+    (the level is his to change, never hers)."""
+    said = lang.say(key, site=site, link=site_link(site))
+    notices = ctx.artifacts.setdefault("notices", [])
+    if said not in notices:
+        notices.append(said)
+    return _no(said)
+
+
 def offered(user_id: str) -> bool:
     from app.utils import flags
     return flags.on(SWITCH, user_id)
@@ -289,7 +305,7 @@ def page_fill(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     if stop_all.stopped(ctx.user_id):
         return _no(lang.say("browser_stopped"))
     if ctx.confirmed and ctx.held_ids:
-        return _with_source(ctx, _send(ctx.held_ids[0]))
+        return _with_source(ctx, _send(ctx, ctx.held_ids[0]))
     try:
         url = web_page.check_url(str(args.get("url") or ""), session=True)
     except web_page.PageError as exc:
@@ -297,7 +313,7 @@ def page_fill(args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
     site = web_page.site_of(url)
     level = browser_sites.level(site)
     if level == browser_sites.READ:
-        return _no(lang.say("fill_level_read", site=site))
+        return _level_refused(ctx, "fill_level_read", site)
     try:
         job = browser_job.start({**args, "url": url}, user_id=ctx.user_id, thread_id=ctx.thread_id,
                                 language=lang.current())
@@ -333,7 +349,7 @@ def _outcome(row: Dict[str, Any]) -> Dict[str, Any]:
     return _no(browser_job.told(row))
 
 
-def _send(job: str) -> Dict[str, Any]:
+def _send(ctx: TurnCtx, job: str) -> Dict[str, Any]:
     """His yes: the held send goes, if the site lets her send."""
     from app.features import browser_job, browser_sites
 
@@ -343,8 +359,9 @@ def _send(job: str) -> Dict[str, Any]:
     if not row or row.get("status") != browser_job.HELD:
         return _no(lang.say("fill_gone"))
     site = row["site"]
-    if browser_sites.level(site) != browser_sites.SUBMIT:
-        return _no(lang.say("fill_level_read", site=site))
+    level = browser_sites.level(site)
+    if level != browser_sites.SUBMIT:
+        return _level_refused(ctx, f"fill_level_{level}", site)
     row = browser_job.submit(job)
     if row is None:
         # Another yes took it first: it is that one's to tell.

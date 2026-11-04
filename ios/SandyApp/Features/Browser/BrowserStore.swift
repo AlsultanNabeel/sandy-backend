@@ -46,6 +46,17 @@ final class BrowserStore: LoadableStore {
         }
     }
 
+    /// A site he adds by its name, at the level he picked: nil once kept, else what to show.
+    func addSite(_ typed: String, level: String, api: APIClient) async -> String? {
+        do {
+            let saved = try await api.setBrowserLevel(site: BrowserSite.name(of: typed), level: level)
+            if let i = sites.firstIndex(where: { $0.site == saved.site }) { sites[i] = saved } else { sites.append(saved) }
+            return nil
+        } catch {
+            return (error as? APIError)?.message ?? LanguageManager.shared.s("browser.saveFailed")
+        }
+    }
+
     /// «طلّعها».
     func signOut(site: String, api: APIClient) async {
         do {

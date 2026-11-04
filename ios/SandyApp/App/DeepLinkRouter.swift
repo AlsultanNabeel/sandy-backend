@@ -7,11 +7,13 @@ enum DeepLink: Equatable {
     case browserLogin(URL)
     /// «Sandy's browser» for a fill (`sandy://browser/live?job=…`).
     case browserLive(String)
+    /// The Sites screen on one site, from a refusal for its level (`sandy://browser/site?site=…`).
+    case browserSite(String)
 }
 
 /// Routes sandy://call, call/end, chat, quickadd, focus/stop, tasks (a task's email:
-/// «افتح المهمة» opens the Tasks screen), browser/login?url= and browser/live?job= (links in
-/// Sandy's replies).
+/// «افتح المهمة» opens the Tasks screen), browser/login?url=, browser/live?job= and
+/// browser/site?site= (links in Sandy's replies).
 /// A link arriving before the main screen exists waits in `pending` for `MainTabView`, a
 /// minute at most and never across a sign-out: a «talk to Sandy» tapped signed out must not
 /// open the mic minutes later, once sign-in is done.
@@ -70,6 +72,8 @@ final class DeepLinkRouter: ObservableObject {
                 ask(.browserLogin(page))
             } else if path == "/live", let job = value("job"), !job.isEmpty {
                 ask(.browserLive(job))
+            } else if path == "/site", let site = value("site").map(BrowserSite.name(of:)), !site.isEmpty {
+                ask(.browserSite(site))
             }
         case "focus":
             if path == "/stop" { FocusLiveActivity.shared.stopFromLink() }

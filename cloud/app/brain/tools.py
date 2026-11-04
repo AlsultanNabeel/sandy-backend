@@ -14,7 +14,7 @@ from app.brain import tools_blocks as B
 from app.brain import tools_browser as BW
 from app.brain import tools_tasks as T
 from app.brain import tools_world as X
-from app.brain.ctx import TurnCtx, refused
+from app.brain.ctx import IN_TOOL, TurnCtx, refused
 from app.brain.when import PERIODS
 from app.features import trace_store
 
@@ -257,11 +257,14 @@ def execute(name: str, args: Dict[str, Any], ctx: TurnCtx) -> Dict[str, Any]:
         return refused(f"unknown tool {name}")
     logger.info("[brain] tool %s args=%s", name, sorted(args or {}))
     t0 = time.perf_counter()
+    running = IN_TOOL.set(True)
     try:
         result = handler(dict(args or {}), ctx)
     except Exception as exc:  # noqa: BLE001 — one tool never breaks the turn
         logger.exception("[brain] tool %s raised", name)
         result = {"ok": False, "broke": True, "error": f"tool failed: {type(exc).__name__}"}
+    finally:
+        IN_TOOL.reset(running)
     trace_store.note_tool(name, dict(args or {}), result, ms=(time.perf_counter() - t0) * 1000)
     ctx.results.append((name, result))
     BW.saw(name, result, ctx)

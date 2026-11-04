@@ -559,8 +559,16 @@ PHRASES = {
                         "بتقدر تبعته إنت من «متصفح ساندي»: {link}",
                   "en": "I filled the form on {site} ({fields}) and didn't send it: on this site I may only "
                         "fill. You can send it yourself from «Sandy's browser»: {link}"},
-    "fill_level_read": {"ar": "على {site} مسموحلي أقرا بس. إذا بدك أعبّي، غيّرها من «المواقع» بالإعدادات.",
-                        "en": "On {site} I may only read. If you want me to fill, change it in «Sites» in settings."},
+    "fill_level_read": {"ar": "ما عندي إذن أعبّي على {site}: مسموحلي أقرا بس. إذا بدك، غيّر الإذن إنت من "
+                              "شاشة المواقع: {link}",
+                        "en": "I don't have permission to fill on {site}: I may only read there. If you want, "
+                              "change it yourself on the Sites screen: {link}"},
+    "fill_level_fill": {"ar": "ما عندي إذن أبعت على {site}: مسموحلي أعبّي بس. إذا بدك، غيّر الإذن إنت من "
+                              "شاشة المواقع: {link}",
+                        "en": "I don't have permission to send on {site}: I may only fill there. If you want, "
+                              "change it yourself on the Sites screen: {link}"},
+    "browser_bad_site": {"ar": "هاد مش اسم موقع. اكتب النطاق، مثلاً «example.com».",
+                         "en": "That isn't a site name. Type the domain, for example «example.com»."},
     "fill_background": {"ar": "التعبئة على {site} طوّلت، فبكمّلها بالخلفية وببعتلك لما أخلص أو لما بدها موافقتك. "
                               "بتقدر تتفرّج من هون: {link}",
                         "en": "The form on {site} is taking a while, so I'll carry on in the background and tell "
