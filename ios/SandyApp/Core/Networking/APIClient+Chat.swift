@@ -31,6 +31,15 @@ private struct ConversationDetailResponse: Decodable {
     }
 }
 
+/// What a streamed reply came to: its words, a picture Sandy drew, what «تراجع» takes back, and
+/// the fill it named.
+struct ChatReply {
+    let reply: String
+    let image: ChatAttachment?
+    let undo: ChatUndo?
+    let liveJob: String?
+}
+
 /// The fill a reply names (`{job}`), as the server sends and keeps it.
 struct ChatLive: Codable, Hashable {
     let job: String
@@ -92,7 +101,7 @@ extension APIClient {
         attachments: [ChatAttachment] = [],
         onStep: (@MainActor (String) -> Void)? = nil,
         onChunk: @MainActor @escaping (String) -> Void
-    ) async throws -> (reply: String, image: ChatAttachment?, undo: ChatUndo?, liveJob: String?) {
+    ) async throws -> ChatReply {
         guard let url = URL(string: baseURL + "/api/agent/stream") else {
             throw APIError(message: L10nErrors.s("badAddress"))
         }
@@ -187,7 +196,7 @@ extension APIClient {
         if !sawDone {
             throw APIError(message: L10nErrors.s("replyCut"), kind: .connection)
         }
-        return (finalReply, image, undo, liveJob)
+        return ChatReply(reply: finalReply, image: image, undo: undo, liveJob: liveJob)
     }
 
     // MARK: - المرفقات
