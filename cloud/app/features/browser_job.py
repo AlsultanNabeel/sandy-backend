@@ -55,6 +55,8 @@ OPEN = (RUNNING, HELD, APPROVED, HANDED)
 # in the background writes in his chat where it is (never spoken, never pushed).
 WAIT_S = 20
 PROGRESS_S = 20
+# How long a connection of a fill is given to close (`browser_cdp.closing`).
+STOP_S = 5
 # A fill's own work, its time waiting for his yes aside: three minutes in all, twenty seconds a
 # step (a model call and the page). Past either it stops, its session closes, and he is told.
 RUN_S = 3 * 60
@@ -697,7 +699,7 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         await _shut(row)
         beat.cancel()
         if client is not None:
-            await client.stop()
+            await browser_cdp.closing(client.stop(), STOP_S, "gate connection")
 
 
 async def _progressing(job_id: str) -> None:
@@ -1161,7 +1163,7 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     finally:
         watch.cancel()
         # Our connection only: the session itself stays open for his yes (keep_alive).
-        await session.stop()
+        await browser_cdp.closing(session.stop(), STOP_S, "agent connection")
     if reason:
         return {"status": reason.pop("status"), **reason}
     if gate.refused and not asked:

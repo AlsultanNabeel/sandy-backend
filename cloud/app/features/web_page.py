@@ -655,7 +655,7 @@ async def _live_read(url: str, state: Dict[str, Any]) -> Dict[str, Any]:
         return page
     finally:
         if client is not None:
-            await client.stop()
+            await browser_cdp.closing(client.stop())
         steel_client.release(session["id"], time.monotonic() - began)
 
 

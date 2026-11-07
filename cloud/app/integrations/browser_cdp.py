@@ -28,6 +28,19 @@ async def within(call, seconds: float = CALL_S):
     return await asyncio.wait_for(call, seconds)
 
 
+# A connection closing is given this long: one that never closes never holds up what ends it.
+STOP_S = 5
+
+
+async def closing(stop, seconds: float = STOP_S, what: str = "connection") -> None:
+    """``stop`` (a close) awaited ``seconds`` at most; one that does not close in time is left and
+    logged, so a fill or a read always ends and leaves its trace."""
+    try:
+        await asyncio.wait_for(stop, seconds)
+    except asyncio.TimeoutError:
+        logger.warning("[browser] a %s did not close in %ss; left", what, seconds)
+
+
 async def connect(url: str):
     """A connection to ``url``, whose key no log ever shows (cdp-use logs the address)."""
     from cdp_use.client import CDPClient

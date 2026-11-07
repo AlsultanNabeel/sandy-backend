@@ -1522,3 +1522,37 @@ def test_a_yes_that_comes_as_the_time_runs_out_is_never_lost_to_it(world, monkey
     with active_user_profile_context(A):
         assert browser_job.submit(job)["status"] in (browser_job.APPROVED, browser_job.DONE)
         assert browser_job._expired(job) is None
+
+
+# ── A fill always ends, and leaves its trace: no close of a connection may hang it ──
+
+def test_a_connection_that_never_closes_never_hangs_the_fill(monkeypatch):
+    # 4 Nov: after he took over, the first fill left no trace and told him nothing; the agent's
+    # own browser connection had no time to close in, and the fill's thread waited on it.
+    import browser_use
+    from browser_use.tools.service import Tools
+
+    from app.brain import browser_gate
+    monkeypatch.setattr(browser_job, "STOP_S", 0.3)
+
+    class Session:
+        def __init__(self, **kw):
+            self.event_bus = NS(on=lambda kind, fn: None)
+
+        async def stop(self):
+            await asyncio.sleep(30)                            # never closes
+
+    class Agent:
+        def __init__(self, **kw):
+            pass
+
+        async def run(self, max_steps):
+            return NS(final_result=lambda: "ok")
+    monkeypatch.setattr(browser_use, "Agent", Agent)
+    monkeypatch.setattr(browser_use, "BrowserSession", Session)
+    monkeypatch.setattr(Tools, "act", lambda *a, **kw: None)
+    monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
+    row = {"_id": "j1", "site": "forms.example.com", "steel_id": "st1", "goal": "x", "args": {}, "values": "[]"}
+    began = time.monotonic()
+    out = asyncio.run(browser_job._agent(row, browser_gate.Gate("forms.example.com"), FakeCDP({}), "s1", "userA", {}))
+    assert out["status"] == browser_job.DONE and time.monotonic() - began < 3
