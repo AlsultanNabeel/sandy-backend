@@ -404,7 +404,8 @@ submit, a button in a form, one that names a send in either language: send, subm
 delete, publish, accept, confirm, subscribe, pay, order and their kin, إرسال، تقديم، شراء، حذف، نشر،
 موافق، اشترك، ادفع and theirs) or an Enter in a field is
 not done; a line break typed and a click by place are refused. The fill then holds the page as it
-is, the gate still on it, up to `HOLD_S` (ten minutes, the question's life), beating `beat_at`:
+is, the gate still on it, up to `HOLD_S` (five minutes since 4 Nov 2026, a time of its own, never counted in `RUN_S`; then let go in one write, `_expired`, so a
+yes that came first stands, its page closed, and he is told politely where he was asked, `fill_expired`, nothing sent), beating `beat_at`:
 `held`, a `needs_confirmation` naming what he filled (read back from the page, never a password or
 hidden field). His yes (`submit`, `APPROVED`) makes the real click (`Input.dispatchMouseEvent` on the element's centre in the page's own
 coordinates though it lie in a frame of the site, `DOM.getContentQuads`; refused, «moved», unless

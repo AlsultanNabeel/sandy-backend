@@ -59,8 +59,9 @@ PROGRESS_S = 20
 # step (a model call and the page). Past either it stops, its session closes, and he is told.
 RUN_S = 3 * 60
 STEP_S = 20
-# A held fill waits for his yes as long as its question does (`pending.TTL_MINUTES`).
-HOLD_S = 10 * 60
+# A held fill waits five minutes for his yes, a time of its own, never the fill's (`RUN_S`);
+# then it is let go politely, its page closed, nothing sent (`_expired`).
+HOLD_S = 5 * 60
 # A page handed to him stays open, the gate on it, this long at most.
 HANDED_S = 5 * 60
 BEAT_S = 5
@@ -586,7 +587,8 @@ def _drive_and_tell(job_id: str, user_id: str, row: Dict[str, Any]) -> None:
             outcome = {"status": FAILED, "reason": "broke"}
         _save(job_id, **_ending(job_id, outcome))
         final = get(job_id)
-        if final and final.get("detached"):
+        if final and (final.get("detached") or final.get("reason") == "expired"):
+            # A question let go is told where it was asked, whoever waited for it.
             _tell(final)
 
 
@@ -785,7 +787,7 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
     if now.get("detached"):
         # No one waits for it: its question goes to his chat now.
         _tell(now)
-    answer = await _first(_answered(row["_id"], user_id), stopped, HOLD_S + 30)
+    answer = await _first(_answered(row["_id"], user_id), stopped, HOLD_S + 5)
     if answer != APPROVED:
         return {"status": answer or STOPPED, **({} if answer else {"reason": "expired"})}
     return await _act(row, gate, client, session, asked, user_id)
@@ -803,7 +805,22 @@ async def _answered(job_id: str, user_id: str) -> Optional[str]:
         if stop_all.stopped(user_id):
             return STOPPED
         await asyncio.sleep(0.5)
-    return None
+    expired = _expired(job_id)
+    return None if expired else (get(job_id) or {}).get("status")
+
+
+def _expired(job_id: str) -> Optional[Dict[str, Any]]:
+    """His question let go once its time is up, in one write: a yes that came first stands
+    (None then)."""
+    coll = _coll()
+    if coll is None:
+        return None
+    try:
+        return coll.find_one_and_update({"_id": str(job_id), "status": HELD},
+                                        {"$set": {"status": STOPPED, "reason": "expired", "updated_at": _now()}})
+    except PyMongoError:
+        logger.warning("[browser] could not let go of %s", job_id, exc_info=True)
+        return None
 
 
 async def _act(row, gate, client, session: str, asked: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -1316,6 +1333,8 @@ def told(row: Dict[str, Any]) -> str:
     status, site = row.get("status"), row.get("site", "")
     if status == DONE:
         return lang.say("fill_done", site=site, result=row.get("result") or "")
+    if status == STOPPED and row.get("reason") == "expired":
+        return lang.say("fill_expired", site=site, minutes=lang.number(HOLD_S // 60))
     if status == STOPPED:
         return lang.say("fill_stopped", site=site)
     if status == HANDED and row.get("summary"):

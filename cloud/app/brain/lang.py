@@ -622,6 +622,10 @@ PHRASES = {
     "fill_state_handed": {"ar": "صفحة التعبئة على {site} معك إنت هلّق.",
                           "en": "The form on {site} is in your hands now."},
     "fill_state_none": {"ar": "ما في تعبئة مفتوحة إلك هلّق.", "en": "There is no fill open for you right now."},
+    "fill_expired": {"ar": "ما وصلني جوابك خلال {minutes} دقايق، فلغيت التعبئة على {site} وسكّرت الصفحة. ما انبعت "
+                           "شي. إذا لسا بدك، قلّي وبعبّيها من جديد.",
+                     "en": "I didn't hear back from you within {minutes} minutes, so I cancelled the form on {site} and "
+                           "closed the page. Nothing was sent. If you still want it, tell me and I'll fill it again."},
     "fill_slow": {"ar": "ما خلصت التعبئة على {site}: أخدت أكتر من {minutes} دقايق، فوقّفتها وسكّرت الصفحة. ما انبعت شي.",
                   "en": "I didn't finish the form on {site}: it took longer than {minutes} minutes, so I stopped "
                         "and closed the page. Nothing was sent."},

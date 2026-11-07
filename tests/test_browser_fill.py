@@ -1491,3 +1491,34 @@ def test_a_fill_in_the_background_writes_where_it_is_in_his_chat_and_never_pushe
                           .get("messages") or []), seconds=5)
     said = [m["text"] for m in brain_db["conversations"].find_one({"_id": C9})["messages"]]
     assert any(words in t for t in said) and not any(words in p for p in pushed)
+
+
+# ── His yes has five minutes of its own, not counted in the fill's time; then it is let go politely ──
+
+def test_his_yes_has_five_minutes():
+    assert browser_job.HOLD_S == 5 * 60
+
+
+@pytest.mark.parametrize("language, words", [("ar", "ما وصلني جوابك"), ("en", "I didn't hear back from you")])
+def test_a_question_left_unanswered_is_let_go_politely_and_its_page_closed(world, monkeypatch, brain_db, language, words):  # noqa: F811
+    _level("submit")
+    monkeypatch.setattr(browser_job, "HOLD_S", 0.5)
+    asked = _fill(language, thread=C9)
+    assert asked.get("needs_confirmation")
+    job = asked["ids"][0]
+    _wait_for(lambda: (_job(job) or {}).get("status") == browser_job.STOPPED and "release" in world.order)
+    row = _job(job)
+    assert row["reason"] == "expired" and world.released == ["st1"]
+    _wait_for(lambda: (brain_db["conversations"].find_one({"_id": C9}) or {}).get("messages"))
+    said = brain_db["conversations"].find_one({"_id": C9})["messages"][-1]["text"]
+    assert words in said and ("ما انبعت شي" in said or "Nothing was sent" in said)
+
+
+def test_a_yes_that_comes_as_the_time_runs_out_is_never_lost_to_it(world, monkeypatch):
+    # The let go is taken in one write: a yes that came first stands.
+    _level("submit")
+    asked = _fill("en")
+    job = asked["ids"][0]
+    with active_user_profile_context(A):
+        assert browser_job.submit(job)["status"] in (browser_job.APPROVED, browser_job.DONE)
+        assert browser_job._expired(job) is None
