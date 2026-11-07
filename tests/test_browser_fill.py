@@ -1556,3 +1556,21 @@ def test_a_connection_that_never_closes_never_hangs_the_fill(monkeypatch):
     began = time.monotonic()
     out = asyncio.run(browser_job._agent(row, browser_gate.Gate("forms.example.com"), FakeCDP({}), "s1", "userA", {}))
     assert out["status"] == browser_job.DONE and time.monotonic() - began < 3
+
+
+def test_a_fill_he_took_over_leaves_its_trace_and_tells_him_when_its_page_closes(world, monkeypatch, brain_db):  # noqa: F811
+    _level("submit")
+    world.mode = "slow"
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
+    out = _fill("ar", thread=C9)
+    with active_user_profile_context(A):
+        assert browser_job.take_over(out["job"])
+    _wait_for(lambda: _job(out["job"])["status"] == browser_job.HANDED)
+    with active_user_profile_context(A):
+        browser_job.stop_for("userA")                          # its page closes while it is his
+    _wait_for(lambda: any("كانت معك" in m["text"] for m in
+                          (brain_db["conversations"].find_one({"_id": C9}) or {}).get("messages") or []))
+    said = [m["text"] for m in brain_db["conversations"].find_one({"_id": C9})["messages"]]
+    assert any("كانت معك" in t for t in said)
+    _wait_for(lambda: brain_db["sandy_traces"].find_one({"routed_by": "browser_fill"}) is not None)
+    assert brain_db["sandy_traces"].find_one({"routed_by": "browser_fill"}) is not None

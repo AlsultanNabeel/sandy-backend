@@ -589,8 +589,9 @@ def _drive_and_tell(job_id: str, user_id: str, row: Dict[str, Any]) -> None:
             outcome = {"status": FAILED, "reason": "broke"}
         _save(job_id, **_ending(job_id, outcome))
         final = get(job_id)
-        if final and (final.get("detached") or final.get("reason") == "expired"):
-            # A question let go is told where it was asked, whoever waited for it.
+        if final and (final.get("detached") or final.get("reason") == "expired" or final.get("his")):
+            # A question let go, or a page he took over that closed, is told where he asked,
+            # whoever waited for it.
             _tell(final)
 
 
@@ -1335,6 +1336,9 @@ def told(row: Dict[str, Any]) -> str:
     status, site = row.get("status"), row.get("site", "")
     if status == DONE:
         return lang.say("fill_done", site=site, result=row.get("result") or "")
+    if status == STOPPED and row.get("his"):
+        # The page he took over closed (his stop, the gate's, or its time).
+        return lang.say("fill_his_closed", site=site)
     if status == STOPPED and row.get("reason") == "expired":
         return lang.say("fill_expired", site=site, minutes=lang.number(HOLD_S // 60))
     if status == STOPPED:

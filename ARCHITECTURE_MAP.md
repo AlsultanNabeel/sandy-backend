@@ -418,7 +418,7 @@ site's, or one he took over, `take_over`, `his`) stays open with the gate on it 
 (`_handing`): five minutes at most (`HANDED_S`), his stop or the gate's; once he took it over what
 he sends to its own site goes (`gate.his`), and nothing of his to another; then Steel closes it
 and the gate comes off. A handed page counts as an open fill (`_limits`) and is gone from his list
-once closed (`open_jobs`, `live_url`). *The gate* (`brain/browser_gate.py`) is the
+once closed (`open_jobs`, `live_url`); once it closes he is told in the chat he asked from, whoever waited (`fill_his_closed`, since 4 Nov 2026). *The gate* (`brain/browser_gate.py`) is the
 safety net under it, our own connection: every target, tabs now and every tab, frame and worker
 later (`Target.setAutoAttach` with `waitForDebuggerOnStart` on the browser and on each target),
 has `Fetch.enable`, no websocket or peer connection in its scripts and, in a page, no hint to open a name or a
