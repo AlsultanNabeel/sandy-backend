@@ -674,26 +674,38 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             _note("browser_orders", {"site": row["site"]}, ok=False)
             outcome = {"status": FAILED, "reason": "orders"}
             return outcome
-        watch = asyncio.ensure_future(_watching(row["_id"], user_id, stopped))
-        told = asyncio.ensure_future(_progressing(row["_id"]))
-        try:
-            outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped, RUN_S)
-        finally:
-            watch.cancel()
-            told.cancel()
-        if gate.breach is None and asked:
-            # A request held stopped the agent the same way: from here only a breach stops it.
+        left = float(RUN_S)
+        while True:
+            watch = asyncio.ensure_future(_watching(row["_id"], user_id, stopped))
+            told = asyncio.ensure_future(_progressing(row["_id"]))
+            began = time.monotonic()
+            try:
+                # Its own work: `RUN_S` in all, however often he hands the page back.
+                outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped, left)
+            finally:
+                left -= time.monotonic() - began
+                watch.cancel()
+                told.cancel()
+            if gate.breach is None and asked:
+                # A request held stopped the agent the same way: from here only a breach stops it.
+                stopped.clear()
+                outcome = await _hold(row, gate, client, tab, asked, stopped, user_id)
+            for method, url in gate.blocked:
+                _note("browser_blocked", {"method": method, "site": browser_gate.root_of(url)}, ok=False)
+            if gate.breach is not None:
+                _note("browser_gate_stop", {"site": row["site"], "why": gate.breach}, ok=False)
+                outcome = {"status": FAILED, "reason": gate.breach}
+            outcome = _ending(row["_id"], outcome or {"status": STOPPED})
+            if outcome.get("status") == HANDED:
+                outcome = await _handing(row, gate, stopped, user_id)
+            if outcome.get("status") != RUNNING:
+                return outcome
+            # He gave the page back (`give_back`): she goes on from where it is.
+            if left <= 0:
+                raise asyncio.TimeoutError
+            _note("browser_given_back", {"site": row["site"]})
+            asked.clear()
             stopped.clear()
-            outcome = await _hold(row, gate, client, tab, asked, stopped, user_id)
-        for method, url in gate.blocked:
-            _note("browser_blocked", {"method": method, "site": browser_gate.root_of(url)}, ok=False)
-        if gate.breach is not None:
-            _note("browser_gate_stop", {"site": row["site"], "why": gate.breach}, ok=False)
-            outcome = {"status": FAILED, "reason": gate.breach}
-        outcome = _ending(row["_id"], outcome or {"status": STOPPED})
-        if outcome.get("status") == HANDED:
-            outcome = await _handing(row, gate, stopped, user_id)
-        return outcome
     finally:
         # Whatever stopped it (a leak, the emergency stop, an error, its end, a handed page's
         # time): Steel closes the session first, and only then does the gate come off it.
@@ -754,6 +766,9 @@ async def _handing(row: Dict[str, Any], gate, stopped: asyncio.Event, user_id: s
     deadline = time.monotonic() + HANDED_S
     while time.monotonic() < deadline and not stopped.is_set():
         now = get(row["_id"]) or {}
+        if now.get("status") == RUNNING and not now.get("closed_at") and not stop_all.stopped(user_id):
+            gate.his = False                  # given back: hers again, under the gate as before
+            return {"status": RUNNING}
         if now.get("status") != HANDED or now.get("closed_at") or stop_all.stopped(user_id):
             return {"status": STOPPED if now.get("status") in (HANDED, STOPPED) else now.get("status") or STOPPED}
         gate.his = bool(now.get("his"))
@@ -1250,6 +1265,21 @@ def take_over(job_id: str) -> bool:
     # His from now: what he sends to the site goes (`_handing`).
     _save(job_id, status=HANDED, his=True)
     return True
+
+
+def give_back(job_id: str) -> bool:
+    """«رجّع التحكم لساندي»: a page he took over is hers again, and she goes on from where it is. Taken
+    in one write, once: only a page that is his and still open."""
+    coll = _coll()
+    if coll is None:
+        return False
+    try:
+        return coll.find_one_and_update(
+            {"_id": str(job_id), "status": HANDED, "his": True, "closed_at": None},
+            {"$set": {"status": RUNNING, "his": False, "updated_at": _now(), "beat_at": _now()}}) is not None
+    except PyMongoError:
+        logger.warning("[browser] could not give %s back", job_id, exc_info=True)
+        return False
 
 
 def live_url(job_id: str, control: bool) -> Optional[str]:

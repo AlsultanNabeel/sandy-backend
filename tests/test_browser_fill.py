@@ -1574,3 +1574,49 @@ def test_a_fill_he_took_over_leaves_its_trace_and_tells_him_when_its_page_closes
     assert any("كانت معك" in t for t in said)
     _wait_for(lambda: brain_db["sandy_traces"].find_one({"routed_by": "browser_fill"}) is not None)
     assert brain_db["sandy_traces"].find_one({"routed_by": "browser_fill"}) is not None
+
+
+# ── He gives the page back: Sandy goes on from where it is ──
+
+def test_a_page_he_took_over_is_given_back_and_sandy_goes_on_from_it(world, monkeypatch):
+    _level("submit")
+    world.mode = "slow"
+    runs, ended = [], []
+    agent = browser_job.AGENT
+
+    async def counted(*a, **kw):
+        runs.append(1)
+        out = await agent(*a, **kw)
+        ended.append(out["status"])
+        return out
+    monkeypatch.setattr(browser_job, "AGENT", counted)
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
+    out = _fill("en", thread=C9)
+    with active_user_profile_context(A):
+        assert browser_job.take_over(out["job"])
+    _wait_for(lambda: ended == [browser_job.HANDED])      # Sandy let go of it
+    world.mode = "fast"
+    with active_user_profile_context(A):
+        assert browser_job.give_back(out["job"])
+        assert not browser_job.give_back(out["job"])          # once: it is hers again
+    _wait_for(lambda: _job(out["job"])["status"] == browser_job.HELD)
+    job = _job(out["job"])
+    assert len(runs) == 2 and job["his"] is False and world.released == []
+
+
+def test_only_a_page_he_holds_can_be_given_back(world):
+    _level("submit")
+    asked = _fill("en")
+    with active_user_profile_context(A):
+        assert not browser_job.give_back(asked["ids"][0])     # held for his yes, never taken over
+
+
+def test_the_app_gives_a_page_back_by_its_route(world, monkeypatch, brain_db):  # noqa: F811
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
+    from app.api.auth_handlers import make_token
+    from app.api.server import create_app
+    client = create_app(mongo_db=brain_db).test_client()
+    h = {"Authorization": f"Bearer {make_token('user', user_id='userA')}"}
+    monkeypatch.setattr(browser_job, "give_back", lambda job: job == "j-his")
+    assert client.post("/api/browser/jobs/j-his/giveback", headers=h).status_code == 200
+    assert client.post("/api/browser/jobs/j-other/giveback", headers=h).status_code == 404

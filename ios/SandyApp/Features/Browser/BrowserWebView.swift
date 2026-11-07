@@ -146,16 +146,15 @@ struct LiveBrowserView: View {
             if let live, let url = URL(string: live.url) {
                 BrowserWebView(url: url, store: store, playsAtOnce: true)
                     .allowsHitTesting(live.control)
-                if !live.control {
-                    Button {
-                        Task { await takeOver() }
-                    } label: {
-                        Label(lang.s("browser.takeOver"), systemImage: "hand.raised.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .padding(Theme.Spacing.md)
+                Button {
+                    Task { await (live.control ? giveBack() : takeOver()) }
+                } label: {
+                    Label(lang.s(live.control ? "browser.giveBack" : "browser.takeOver"),
+                          systemImage: live.control ? "arrow.uturn.backward.circle.fill" : "hand.raised.fill")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .padding(Theme.Spacing.md)
             } else if gone {
                 VStack(spacing: Theme.Spacing.md) {
                     Image(systemName: "checkmark.circle")
@@ -190,5 +189,13 @@ struct LiveBrowserView: View {
 
     private func takeOver() async {
         do { live = try await state.api.takeOverBrowserJob(job: jobId) } catch { gone = true }
+    }
+
+    /// The page back to Sandy: she goes on, and the view is to watch again.
+    private func giveBack() async {
+        do {
+            try await state.api.giveBackBrowserJob(job: jobId)
+            live = try await state.api.browserLive(job: jobId)
+        } catch { gone = true }
     }
 }

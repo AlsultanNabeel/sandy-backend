@@ -97,6 +97,7 @@ KEPT = {
     "/api/browser/jobs": {"GET"},
     "/api/browser/jobs/<job_id>/live": {"GET"},
     "/api/browser/jobs/<job_id>/takeover": {"POST"},
+    "/api/browser/jobs/<job_id>/giveback": {"POST"},
     # The robot and the firmware tooling.
     "/voice": {"GET"},
     "/api/firmware/manifest": {"GET"},

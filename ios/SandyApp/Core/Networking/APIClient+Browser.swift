@@ -104,6 +104,11 @@ extension APIClient {
         try await fetch("/api/browser/jobs/\(URLEscape.segment(job))/takeover", method: "POST")
     }
 
+    /// «رجّع التحكم لساندي»: the page he took over is hers again, and she goes on from where it is.
+    func giveBackBrowserJob(job: String) async throws {
+        try await send("/api/browser/jobs/\(URLEscape.segment(job))/giveback", method: "POST")
+    }
+
     func stopState() async throws -> Bool {
         let r: StopState = try await fetch("/api/stop")
         return r.stopped

@@ -11,6 +11,7 @@
   GET    /api/browser/jobs                        {jobs: [{id, site, status, created_at}]}: his open fills
   GET    /api/browser/jobs/<id>/live              {url}: «متصفح ساندي», to watch only
   POST   /api/browser/jobs/<id>/takeover          {url}: «خليني أكمّل أنا»: the agent stops, the view drives
+  POST   /api/browser/jobs/<id>/giveback          {ok}: «رجّع التحكم لساندي»: the page he took over is hers again
 
 Steel's view has no protection of its own: it reaches only the fill's owner (another account's
 fill is 404) and is never logged or traced.
@@ -129,3 +130,10 @@ def register_browser_api(app) -> None:
         if not browser_job.take_over(job_id):
             return jsonify({"error": "not_found", "message": lang.say("fill_gone")}), 404
         return jsonify({"url": browser_job.live_url(job_id, control=True), "control": True})
+
+    @app.route("/api/browser/jobs/<job_id>/giveback", methods=["POST"])
+    @_switched
+    def browser_job_give_back(job_id, claims):
+        if not browser_job.give_back(job_id):
+            return jsonify({"error": "not_found", "message": lang.say("fill_gone")}), 404
+        return jsonify({"ok": True})
