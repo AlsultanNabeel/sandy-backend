@@ -337,7 +337,7 @@ def _run_turn(message, user_id, chat_id, *, pending_state, source, image_state,
 
     if not (outcome.get("error") or outcome.get("stopped")):
         # Nothing is said to be done that no tool of the turn did (`honesty`).
-        question = confirm.ask(outcome["pending"]) if outcome.get("pending") else ""
+        question = confirm.ask(outcome["pending"]) if outcome.get("pending") and not outcome.get("quiet") else ""
         text = _stood(honesty.correct(outcome["text"], ctx.worked, ctx.results, question), ctx, question)
         # In the message's language (`language_guard`); the held question is ours, already in it.
         body = _without(question, text)
@@ -454,6 +454,9 @@ def _settle(held, message, ctx, image_state, user_id, thread_id, history, comple
         waiting = confirm.then(resolved["pending"], confirm.following(held))
         outcome = _asked_first(waiting, "", {**resolved, "text": _done(resolved),
                                              "pending": None})
+    elif held and confirm.asked_once(held) and not outcome.get("pending"):
+        # A fill's question was said once and still waits: not asked again, not let go.
+        outcome = {**outcome, "pending": held, "quiet": True}
     elif held and not outcome.get("error") and not outcome.get("stopped"):
         # Neither yes nor no: the message was answered, and the question is asked once
         # more; a second unclear answer lets it go, and what waited behind it is asked.

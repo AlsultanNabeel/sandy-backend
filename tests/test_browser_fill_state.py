@@ -37,12 +37,10 @@ def _status(language):
 
 
 @pytest.mark.parametrize("language, words", [("ar", "لسا شغّالة"), ("en", "still working")])
-def test_a_running_fill_is_read_with_its_steps_and_the_field_it_is_on(on, language, words):
+def test_a_running_fill_is_read_with_the_field_it_is_on(on, language, words):
     _job(on, browser_job.RUNNING, progress={"steps": 7, "field": "Customer name"})
     out = _status(language)
-    with lang.using(language):
-        seven = lang.number(7)
-    assert out["ok"] and words in out["reply"] and seven in out["reply"] and "Customer name" in out["reply"]
+    assert out["ok"] and words in out["reply"] and "Customer name" in out["reply"]
 
 
 @pytest.mark.parametrize("language, status, words", [

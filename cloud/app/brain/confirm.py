@@ -82,6 +82,13 @@ def live(pending: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     return pending if P.live(pending) else None
 
 
+def asked_once(held: Dict[str, Any]) -> bool:
+    """A fill's question: said once, and it waits for his yes until its own time is up
+    (`browser_job.HOLD_S`), whatever he says meanwhile that is no answer."""
+    steps = held.get("steps") or []
+    return bool(steps) and all(s.get("tool") == "page_fill" for s in steps)
+
+
 def asked_again(held: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """An answer that is neither yes nor no: the question is asked once more, on chat and
     voice alike. A second unclear answer lets it go (None), so an old yes cannot fire later."""

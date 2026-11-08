@@ -589,6 +589,7 @@ def _drive_and_tell(job_id: str, user_id: str, row: Dict[str, Any]) -> None:
             outcome = {"status": FAILED, "reason": "broke"}
         _save(job_id, **_ending(job_id, outcome))
         final = get(job_id)
+        _forget_question(final)
         if final and (final.get("detached") or final.get("reason") == "expired" or final.get("his")):
             # A question let go, or a page he took over that closed, is told where he asked,
             # whoever waited for it.
@@ -730,6 +731,7 @@ async def _progressing(job_id: str) -> None:
     he asked from, where it is (`state_line`); written only, never spoken nor pushed."""
     from app.api.conversations_api import say_in
     from app.brain import lang
+    await asyncio.sleep(WAIT_S)               # the reply that said it goes on is the first word
     while True:
         await asyncio.sleep(PROGRESS_S)
         now = get(job_id) or {}
@@ -743,15 +745,10 @@ async def _progressing(job_id: str) -> None:
 
 
 def _where(row: Dict[str, Any]) -> str:
-    """How far a running fill is, in words: its steps and the field it is on, when known."""
+    """Where a running fill is, in words: the field it is on, when known."""
     from app.brain import lang
-    progress = row.get("progress") or {}
-    steps, field = int(progress.get("steps") or 0), str(progress.get("field") or "")
-    if not steps:
-        return ""
-    if field:
-        return lang.say("fill_where_field", steps=lang.number(steps), field=field)
-    return lang.say("fill_where", steps=lang.number(steps))
+    field = str((row.get("progress") or {}).get("field") or "")
+    return lang.say("fill_where_field", field=field) if field else ""
 
 
 def state_line(row: Dict[str, Any]) -> str:
@@ -1335,6 +1332,18 @@ def stop_for(user_id: str, site: str = "") -> None:
         db[COLLECTION].update_one({"_id": r["_id"], "user_id": str(user_id)},
                                   {"$set": {"status": STOPPED, "updated_at": _now()}})
         _release(r)
+
+
+def _forget_question(row: Optional[Dict[str, Any]]) -> None:
+    """A fill that ended takes its question with it: an old yes answers nothing, and the
+    question is not asked again of a fill that is gone."""
+    from app.brain import confirm, pending
+    thread, uid = str((row or {}).get("thread_id") or ""), str((row or {}).get("user_id") or "")
+    if not row or not thread or not uid:
+        return
+    held = pending.load(thread, uid, get_db())
+    if held and any(str(row["_id"]) in (s.get("ids") or []) for s in held.get("steps") or []):
+        pending.save(thread, uid, get_db(), confirm.following(held))
 
 
 def _tell(row: Dict[str, Any]) -> None:

@@ -114,3 +114,65 @@ def test_a_yes_while_the_page_is_his_answers_the_question_still_open(world):  # 
         browser_job.take_over(job)
     done = _fill("en", confirmed_job=job)
     assert done["ok"] and "✅" in done["reply"] and len(_releases(world)) == 1
+
+
+# ── The lines she writes while it works, and the one question ──
+
+def _chat(db, thread):
+    return [m["text"] for m in (db["conversations"].find_one({"_id": thread}) or {}).get("messages") or []]
+
+
+def test_progress_stops_the_moment_the_question_arrives_and_the_question_comes_once(world, monkeypatch, brain_db):  # noqa: F811
+    import time as _t
+
+    from test_browser_fill import C9, _wait_for
+    _level("submit")
+    world.mode = "slow"
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
+    monkeypatch.setattr(browser_job, "PROGRESS_S", 0.4)
+    _fill("en", thread=C9)
+    _wait_for(lambda: any("Are you sure" in t for t in _chat(brain_db, C9)))
+    at = len(_chat(brain_db, C9))
+    _t.sleep(1.5)
+    said = _chat(brain_db, C9)
+    assert len(said) == at and sum("Are you sure" in t for t in said) == 1
+
+
+@pytest.mark.parametrize("language, seen, unseen", [
+    ("ar", "هلّق عند «Telephone»", "خطوات"), ("en", "now at «Telephone»", "steps")])
+def test_where_a_fill_is_said_without_a_count(language, seen, unseen):
+    with lang.using(language):
+        said = browser_job.state_line({"status": browser_job.RUNNING, "site": "x.example",
+                                       "progress": {"steps": 1, "field": "Telephone"}})
+    assert seen in said and unseen not in said
+
+
+def test_a_fill_that_ended_takes_its_question_with_it(world, monkeypatch, brain_db):  # noqa: F811
+    from test_browser_fill import C9, _wait_for
+
+    from app.brain import pending
+    _level("submit")
+    world.mode = "slow"
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
+    monkeypatch.setattr(browser_job, "HOLD_S", 0.5)
+    _fill("en", thread=C9)
+    _wait_for(lambda: any("didn't hear back" in t for t in _chat(brain_db, C9)))
+    assert pending.load(C9, "userA", brain_db) is None
+
+
+@pytest.mark.parametrize("message", ["مطولة", "taking long?"])
+def test_an_unrelated_message_never_asks_the_fills_question_again_nor_lets_it_go(brain_db, monkeypatch, message):  # noqa: F811
+    from brain_fakes import A, ScriptedModel, text_reply
+
+    from app.brain import confirm, loop
+    from app.utils.user_profiles import active_user_profile_context
+    with lang.using("en"):
+        held = confirm.with_step(None, "page_fill", {"url": "https://x.example"}, "send the form", ids=["j1"])
+        question = confirm.ask(held)
+    state = held
+    for _ in range(2):
+        with active_user_profile_context(A):
+            out = loop.run_turn(message, user_id="userA", chat_id="userA", source="web", pending_state=state,
+                                complete=ScriptedModel(text_reply("ok")))
+        state = out["pending_state"]
+        assert question not in out["final_response"] and state and state["steps"][0]["ids"] == ["j1"]

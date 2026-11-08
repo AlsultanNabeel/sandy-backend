@@ -464,7 +464,7 @@ yes is: when «اه» and «لأ» come at once only one of them is) closes the 
 call to the browser has `browser_cdp.CALL_S` (20 s) at most, and every close of a connection `STOP_S` (5 s, `browser_cdp.closing`, since 4 Nov 2026: the
 agent's own connection once never closed after he took over, and the fill's thread waited on it, leaving no trace and telling him nothing). A connection whose opening handshake times out is tried again, `CONNECT_TRIES` (3) in all, and each attempt that failed is closed, never left half open. The tool waits `WAIT_S` (20 s since 4 Nov 2026, was 80); past
 it the fill is `detached`, and while it works it writes a short line in that chat about every `PROGRESS_S` (20 s) of where it is
-(`_progressing`, its steps and the field it is on; written only, never spoken nor pushed), and once it is held or stops it tells him in the chat he asked from
+(`_progressing`, the field it is on; written only, never spoken nor pushed, and over once the question comes), and once it is held or stops it tells him in the chat he asked from
 (`conversations_api.say_in`: its question, kept as the thread's `pending` so his next message
 answers it, or its result) and on his phone, each state once whoever tells it (`told`); never as a task's result. Each action on the page is
 a tool on the fill's own background trace row (`trace_store.background(…, keep=True)`). *Live view*:
@@ -515,7 +515,7 @@ cancelled or changed at once, on chat and voice alike; only a bulk change, more 
 tool itself whatever the model decided (`_remove`): emptying a list (`everything`, or every open
 item of it named one by one) or more than five rows in one turn, over one call or several
 (`ctx.artifacts["deleted_rows"]`), goes only on the replay of his yes (`ctx.confirmed`);
-«فضّي اللي تمّ» (`hide_done`) only hides and never asks;
+a fill's question is said once and waits till its own time, whatever else he says (`confirm.asked_once`), and goes with the fill when it ends (`browser_job._forget_question`); «فضّي اللي تمّ» (`hide_done`) only hides and never asks;
 two matching rows return `needs_choice`. The
 loop stores a `brain_confirm` pending (10 minutes, a nonce, `consumed_at`; its
 `steps` are every held `{tool, args, summary, ids}` of the turn, `ids` the rows the question
