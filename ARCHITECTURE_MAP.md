@@ -335,7 +335,7 @@ sign-in page is `no_session`, never a login link, and the app keeps no sign-in a
 the check and the connect is the risk left). Why a page was not read is told apart (`PageError.code`, `lang` «page_<code>», since 4 Nov 2026): `missing` (404, 410, from the plain request or Steel's `status`: never another step, its error page never read as the page — ar.wikipedia's «/wiki/ESP32» was read as its «no such article» page and she said «ما لقيت»; the reply offers a search by name on the site, none is made), `refused` (401, 403, 429, 451: Steel is still tried, and refusing too it stays a refusal), no permission (`blocked`, `private`, `fill_level_read`: «ما عندي إذن») and `unreachable`, a technical failure. A page is `{url, title, text, links, items, via, warning}`:
 its words in paragraphs, its content's links (navigation, header, footer and aside dropped) and its
 `items` (`_items`, since 4 Nov 2026): its main repeated content, of the blocks of one tag and class side by side
-(`MIN_BLOCKS`, three) the run whose own links say the most, one link a block, the one whose words mean most, never
+(`MIN_BLOCKS`, three) the run whose own links say the most, one link a block, the one in a heading, else (one page linked twice is its first link, the title, since 8 Nov 2026: Mostaql links a longer description too) the one whose words mean most, never
 one most blocks say the same (hide, past, «Add to cart»), an action or menu word (`_ACTIONS`, both languages), a
 site's name (`_HOSTLIKE`), a search (`_SEARCH_FIELDS`: hn.algolia.com's «?query=») or the page itself; no code for
 any one site (`tests/test_browser_items.py`: Hacker News saved, a store, an Arabic and an English list).

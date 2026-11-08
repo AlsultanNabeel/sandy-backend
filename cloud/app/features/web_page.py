@@ -142,6 +142,7 @@ _LETTER = re.compile(r"[^\W\d_]")
 # A link that searches for what is on the page, elsewhere or on the site: never an item.
 _SEARCH_FIELDS = {"q", "query", "search", "s", "keyword", "keywords", "k", "term"}
 # Words that are a site's name («example.com»): where an item is from, not the item.
+_HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 _HOSTLIKE = re.compile(r"^[\w-]+(\.[\w-]+)+(/\S*)?$")
 
 
@@ -384,24 +385,33 @@ def _searches(url: str) -> bool:
 
 
 def _picked(blocks: List[Any], base_url: str) -> List[Dict[str, str]]:
-    """Each block's own link: the one whose words mean most, never one every other block says
-    the same (an action, a menu), a search, or the page itself."""
+    """Each block's own link: the one in a heading, else the one whose words mean most, never
+    one every other block says the same (an action, a menu), a search, or the page itself."""
     found = []
     for block in blocks:
         anchors = [block] if block.name == "a" and block.get("href") else block.find_all("a", href=True)
-        found.append([(_words_of(a), urljoin(base_url, str(a["href"]).strip())) for a in anchors])
+        # A parsed page, not the database (بلا .limit()): whether this link sits in a heading.
+        found.append([(_words_of(a), urljoin(base_url, str(a["href"]).strip()),
+                       a.find_parent(_HEADINGS) is not None or a.find(_HEADINGS) is not None) for a in anchors])
     said: Dict[str, int] = {}
     for links in found:
-        for words in {w.lower() for w, _ in links}:
+        for words in {w.lower() for w, _, _ in links}:
             said[words] = said.get(words, 0) + 1
     out, seen = [], set()
     for links in found:
-        ok = [(w, u) for w, u in links
-              if u.startswith(("http://", "https://")) and u.split("#")[0] != base_url.split("#")[0]
-              and said[w.lower()] * 2 <= len(blocks) and _meaningful(w) and not _searches(u)]
+        ok, urls = [], set()
+        for w, u, titled in links:
+            # One page linked twice in a block: the first is its title, the rest its description.
+            if u in urls and not titled:
+                continue
+            if w and u.startswith(("http://", "https://")):
+                urls.add(u)
+            if (u.startswith(("http://", "https://")) and u.split("#")[0] != base_url.split("#")[0]
+                    and said[w.lower()] * 2 <= len(blocks) and _meaningful(w) and not _searches(u)):
+                ok.append((w, u, titled))
         if not ok:
             continue
-        words, url = max(ok, key=lambda p: (not _HOSTLIKE.match(p[0]), len(p[0].split()), len(p[0])))
+        words, url, _ = max(ok, key=lambda p: (p[2], not _HOSTLIKE.match(p[0]), len(p[0].split()), len(p[0])))
         if url not in seen:
             seen.add(url)
             out.append({"title": words[:200], "url": url})

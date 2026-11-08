@@ -80,3 +80,25 @@ def test_how_things_are_now_names_the_real_items(language):
         line = task_diff.describe(web_page.for_compare({**page, "warning": False}))
     assert "«Wireless Earbuds Pro 2»" in line and "Add to cart" not in line and "Quick view" not in line
     assert lang.number(6) in line if language == "ar" else "6" in line
+
+
+def test_a_listing_with_a_title_and_a_longer_description_is_its_titles():
+    # Mostaql, saved 8 Nov 2026: each project links its title and, longer, its description.
+    raw = (PAGES / "mostaql_projects.html").read_bytes()
+    titles = [a.get_text(" ", strip=True) for a in BeautifulSoup(raw, "html.parser").select("tr.project-row h2 a")]
+    items = _page("mostaql_projects.html", "https://mostaql.com/projects")["items"]
+    assert len(items) == 25 and [i["title"] for i in items] == titles
+
+
+def test_with_no_heading_the_first_of_two_links_to_one_page_is_the_title():
+    rows = "".join(f"<div class='r'><a href='/p/{n}'>Short title {n}</a><p><a href='/p/{n}'>A much longer description of "
+                   f"project number {n}, with plenty of words in it that run on and on</a></p></div>" for n in range(5))
+    items = web_page.extract(f"<html><body>{rows}</body></html>", "https://x.example/")["items"]
+    assert [i["title"] for i in items] == [f"Short title {n}" for n in range(5)]
+
+
+def test_a_title_wrapped_around_its_heading_is_the_title():
+    rows = "".join(f"<div class='r'><a href='/p/{n}'><h3>Title {n}</h3></a><a href='/q/{n}'>A far longer link that goes "
+                   f"somewhere else entirely with many words {n}</a></div>" for n in range(5))
+    items = web_page.extract(f"<html><body>{rows}</body></html>", "https://x.example/")["items"]
+    assert [i["title"] for i in items] == [f"Title {n}" for n in range(5)]
