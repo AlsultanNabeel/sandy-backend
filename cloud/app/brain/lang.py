@@ -569,8 +569,8 @@ PHRASES = {
                          "put, or tell me to leave it."},
     "fill_summary": {"ar": "أبعت النموذج على {site} بهالمعلومات: {fields}",
                      "en": "send the form on {site} with these details: {fields}"},
-    "fill_done": {"ar": "انبعت النموذج على {site} ✅ والصفحة بتقول: {result}",
-                  "en": "The form on {site} was sent ✅ and the page says: {result}"},
+    "fill_done": {"ar": "انبعت النموذج على {site} ✅ والموقع استلمه.",
+                  "en": "The form on {site} was sent ✅ and the site accepted it."},
     "fill_only": {"ar": "عبّيت النموذج على {site} ({fields}) وما بعتته، لأنه مسموحلي أعبّي بس بهالموقع. "
                         "بتقدر تبعته إنت من «متصفح ساندي».",
                   "en": "I filled the form on {site} ({fields}) and didn't send it: on this site I may only "
@@ -596,6 +596,10 @@ PHRASES = {
                         "en": "The form on {site} wasn't sent: I stopped before finishing it. Try again."},
     "fill_site_refused": {"ar": "حاولت أبعت النموذج على {site} بس الموقع رفضه (الرمز {code}).",
                           "en": "I tried to send the form on {site} but the site refused it (code {code})."},
+    "fill_site_said": {"ar": "حاولت أبعت النموذج على {site} بس الموقع رفضه: {why}",
+                       "en": "I tried to send the form on {site} but the site refused it: {why}"},
+    "fill_site_refused_plain": {"ar": "حاولت أبعت النموذج على {site} بس الموقع رفضه.",
+                                "en": "I tried to send the form on {site} but the site refused it."},
     "fill_no_answer": {"ar": "ضغطت إرسال على {site} بس ما وصلني رد من الموقع، فما بقدر أأكد إنه انبعت.",
                        "en": "I pressed send on {site} but got no answer from the site, so I can't confirm it went."},
     "fill_leak": {"ar": "وقّفت التعبئة على {site} وسكّرت الصفحة: كانت بدها تبعت من معلوماتك لموقع تاني، وما طلع منها شي.",

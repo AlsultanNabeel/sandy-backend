@@ -195,7 +195,7 @@ def test_the_send_waits_for_his_yes_and_then_goes_once(world, language):
     [job] = asked["ids"]
     assert _job(job)["status"] == browser_job.HELD and world.released == []
     done = _fill(language, confirmed_job=job)
-    assert done["ok"] and "application 77 was received" in done["reply"]
+    assert done["ok"] and "accepted it" in done["reply"] or "استلمه" in done["reply"]
     # His yes is the real click on the same element of the same page, on the one connection.
     [holder] = world.clients
     assert world.pressed == [("mouseMoved", "s1"), ("mousePressed", "s1"), ("mouseReleased", "s1")]
@@ -334,7 +334,7 @@ def test_in_a_turn_the_yes_sends_it(world, language, said, yes):
         assert first["pending_state"] and "Nabeel" in first["final_response"]
         second = loop.run_turn(yes, user_id="userA", chat_id="userA", source="web",
                                pending_state=first["pending_state"], complete=ScriptedModel(text_reply("ok")))
-    assert "application 77" in second["final_response"]
+    assert ("accepted it" in second["final_response"] or "استلمه" in second["final_response"])
 
 
 # ── «متصفح ساندي» ──
@@ -621,7 +621,7 @@ def test_two_yeses_at_once_click_once_and_the_second_says_so(world):
     for t in yeses:
         t.join(20)
     sent = [o for o in outs if o.get("ok")]
-    assert len(sent) == 1 and "application 77" in sent[0]["reply"]
+    assert len(sent) == 1 and "accepted it" in sent[0]["reply"]
     [other] = [o for o in outs if not o.get("ok")]
     assert "already" in other["reply"]
     assert [p for p, _ in world.pressed] == ["mouseMoved", "mousePressed", "mouseReleased"]
@@ -960,7 +960,7 @@ def test_a_request_a_click_made_is_answered_at_once_and_his_yes_makes_that_click
     nothing = {"requestId": "r20", "responseCode": 204, "responseHeaders": []}
     assert holder.of("Fetch.fulfillRequest") == [nothing]
     done = _fill("en", confirmed_job=asked["ids"][0])
-    assert done["ok"] and "application 77" in done["reply"]
+    assert done["ok"] and "accepted it" in done["reply"]
     # His yes: the same click again, on the same element, its one send let through.
     assert {"requestId": "r20"} not in holder.of("Fetch.continueRequest")
     assert [kind for kind, _ in world.pressed] == ["mouseMoved", "mousePressed", "mouseReleased"]

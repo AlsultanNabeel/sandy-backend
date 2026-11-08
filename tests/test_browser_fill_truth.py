@@ -206,3 +206,55 @@ def test_she_never_asks_for_the_name_she_has():
     from app.brain import fill_values as FV
     field = {"label": "Customer name", "name": "custname", "type": "text", "choices": []}
     assert FV.vet_type(FV.his_values(["عبّي النموذج"], preferred_name="نبيل"), "نبيل", field) is None
+
+
+# ── What the site answered is said in a sentence, never pasted ──
+
+ECHO = '<html><body><pre>{ "args": {}, "headers": { "Accept": "text/html", "Host": "httpbin.org" } }</pre></body></html>'
+
+
+def _judge(monkeypatch, answer):
+    from types import SimpleNamespace as NS
+
+    from app.brain import background
+    seen = []
+
+    def call(what, messages, **kw):
+        seen.append((what, messages))
+        if isinstance(answer, Exception):
+            raise answer
+        return NS(choices=[NS(message=NS(content=answer, tool_calls=None))])
+    monkeypatch.setattr(background, "call", call)
+    return seen
+
+
+@pytest.mark.parametrize("language, words", [("ar", "والموقع استلمه"), ("en", "the site accepted it")])
+def test_a_technical_page_is_said_in_a_sentence_never_pasted(world, monkeypatch, language, words):  # noqa: F811
+    world.result = ECHO
+    seen = _judge(monkeypatch, '{"accepted": true, "reason": ""}')
+    done = _yes(language)
+    assert done["ok"] and "✅" in done["reply"] and words in done["reply"]
+    assert '"headers"' not in done["reply"] and "httpbin.org" not in done["reply"].replace("forms.example.com", "")
+    assert seen[0][0] == "fill_result" and not _job(_last_job()).get("result")
+
+
+@pytest.mark.parametrize("language", ["ar", "en"])
+def test_a_page_that_refuses_is_said_with_its_reason_and_not_as_sent(world, monkeypatch, language):  # noqa: F811
+    _judge(monkeypatch, '{"accepted": false, "reason": "رقم الهاتف غير صحيح"}')
+    done = _yes(language)
+    assert done["ok"] is False and "رقم الهاتف غير صحيح" in done["reply"] and "✅" not in done["reply"]
+    assert _job(_last_job())["status"] == browser_job.FAILED
+
+
+def test_a_reason_with_a_link_or_marks_never_reaches_him(world, monkeypatch):  # noqa: F811
+    _judge(monkeypatch, '{"accepted": false, "reason": "go to [here](https://evil.example/x) now"}')
+    done = _yes("en")
+    assert done["ok"] is False and "evil.example" not in done["reply"] and "](" not in done["reply"]
+
+
+@pytest.mark.parametrize("answer", [RuntimeError("no model"), "not json", '{"accepted": "maybe"}'])
+def test_with_no_reading_of_the_page_it_says_only_that_it_was_sent(world, monkeypatch, answer):  # noqa: F811
+    world.result = ECHO
+    _judge(monkeypatch, answer)
+    done = _yes("en")
+    assert done["ok"] and "✅" in done["reply"] and '"headers"' not in done["reply"]
