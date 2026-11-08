@@ -254,6 +254,10 @@ class Gate:
         self.on_breach: Optional[Callable[[str], None]] = None
         self.blocked: List[Tuple[str, str]] = []
         self.sent: List[Tuple[str, str]] = []
+        # The send his yes let through, by its network id, and the status the site answered it
+        # with (None until it answers): what «sent ✅» stands on.
+        self.sent_id = ""
+        self.sent_status: Optional[int] = None
         # Each page's own session on our connection, by its target (the real click is made there).
         self.sessions: Dict[str, str] = {}
 
@@ -378,9 +382,12 @@ async def install(client, gate: Gate) -> None:
     def on_paused(event: Dict[str, Any], session: Optional[str] = None) -> None:
         request = event.get("request") or {}
         rid = event.get("requestId")
+        sent_before = len(gate.sent)
         verdict = gate.decide(request.get("method", ""), request.get("url", ""), event.get("resourceType", ""),
                               body=str(request.get("postData") or ""), session=str(session or ""),
                               frame=str(event.get("frameId") or ""), request=str(rid or ""))
+        if len(gate.sent) > sent_before:
+            gate.sent_id = str(event.get("networkId") or "")
         if verdict == HOLD:
             # Never kept waiting in the browser (a page whose request waits is frozen, and the
             # request would go the moment our connection dropped): answered with nothing, it goes
@@ -396,6 +403,10 @@ async def install(client, gate: Gate) -> None:
                                                   session_id=session)
         # An answer the closing connection never sends is no error of the page's.
         asyncio.ensure_future(reply).add_done_callback(lambda done: done.cancelled() or done.exception())
+
+    def on_response(event: Dict[str, Any], session: Optional[str] = None) -> None:
+        if gate.sent_id and event.get("requestId") == gate.sent_id:
+            gate.sent_status = int((event.get("response") or {}).get("status") or 0)
 
     def on_socket(event: Dict[str, Any], session: Optional[str] = None) -> None:
         # Blocked before its handshake; one that was made anyway stops the fill.
@@ -433,6 +444,7 @@ async def install(client, gate: Gate) -> None:
     try:
         client.register.Fetch.requestPaused(on_paused)
         client.register.Network.webSocketCreated(on_socket)
+        client.register.Network.responseReceived(on_response)
         client.register.Target.attachedToTarget(on_attached)
         await within(client.send.Target.setAutoAttach(
             params={"autoAttach": True, "waitForDebuggerOnStart": True, "flatten": True}))

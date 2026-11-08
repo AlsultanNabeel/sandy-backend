@@ -39,7 +39,7 @@ def world(monkeypatch, brain_db):  # noqa: F811
     monkeypatch.setattr(steel_client.config, "STEEL_API_KEY", "k")
     brain_db["sandy_users"].insert_one({"_id": "userA"})
     browser_sites.init_browser_sites(brain_db)
-    w = NS(snapshot=FORM, clients=[], opened=[], released=[], timeouts=[], mode="submit", sent_notes=[], pressed=[], here=True,
+    w = NS(snapshot=FORM, clients=[], opened=[], released=[], timeouts=[], answered=200, mode="submit", sent_notes=[], pressed=[], here=True,
            order=[], refuse=0, shut=set(), points=[], quad=[0, 0, 20, 0, 20, 40, 0, 40], scrolled=0,
            filled=[{"field": "Name", "value": "Nabeel"}, {"field": "Email", "value": "n@example.com"}],
            result="<html><body><main><p>Thanks Nabeel, your application 77 was received.</p></main></body></html>")
@@ -77,9 +77,13 @@ def world(monkeypatch, brain_db):  # noqa: F811
             w.points.append((params["x"], params["y"]))
             if params["type"] == "mouseReleased":
                 # The real click on the send button: the page's own send, through the gate.
-                client.handlers["Fetch.requestPaused"]({"requestId": "r10", "resourceType": "Document", "frameId": "f1",
-                                                        "request": {"method": "POST", "url": URL,
-                                                                    "postData": "name=Nabeel"}}, session)
+                client.handlers["Fetch.requestPaused"]({"requestId": "r10", "networkId": "n10", "resourceType": "Document",
+                                                        "frameId": "f1", "request": {"method": "POST", "url": URL,
+                                                                                     "postData": "name=Nabeel"}}, session)
+                if w.answered is not None:
+                    # What the site answered that send.
+                    client.handlers["Network.responseReceived"]({"requestId": "n10", "response": {"status": w.answered}},
+                                                                session)
                 # A second send at once, from the same frame: his yes was for one only.
                 client.handlers["Fetch.requestPaused"]({"requestId": "r11", "resourceType": "XHR", "frameId": "f1",
                                                         "request": {"method": "POST", "url": URL + "/again"}}, session)
@@ -401,7 +405,7 @@ def test_the_real_agent_is_built_on_our_model_the_sites_domains_and_the_gate(mon
     row = {"_id": "j1", "site": "forms.example.com", "steel_id": "st1", "goal": "apply", "args": {"details": "Name: N"}}
     gate = browser_gate.Gate("forms.example.com")
     out = asyncio.run(browser_job._agent(row, gate, FakeCDP(), "s1", "userA", {}))
-    assert out == {"status": browser_job.DONE, "result": "filled"} and built["stopped"]
+    assert out == {"status": browser_job.DONE} and built["stopped"]
     assert built["session"]["allowed_domains"] == ["forms.example.com", "*.forms.example.com"]
     assert built["session"]["cross_origin_iframes"] is False
     agent = built["agent"]
@@ -1307,9 +1311,10 @@ def test_a_scripts_read_carrying_her_value_is_held_and_his_yes_tells_the_change_
         if params["functionDeclaration"] == browser_job._CHANGED_JS:
             # The field tells its change again: the page's script reads it again, under his yes.
             again.append(params["objectId"])
-            holder.handlers["Fetch.requestPaused"]({"requestId": "r31", "resourceType": "Fetch", "frameId": "f1",
+            holder.handlers["Fetch.requestPaused"]({"requestId": "r31", "networkId": "n31", "resourceType": "Fetch", "frameId": "f1",
                                                     "request": {"method": "GET", "url": URL + "/check?n=Nabeel"}},
                                                    session)
+            holder.handlers["Network.responseReceived"]({"requestId": "n31", "response": {"status": 200}}, session)
         return answer(params, session)
     holder.answers["Runtime.callFunctionOn"] = change
     done = _fill("en", confirmed_job=asked["ids"][0])

@@ -588,9 +588,14 @@ PHRASES = {
                               "you when I'm done or need your yes."},
     "fill_stopped": {"ar": "وقّفت التعبئة على {site}.", "en": "I stopped filling the form on {site}."},
     "fill_handed": {"ar": "صفحة {site} صارت إلك، كمّل إنت.", "en": "The page on {site} is yours now; carry on."},
-    "fill_failed": {"ar": "ما زبطت التعبئة على {site}. جرّب كمان شوي، أو كمّل إنت من «متصفح ساندي».",
-                    "en": "Filling the form on {site} didn't work. Try again in a bit, or carry on yourself "
-                          "from «Sandy's browser»."},
+    "fill_failed": {"ar": "ما انبعت النموذج على {site}: صار خلل بالتعبئة. جرّب كمان شوي.",
+                    "en": "The form on {site} wasn't sent: something went wrong while filling it. Try again in a bit."},
+    "fill_unfinished": {"ar": "ما انبعت النموذج على {site}: وقفت قبل ما أخلص التعبئة. جرّب كمان مرة.",
+                        "en": "The form on {site} wasn't sent: I stopped before finishing it. Try again."},
+    "fill_site_refused": {"ar": "حاولت أبعت النموذج على {site} بس الموقع رفضه (الرمز {code}).",
+                          "en": "I tried to send the form on {site} but the site refused it (code {code})."},
+    "fill_no_answer": {"ar": "ضغطت إرسال على {site} بس ما وصلني رد من الموقع، فما بقدر أأكد إنه انبعت.",
+                       "en": "I pressed send on {site} but got no answer from the site, so I can't confirm it went."},
     "fill_leak": {"ar": "وقّفت التعبئة على {site} وسكّرت الصفحة: كانت بدها تبعت من معلوماتك لموقع تاني، وما طلع منها شي.",
                   "en": "I stopped filling the form on {site} and closed the page: it tried to send your details to "
                         "another site, and nothing left."},

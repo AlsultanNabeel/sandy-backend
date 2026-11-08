@@ -686,6 +686,9 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
                 left -= time.monotonic() - began
                 watch.cancel()
                 told.cancel()
+            if outcome and outcome.get("status") == DONE and not asked:
+                # The agent stopped with nothing sent: its own words are never told as a result.
+                outcome = {"status": FAILED, "reason": "unfinished"}
             if gate.breach is None and asked:
                 # A request held stopped the agent the same way: from here only a breach stops it.
                 stopped.clear()
@@ -931,6 +934,10 @@ def _answered_page(gate, html: str, url: str) -> Dict[str, Any]:
         return {"status": FAILED, "reason": gate.breach}
     if not gate.sent:
         return {"status": FAILED, "reason": "unsent"}
+    if gate.sent_status is None:
+        return {"status": FAILED, "reason": "no_answer"}
+    if gate.sent_status >= 400:
+        return {"status": FAILED, "reason": "site_refused", "http": gate.sent_status}
     return {"status": DONE, "result": web_page.extract(html, url)["text"][:600]}
 
 
@@ -1171,11 +1178,10 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
     watch = asyncio.ensure_future(stuck())
     try:
         try:
-            history = await run
+            await run
         except asyncio.CancelledError:
             if reason.get("reason") != "step_slow":
                 raise
-            history = None
     finally:
         watch.cancel()
         # Our connection only: the session itself stays open for his yes (keep_alive).
@@ -1186,7 +1192,7 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
         # It stopped short of sending for what he never gave: he is asked for it, nothing sent.
         from app.brain import fill_values
         return {"status": FAILED, "reason": "needs", "asked": fill_values.asked(gate.refused)}
-    return {"status": DONE, "result": str(history.final_result() or "")}
+    return {"status": DONE}
 
 
 def _spent(row: Dict[str, Any]) -> float:
@@ -1357,7 +1363,7 @@ def _push(uid: str, body: str) -> None:
 # Why a fill stopped, by the gate or at his yes, as told to him.
 _TOLD = {"leak": "fill_leak", "socket": "fill_leak", "uncovered": "fill_leak",
          "moved": "fill_moved", "unsent": "fill_unsent", "orders": "fill_orders", "cost": "fill_cost",
-         "steps": "fill_steps"}
+         "steps": "fill_steps", "unfinished": "fill_unfinished", "no_answer": "fill_no_answer"}
 
 
 def told(row: Dict[str, Any]) -> str:
@@ -1381,6 +1387,8 @@ def told(row: Dict[str, Any]) -> str:
     reason = row.get("reason") or ""
     if reason == "needs" and row.get("asked"):
         return row["asked"]
+    if reason == "site_refused":
+        return lang.say("fill_site_refused", site=site, code=lang.number(row.get("http") or 0))
     if reason == "slow":
         return lang.say("fill_slow", site=site, minutes=lang.number(RUN_S // 60))
     if reason == "step_slow":
