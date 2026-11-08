@@ -470,8 +470,7 @@ answers it, or its result) and on his phone, each state once whoever tells it (`
 a tool on the fill's own background trace row (`trace_store.background(…, keep=True)`). *Live view*:
 `/api/browser/jobs/<id>/live` gives Steel's `debugUrl` with `interactive=false` (watch only) to the
 fill's owner alone, `…/takeover` stops the agent and gives it with `interactive=true`, `…/giveback` («رجّع التحكم لساندي», since 4 Nov 2026,
-`give_back`, in one write, only a page he holds) makes it hers again and the agent goes on from where the page is, within what is
-left of `RUN_S`, under the gate as before; it is kept
+`give_back`, in one write, only a page he holds) puts the fill back where it was (`back_to`, kept by `take_over`, since 8 Nov 2026: a question waiting for his yes still waits, the same one, `_hold(again=True)`, never a new run; work she was doing goes on from where the page is within what is left of `RUN_S`), under the gate as before; his yes with the page in his hands answers the open question (`_send`); it is kept
 sealed and never logged. The fill to watch is never a link in words (since 4 Nov 2026, when the model's «[هون](sandy://browser/live?job=…).»
 was read with «).» into the id): the tool names it in `ctx.artifacts["live"]` (`tools_browser._watched`), the turn hands `live` ({job}) with the
 reply (`/api/agent`, its stream's `done`), a link the model writes anyway is taken out (`loop._unlinked`), the app keeps it on the message

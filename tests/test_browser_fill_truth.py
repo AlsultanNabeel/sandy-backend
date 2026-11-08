@@ -62,3 +62,55 @@ def test_every_other_end_says_it_was_not_sent(reason, language, words):
     with lang.using(language):
         said = browser_job.told({"status": browser_job.FAILED, "reason": reason, "site": "x.example"})
     assert any(w in said for w in words) and "✅" not in said
+
+
+# ── Giving the page back returns the fill to where it was ──
+
+def _take_and_give(job, times=2):
+    import time as _t
+
+    from brain_fakes import A
+
+    from app.utils.user_profiles import active_user_profile_context
+    for _ in range(times):
+        with active_user_profile_context(A):
+            assert browser_job.take_over(job)
+        _t.sleep(0.8)                                         # the fill sees it is his
+        with active_user_profile_context(A):
+            assert browser_job.give_back(job)
+        _t.sleep(0.8)
+
+
+def _releases(world):  # noqa: F811
+    return [p for p in world.pressed if p[0] == "mouseReleased"]
+
+
+def test_a_question_waiting_for_his_yes_still_waits_after_he_takes_and_gives_back_twice(world, monkeypatch):  # noqa: F811
+    _level("submit")
+    runs = []
+    agent = browser_job.AGENT
+
+    async def counted(*a, **kw):
+        runs.append(1)
+        return await agent(*a, **kw)
+    monkeypatch.setattr(browser_job, "AGENT", counted)
+    asked = _fill("en")
+    job = asked["ids"][0]
+    _take_and_give(job)
+    assert _job(job)["status"] == browser_job.HELD and len(runs) == 1
+    done = _fill("en", confirmed_job=job)
+    assert done["ok"] and "✅" in done["reply"] and len(_releases(world)) == 1 and len(runs) == 1
+    assert world.released == ["st1"]
+
+
+def test_a_yes_while_the_page_is_his_answers_the_question_still_open(world):  # noqa: F811
+    from brain_fakes import A
+
+    from app.utils.user_profiles import active_user_profile_context
+    _level("submit")
+    asked = _fill("en")
+    job = asked["ids"][0]
+    with active_user_profile_context(A):
+        browser_job.take_over(job)
+    done = _fill("en", confirmed_job=job)
+    assert done["ok"] and "✅" in done["reply"] and len(_releases(world)) == 1

@@ -401,6 +401,10 @@ def _send(ctx: TurnCtx, job: str) -> Dict[str, Any]:
     row = browser_job.get(job)
     if row and row.get("status") == browser_job.APPROVED:
         return _no(lang.say("fill_taken", site=row["site"]))
+    if row and row.get("status") == browser_job.HANDED and row.get("back_to") == browser_job.HELD:
+        # His yes to the question still open, with the page in his hands: it goes back and is sent.
+        browser_job.give_back(job)
+        row = browser_job.get(job)
     if not row or row.get("status") != browser_job.HELD:
         return _no(lang.say("fill_gone"))
     site = row["site"]
