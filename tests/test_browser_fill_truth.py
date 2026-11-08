@@ -176,3 +176,33 @@ def test_an_unrelated_message_never_asks_the_fills_question_again_nor_lets_it_go
                                 complete=ScriptedModel(text_reply("ok")))
         state = out["pending_state"]
         assert question not in out["final_response"] and state and state["steps"][0]["ids"] == ["j1"]
+
+
+# ── What is required and empty is asked before the question to send ──
+
+@pytest.mark.parametrize("language, words", [("ar", "ناقصني"), ("en", "I still need")])
+def test_required_empty_fields_are_asked_together_before_any_question_to_send(world, language, words):  # noqa: F811
+    _level("submit")
+    world.filled = [{"field": "Name", "value": "نبيل", "required": True},
+                    {"field": "Telephone", "value": "", "required": True},
+                    {"field": "E-mail", "value": "", "required": True},
+                    {"field": "Notes", "value": "", "required": False}]
+    out = _fill(language)
+    assert not out.get("needs_confirmation") and words in out["reply"]
+    assert "Telephone" in out["reply"] and "E-mail" in out["reply"] and "Notes" not in out["reply"]
+    assert world.pressed == [] and world.released == ["st1"]
+
+
+@pytest.mark.parametrize("language, empty", [("ar", "Notes: فاضي"), ("en", "Notes: empty")])
+def test_optional_empty_fields_are_only_mentioned(world, language, empty):  # noqa: F811
+    _level("submit")
+    world.filled = [{"field": "Name", "value": "نبيل", "required": True},
+                    {"field": "Notes", "value": "", "required": False}]
+    out = _fill(language)
+    assert out.get("needs_confirmation") and empty in out["summary"]
+
+
+def test_she_never_asks_for_the_name_she_has():
+    from app.brain import fill_values as FV
+    field = {"label": "Customer name", "name": "custname", "type": "text", "choices": []}
+    assert FV.vet_type(FV.his_values(["عبّي النموذج"], preferred_name="نبيل"), "نبيل", field) is None

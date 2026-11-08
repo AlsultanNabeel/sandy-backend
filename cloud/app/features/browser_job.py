@@ -810,6 +810,12 @@ async def _hold(row, gate, client, tab: str, asked: Dict[str, Any], stopped: asy
         if now.get("detached"):
             _tell(now)
         return {"status": HANDED}
+    from app.brain import fill_values, lang
+    missing = fill_values.required_empty(filled)
+    if missing:
+        # All at once, before any question to send: his answer starts it again with them.
+        return {"status": FAILED, "reason": "needs", "asked": lang.say(
+            "fill_needs", site=row["site"], fields=lang.say("sep").join(f"«{m}»" for m in missing))}
     _save(row["_id"], status=HELD, summary=_summary(filled, gate.refused), action=asked.get("label", ""),
           beat_at=_now())
     now = get(row["_id"]) or {}

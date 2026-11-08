@@ -1,5 +1,5 @@
 """A fill writes and picks only what he said (`brain/fill_values.py`): his values are read from
-his own words by code (his messages, his name when he says «اسمي», never the model's), and
+his own words by code (his messages and his profile's name, never the model's), and
 every value typed, every box ticked and every option picked is checked against them before it
 is done. A value he did not give is refused, and he is asked; a choice of his is never typed
 into a text field («نبيل لارج», the size in the name, on 4 Nov 2026); a value is his only as he
@@ -34,9 +34,10 @@ def test_with_only_his_name_only_his_name_is_written():
         assert FV.vet_choose(values, option, checked=False) == FV.NOT_HIS
 
 
-def test_his_name_is_his_only_when_he_names_it():
-    assert FV.vet_type(_values("عبّي النموذج"), "نبيل", NAME) == FV.NOT_HIS
+def test_his_name_is_his_whether_or_not_he_names_it():
+    assert FV.vet_type(_values("عبّي النموذج"), "نبيل", NAME) is None
     assert FV.vet_type(_values("fill it with my name"), "نبيل", NAME) is None
+    assert FV.vet_type(FV.his_values(["عبّي النموذج"]), "نبيل", NAME) == FV.NOT_HIS       # no name kept
 
 
 # ── A choice of his is picked, never typed («نبيل لارج») ──

@@ -394,12 +394,11 @@ action*: browser-use's agent (our model, `brain/browser_llm.SandyLLM`, every ste
 seconds a step, `_agent`'s own watch: past either it stops (`slow`, `step_slow`), its session closes, and he is told it did not finish and why, nothing sent) has each
 action looked at before it is done (`_Asking`): a value typed, a box ticked or an option picked must be his (`brain/fill_values.py`,
 since 4 Nov 2026, when a fill typed «123-456-7890» and «نبيل لارج» he never gave: his values read by code from his own messages of
-the conversation, `tools_browser._his_words`, and his profile's name when he says «اسمي», never the model's `details`; as he
+the conversation, `tools_browser._his_words`, and his profile's name (never asked for), never the model's `details`; as he
 said them, a phone by its digits; a choice of his never typed into a text field, `A_CHOICE`; never one kind of value in a field
 of another, `WRONG_FIELD`; a choice named in the other script by its letters, `_skeleton`, «لارج» → «Large»), read from the
 element itself (`_FIELD_JS`, `_vetted`), else not done and kept on `gate.refused`, asked of him in the question or, with nothing
-to send, as the fill's end (`needs`, `fill_values.asked`); the question shows every field with its value and a required empty
-one said so (`_FILLED_JS`, groups by their ticked options; `fill_values.summary`); a click on what sends (`_SENDS_JS`: a form's
+to send, as the fill's end (`needs`, `fill_values.asked`); a form's required fields still empty are asked of him together, before any question to send (`fill_values.required_empty`, `fill_needs`: his answer starts the fill again), so the question shows every field with its value and an optional empty (`_FILLED_JS`, groups by their ticked options; `fill_values.summary`); a click on what sends (`_SENDS_JS`: a form's
 submit, a button in a form, one that names a send in either language: send, submit, buy, checkout,
 delete, publish, accept, confirm, subscribe, pay, order and their kin, إرسال، تقديم، شراء، حذف، نشر،
 موافق، اشترك، ادفع and theirs) or an Enter in a field is

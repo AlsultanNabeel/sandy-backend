@@ -49,6 +49,8 @@ FILL_SCHEMA: Dict[str, Any] = {
     "description": ("عبّي نموذج بصفحة من معلوماته («عبّيلي هالنموذج…»، «سجّليني بهالصفحة…»، «fill this form…»). "
                     "ما بينبعت إلا بعد موافقته؛ ما بتكتبي كلمة سر ولا بطاقة ولا بتحلّي صورة تحقق ولا بتدفعي. "
                     "ما تسألي قبل: ناديها فوراً باللي عندك، والأداة بتوقف وبتوريه شو عبّت قبل أي إرسال "
+                    "لما يجاوبك على خانات ناقصة سألتيه عنها، ناديها من جديد بنفس الرابط "
+                    "(when he answers the fields you asked for, call it again with the same link). "
                     "(call it at once with what you have; never ask first: it shows him what it filled "
                     "and waits. Nothing is sent without his yes; never a password, a card, a captcha or a "
                     "payment.)"),

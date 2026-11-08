@@ -1,7 +1,7 @@
 """What a fill may write and pick: only what he said (`features/browser_job`).
 
 His values are read from his own words by code, never from the model's (`his_values`: his
-messages of the conversation, and his name from his profile when he says «اسمي», «my name»):
+messages of the conversation, and his name from his profile, which she never asks him for):
 what follows a field's name («الاسم: نبيل», «phone 0599…»), an e-mail address, a phone
 number, and each word of his that is not a command («حطي»، «fill», «the form»).
 
@@ -34,8 +34,6 @@ _KEY = re.compile(
     r"(?:^|\s)(الاسم|اسم|الهاتف|هاتف|الجوال|جوال|الموبايل|موبايل|الرقم|رقم|الإيميل|الايميل|إيميل|ايميل|البريد|"
     r"الحجم|حجم|ملاحظات|name|e-?mail|phone|tel|telephone|mobile|number|size|notes?|comments?)\s+(.+)$", re.I)
 _PARTS = re.compile(r"\s+(?:and|with|&|مع)\s+|\s+و(?=\S)", re.I)
-# He names his own name: his profile's is his value.
-_HIS_NAME = re.compile(r"اسمي|باسمي|بإسمي|إسمي|\bmy name\b", re.I)
 # His words that ask, not values.
 _FILLER = frozenset("""
 حطي حط حطيلي عبي عبيلي عبيها املي امليلي اكتبي اكتب سجليني سجلي اعملي بدي بدك ابغى اريد لو سمحت من فضلك
@@ -90,7 +88,7 @@ def _value(text: str, kind: str) -> Dict[str, str]:
 
 
 def his_values(said: Iterable[str], preferred_name: str = "") -> List[Dict[str, str]]:
-    """The values in his own words (his messages), and his name when he names it."""
+    """The values in his own words (his messages), and his name from his profile."""
     out: List[Dict[str, str]] = []
 
     def add(text: str, kind: str) -> None:
@@ -98,10 +96,10 @@ def his_values(said: Iterable[str], preferred_name: str = "") -> List[Dict[str, 
         if text and not any(v["text"] == text and v["kind"] == kind for v in out):
             out.append(_value(text, kind))
 
+    if preferred_name:
+        add(preferred_name, NAME)             # she has it: never asked for
     for message in said:
         words = _URL.sub(" ", str(message or ""))
-        if preferred_name and _HIS_NAME.search(words):
-            add(preferred_name, NAME)
         for m in _EMAIL.finditer(words):
             add(m.group(0), EMAIL)
         for m in _PHONE.finditer(_EMAIL.sub(" ", words)):
@@ -181,6 +179,11 @@ def summary(fields: List[Dict[str, Any]]) -> str:
             value = lang.say("fill_empty_required" if f.get("required") else "fill_empty")
         shown.append(f"{f.get('field') or '؟'}: {value}")
     return lang.say("sep").join(shown)
+
+
+def required_empty(fields: List[Dict[str, Any]]) -> List[str]:
+    """The names of the fields the form requires that are still empty."""
+    return [str(f.get("field") or "؟") for f in fields if f.get("required") and not str(f.get("value") or "").strip()]
 
 
 def asked(refused: List[Dict[str, str]]) -> str:
