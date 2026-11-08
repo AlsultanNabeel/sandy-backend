@@ -258,3 +258,19 @@ def test_with_no_reading_of_the_page_it_says_only_that_it_was_sent(world, monkey
     _judge(monkeypatch, answer)
     done = _yes("en")
     assert done["ok"] and "✅" in done["reply"] and '"headers"' not in done["reply"]
+
+
+def test_a_reading_asked_as_json_and_written_around_with_marks_is_still_read(world, monkeypatch):  # noqa: F811
+    seen = []
+    from types import SimpleNamespace as NS
+
+    from app.brain import background
+
+    def call(what, messages, **kw):
+        seen.append(kw)
+        return NS(choices=[NS(message=NS(content='```json\n{"accepted": false, "reason": "the slot is taken"}\n```',
+                                         tool_calls=None))])
+    monkeypatch.setattr(background, "call", call)
+    done = _yes("en")
+    assert done["ok"] is False and "the slot is taken" in done["reply"]
+    assert seen[0]["response_format"] == {"type": "json_object"}

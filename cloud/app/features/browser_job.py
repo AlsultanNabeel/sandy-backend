@@ -970,8 +970,10 @@ def _judged(text: str, user_id: str) -> Optional[Dict[str, Any]]:
         answer = background.call("fill_result", [
             {"role": "system", "content": _RESULT_PROMPT.format(language=language)},
             {"role": "user", "content": text[:4000]}], priority=background.DIRECT, user_id=user_id,
-            max_tokens=120, temperature=0)
-        found = json.loads(answer.choices[0].message.content or "")
+            max_tokens=120, temperature=0, response_format={"type": "json_object"})
+        # Between its braces: a model may still write marks around it.
+        said = str(answer.choices[0].message.content or "")
+        found = json.loads(said[said.index("{"):said.rindex("}") + 1])
     except _READING_ERRORS as exc:     # a model's reading never undoes a send that happened
         logger.warning("[browser] the page after a send could not be read: %s", type(exc).__name__)
         return None
