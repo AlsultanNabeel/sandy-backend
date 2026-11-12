@@ -188,17 +188,42 @@ def fill_state_talk(text: str) -> bool:
     return any(_FILL_WORD.search(_plain(s)) and _STATE_WORD.search(_plain(s)) for s in _sentences(text))
 
 
+# A fill said to be done: filled, finished, sent («عبّيته يا قلبي» of one only just begun, 12 Nov).
+_DONE_WORD = re.compile(r"عبيت|خلصت|خلصتها|انبعت|بعتت|بعته|\b(?<!being )(filled|finished|sent|submitted|done)\b", re.I)
+
+
 def fill_state(text: str, results: List[Tuple[str, Dict[str, Any]]], question: str,
                read: Callable[[], str], tools: Iterable[str]) -> str:
     """The reply with what it says of a fill's state standing on a tool of the turn that read it
     (``tools``); else each such sentence taken out and the real state, as ``read`` reads it, in
-    their place. The held question stays last."""
+    their place. A fill the code says in its own words (``verbatim``: one just begun, going on in
+    the background) is said in those alone; a fill said done stands only on a tool that says so
+    too. The held question stays last."""
     body = text[: -len(question)] if question and text.endswith(question) else text
-    if not fill_state_talk(body) or any(name in set(tools) for name, _ in results):
+    read_by = [r for name, r in results if name in set(tools)]
+    said = [str(r.get("reply") or "") for r in read_by if r.get("verbatim")]
+    if said:
+        if body.strip() not in said:
+            logger.info("[honesty] a fill's state said in the code's own words")
+        return "\n".join(t for t in (*said, question) if t)
+    if not fill_state_talk(body) and not _said_done(body):
+        return text
+    if read_by and not (_said_done(body) and not any(_tool_says_done(r) for r in read_by)):
         return text
     logger.warning("[honesty] reply spoke of a fill's state no tool read; replaced")
-    kept = "".join(s for s in _sentences(body) if not fill_state_talk(s)).strip()
-    return "\n".join(t for t in (kept, read(), question) if t)
+    kept = "".join(s for s in _sentences(body) if not fill_state_talk(s) and not _said_done(s)).strip()
+    real = "\n".join(str(r.get("reply") or "") for r in read_by if r.get("reply")) or read()
+    return "\n".join(t for t in (kept, real, question) if t)
+
+
+def _said_done(text: str) -> bool:
+    return any(_FILL_WORD.search(_plain(s)) and _DONE_WORD.search(_plain(s)) for s in _sentences(text))
+
+
+def _tool_says_done(result: Dict[str, Any]) -> bool:
+    """A tool's answer says the fill is filled: its question to send, or its words."""
+    return bool(result.get("needs_confirmation")) or bool(
+        _DONE_WORD.search(_plain(str(result.get("reply") or result.get("summary") or ""))))
 
 
 def voice_correction(text: str, worked: Iterable[str],

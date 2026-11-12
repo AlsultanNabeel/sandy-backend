@@ -585,9 +585,13 @@ PHRASES = {
                               "change it yourself on the Sites screen: {link}"},
     "browser_bad_site": {"ar": "هاد مش اسم موقع. اكتب النطاق، مثلاً «example.com».",
                          "en": "That isn't a site name. Type the domain, for example «example.com»."},
-    "fill_background": {"ar": "التعبئة على {site} طوّلت، فبكمّلها بالخلفية وببعتلك لما أخلص أو لما بدها موافقتك.",
-                        "en": "The form on {site} is taking a while, so I'll carry on in the background and tell "
-                              "you when I'm done or need your yes."},
+    "fill_background": {"ar": "بلّشت أعبّي النموذج على {site}، ولسا ما خلصت. بكمّل بالخلفية، وببعتلك هون لما "
+                              "بدها موافقتك أو لما توقف.",
+                        "en": "I've started filling the form on {site}; it isn't done yet. I'm carrying on in the "
+                              "background and will tell you here when it needs your yes or stops."},
+    "fill_sending": {"ar": "ضغطت إرسال على {site} ولسا ناطرة رد الموقع. ببعتلك هون شو قال.",
+                     "en": "I pressed send on {site} and I'm still waiting for the site's answer. I'll tell you "
+                           "here what it said."},
     "fill_stopped": {"ar": "وقّفت التعبئة على {site}.", "en": "I stopped filling the form on {site}."},
     "fill_handed": {"ar": "صفحة {site} صارت إلك، كمّل إنت.", "en": "The page on {site} is yours now; carry on."},
     "fill_failed": {"ar": "ما انبعت النموذج على {site}: صار خلل بالتعبئة. جرّب كمان شوي.",

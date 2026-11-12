@@ -106,3 +106,36 @@ def test_a_guess_of_how_a_closed_fill_ended_is_replaced_by_how_it_did(on, langua
     _job(on, browser_job.STOPPED, reason="expired")
     state = _turn(ScriptedModel(text_reply(guess)), "شو صار بالتعبئة؟" if language == "ar" else "what happened?")
     assert guess not in state["final_response"] and real in state["final_response"]
+
+
+JOB = "1446ccfffcfd43188e17eb208cc0a7d2"
+
+
+def _begun(monkeypatch, language):
+    def fill(args, ctx):
+        from app.brain import tools_browser
+        with lang.using(language):
+            return tools_browser._outcome(ctx, {"id": JOB, "site": "httpbin.org", "status": browser_job.RUNNING})
+    monkeypatch.setitem(tools.HANDLERS, "page_fill", fill)
+    monkeypatch.setattr(browser_job, "detach", lambda job: None)
+
+
+@pytest.mark.parametrize("language, claim, words", [
+    ("ar", "عبيته يا قلبي، بس التعبئة على الموقع طوّلت. رح أكملها بالخلفية. 🤍", "بلّشت أعبّي"),
+    ("en", "Done, I filled it for you! I'll finish the rest in the background.", "I've started filling")])
+def test_a_fill_only_begun_is_said_begun_in_the_codes_words(on, monkeypatch, language, claim, words):
+    # 12 Nov: «عبّيته يا قلبي» of a fill that had only just begun.
+    _begun(monkeypatch, language)
+    state = _turn(ScriptedModel(tools_reply(call("page_fill", url="https://httpbin.org/forms/post", goal="x")),
+                                text_reply(claim)), "عبّيلي النموذج" if language == "ar" else "fill the form")
+    assert words in state["final_response"] and claim not in state["final_response"]
+    assert "عبيته" not in state["final_response"] and "Done" not in state["final_response"]
+
+
+@pytest.mark.parametrize("language, claim, real", [
+    ("ar", "عبّيت النموذج وخلصت.", "لسا شغّالة"), ("en", "I filled the form, it's finished.", "still working")])
+def test_a_fill_said_done_while_its_tool_reads_it_running_is_replaced(on, language, claim, real):
+    _job(on, browser_job.RUNNING, progress={"steps": 2, "field": "Telephone"})
+    state = _turn(ScriptedModel(tools_reply(call("fill_status")), text_reply(claim)),
+                  "وين صارت؟" if language == "ar" else "where is it?")
+    assert claim not in state["final_response"] and real in state["final_response"]

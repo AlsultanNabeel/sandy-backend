@@ -389,7 +389,8 @@ def _outcome(ctx: TurnCtx, row: Dict[str, Any]) -> Dict[str, Any]:
     if status == browser_job.RUNNING:
         browser_job.detach(job)
         _watched(ctx, job)
-        return {"ok": True, "reply": lang.say("fill_background", site=site), "job": job}
+        # Said in the code's words alone: it has only begun (`honesty.fill_state`).
+        return {"ok": True, "reply": lang.say("fill_background", site=site), "job": job, "verbatim": True}
     if status == browser_job.HANDED and row.get("summary"):
         _watched(ctx, job)
         return {"ok": True, "reply": browser_job.told(row), "job": job}
@@ -425,7 +426,7 @@ def _send(ctx: TurnCtx, job: str) -> Dict[str, Any]:
         # Still answering: it tells him itself once it has.
         browser_job.detach(job)
         _watched(ctx, job)
-        return {"ok": True, "reply": lang.say("fill_background", site=row["site"]), "job": job}
+        return {"ok": True, "reply": lang.say("fill_sending", site=row["site"]), "job": job, "verbatim": True}
     if row.get("status") == browser_job.DONE:
         return {"ok": True, "reply": browser_job.told(row), "source": row.get("url", "")}
     return _no(browser_job.told(row))
