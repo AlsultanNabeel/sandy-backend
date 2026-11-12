@@ -164,6 +164,10 @@ struct LiveBrowserView: View {
     static let checkEvery: Duration = .seconds(5)
     @State private var live: BrowserLive?
     @State private var gone = false
+    /// The fill as the server has it: the question it waits on, shown here too.
+    @State private var job: BrowserJobView?
+    @State private var answer = ""
+    @State private var answering = false
     @State private var store = WKWebsiteDataStore.nonPersistent()
 
     var body: some View {
@@ -171,6 +175,7 @@ struct LiveBrowserView: View {
             if let live, let url = URL(string: live.url) {
                 BrowserWebView(url: url, store: store, playsAtOnce: true)
                     .allowsHitTesting(live.control)
+                if let ask = job?.ask { asking(ask) }
                 Button {
                     Task { await (live.control ? giveBack() : takeOver()) }
                 } label: {
@@ -180,6 +185,9 @@ struct LiveBrowserView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .padding(Theme.Spacing.md)
+            } else if gone, let ask = job?.ask {
+                // It closed asking for what it needs: asked here as in the chat.
+                asking(ask).frame(maxHeight: .infinity)
             } else if gone {
                 VStack(spacing: Theme.Spacing.md) {
                     Image(systemName: "checkmark.circle")
@@ -203,13 +211,68 @@ struct LiveBrowserView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             do { live = try await state.api.browserLive(job: jobId) } catch { gone = true }
-            // While it is shown: the fill closed is a line and a way back, not Steel's page.
+            job = try? await state.api.browserJob(job: jobId)
+            // While it is shown: its question as it comes, and the fill closed is a line and a
+            // way back, not Steel's page.
             while !gone, !Task.isCancelled {
                 try? await Task.sleep(for: Self.checkEvery)
-                guard let open = try? await state.api.browserJobs() else { continue }
-                if !open.contains(where: { $0.id == jobId }) { gone = true }
+                guard let now = try? await state.api.browserJob(job: jobId) else { continue }
+                job = now
+                if !now.open { gone = true }
             }
         }
+    }
+
+    /// The question the fill waits on, as the chat asked it: «آه» and «لا» for its send, a line to
+    /// answer for what it needs. The answer goes into its conversation as his own message, on
+    /// the chat's own path (`/api/agent`), so it is taken once whichever answers first.
+    private func asking(_ ask: BrowserJobView.Ask) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text(ask.text)
+                .font(Theme.Typography.body)
+                .fixedSize(horizontal: false, vertical: true)
+            if ask.kind == "confirm" {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Button(lang.s("browser.askYes")) { Task { await reply(lang.s("browser.askYesSaid")) } }
+                        .buttonStyle(.borderedProminent)
+                    Button(lang.s("browser.askNo")) { Task { await reply(lang.s("browser.askNoSaid")) } }
+                        .buttonStyle(.bordered)
+                }
+            } else {
+                HStack(spacing: Theme.Spacing.sm) {
+                    TextField(lang.s("browser.askAnswer"), text: $answer)
+                        .textFieldStyle(.roundedBorder)
+                    Button(lang.s("browser.askSend")) {
+                        let said = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+                        Task { await reply(said) }
+                    }
+                    .disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .disabled(answering)
+        .padding(Theme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .liquidGlass(cornerRadius: Theme.Radius.bubble, tint: 0.06)
+        .padding(.horizontal, Theme.Spacing.md)
+    }
+
+    /// His answer, said in the fill's conversation as he would say it there: his line kept, the
+    /// turn run, her reply kept.
+    private func reply(_ text: String) async {
+        guard let thread = job?.thread, !thread.isEmpty, !text.isEmpty, !answering else { return }
+        answering = true
+        defer { answering = false }
+        await state.api.say(text, in: thread)
+        answer = ""
+        if job?.ask?.kind == "needs" {
+            // What it needed starts a new fill, its own to watch from the chat: this one is done.
+            job = nil
+            gone = true
+            return
+        }
+        job = try? await state.api.browserJob(job: jobId)
+        if job?.open != true { gone = true }
     }
 
     private func takeOver() async {

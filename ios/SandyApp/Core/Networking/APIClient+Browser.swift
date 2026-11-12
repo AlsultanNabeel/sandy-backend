@@ -38,6 +38,20 @@ struct BrowserJob: Decodable, Identifiable, Hashable {
     var thread: String?
 }
 
+/// A fill as the live view shows it: open or not, the conversation it was asked from, and the
+/// question it waits on, word for word as the chat asked it.
+struct BrowserJobView: Decodable, Equatable {
+    struct Ask: Decodable, Equatable {
+        /// «confirm»: its question to send (yes or no). «needs»: the fields it needs.
+        let kind: String
+        let text: String
+    }
+    let id: String
+    let open: Bool
+    let thread: String
+    let ask: Ask?
+}
+
 /// Steel's view of a fill: to watch, or (`control`) to drive.
 struct BrowserLive: Decodable, Equatable {
     let url: String
@@ -95,6 +109,23 @@ extension APIClient {
     func browserJobs() async throws -> [BrowserJob] {
         let r: BrowserJobsResponse = try await fetch("/api/browser/jobs")
         return r.jobs
+    }
+
+    /// His words said in a conversation away from its screen (the live view's answer to a fill's
+    /// question), as the chat says them: his line kept, the turn run on `/api/agent` under one
+    /// id, her reply kept with the fill it names.
+    @discardableResult
+    func say(_ text: String, in thread: String) async -> ChatReply? {
+        let id = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        try? await appendMessage(cid: thread, role: "user", text: text, clientMsgId: id)
+        guard let said = try? await sendMessageStreaming(text, conversationId: thread, clientMsgId: id,
+                                                         onChunk: { _ in }) else { return nil }
+        try? await appendMessage(cid: thread, role: "sandy", text: said.reply, liveJob: said.liveJob)
+        return said
+    }
+
+    func browserJob(job: String) async throws -> BrowserJobView {
+        try await fetch("/api/browser/jobs/\(URLEscape.segment(job))")
     }
 
     func browserLive(job: String) async throws -> BrowserLive {

@@ -60,4 +60,36 @@ final class BrowserTests: XCTestCase {
         let links = shown.runs.compactMap(\.link).map(\.absoluteString)
         XCTAssertEqual(links.sorted(), ["https://example.com", "sandy://browser/login?url=x"])
     }
+
+    /// 13 Nov: the question came while he watched the fill and never showed there. The view reads
+    /// the question it waits on, and his answer from it goes into the fill's conversation on the
+    /// chat's own path: his line, the turn under that same id, her reply.
+    func testTheLiveViewReadsTheQuestionAndAnswersItOnTheChatsPath() async throws {
+        let api = TestClient.make()
+        StubNetwork.install { request in
+            switch request.url?.path ?? "" {
+            case "/api/browser/jobs/j1":
+                return (200, Data(#"{"id":"j1","site":"httpbin.org","status":"held","open":true,"thread":"c2","#
+                    .utf8) + Data(#""ask":{"kind":"confirm","text":"متأكد إنك بدك أبعت؟ (اه/لأ)"}}"#.utf8))
+            case "/api/agent/stream":
+                return (200, Data("data: {\"reply\":\"انبعت ✅\",\"done\":true}\n\n".utf8))
+            default:
+                return (200, Data("{}".utf8))
+            }
+        }
+        let job = try await api.browserJob(job: "j1")
+        XCTAssertEqual(job.ask, BrowserJobView.Ask(kind: "confirm", text: "متأكد إنك بدك أبعت؟ (اه/لأ)"))
+        XCTAssertEqual(job.thread, "c2")
+        let said = await api.say("اه", in: "c2")
+        XCTAssertEqual(said?.reply, "انبعت ✅")
+        XCTAssertEqual(paths().suffix(3), ["POST /api/conversations/c2/messages", "POST /api/agent/stream",
+                                           "POST /api/conversations/c2/messages"])
+        let bodies = StubNetwork.requests.suffix(3).map {
+            (try? JSONSerialization.jsonObject(with: StubNetwork.body(of: $0))) as? [String: Any] ?? [:]
+        }
+        XCTAssertEqual(bodies[0]["role"] as? String, "user")
+        XCTAssertEqual(bodies[1]["conversation_id"] as? String, "c2")
+        XCTAssertEqual(bodies[0]["client_msg_id"] as? String, bodies[1]["client_msg_id"] as? String)
+        XCTAssertEqual(bodies[2]["text"] as? String, "انبعت ✅")
+    }
 }

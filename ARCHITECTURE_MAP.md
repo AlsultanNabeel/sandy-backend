@@ -477,7 +477,7 @@ reply (`/api/agent`, its stream's `done`), a link the model writes anyway is tak
 view plays Steel's stream with no tap (`BrowserWebView(playsAtOnce:)`: `allowsInlineMediaPlayback`, no media needing a tap; Steel has no autoplay
 option of its own; when iOS still refuses it, as Low Power Mode does, Steel's player shows `#playButton` and the app
 re-fires the video's `canplay` from its own content world, which counts as his gesture: pressing the button instead leaves
-Steel's «Connecting…» cover on for good) and, every five seconds while shown, gives way to a line and «رجوع» once the fill is no longer open (`LiveBrowserView`). *Emergency stop* (`features/stop_all.py`, `sandy_users.stopped_at`, forgotten
+Steel's «Connecting…» cover on for good) and, every five seconds while shown, gives way to a line and «رجوع» once the fill is no longer open (`LiveBrowserView`); and shows the question it waits on as the chat asked it, «آه» and «لا» for its send or a line for what it needs, his answer said in its conversation on the chat's own path (`APIClient.say`: his line, `/api/agent` under that id, her reply), so it is taken once whichever answers first (since 13 Nov 2026, when the question came while he watched and never showed there). *Emergency stop* (`features/stop_all.py`, `sandy_users.stopped_at`, forgotten
 by a reset): «وقّفي كل شي» by talk, the call or the app (`/api/stop`) stops every task (no run, no
 failure) and every fill (`browser_job.stop_for`; the step a fill's agent is on is cut at once, `_watching`, as by his «no»
 or his taking over), the browser's tools refuse, reminders still ring;
