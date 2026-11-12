@@ -552,7 +552,8 @@ def _field(label, kind="text", name="", checked=False):
 def test_what_he_never_gave_is_never_written_or_picked_and_he_is_asked(monkeypatch, said, action, field):
     run, asked, done, client = _tools(monkeypatch, sends=False, field=field, said=said, name="نبيل")
     result = run(**action)
-    assert done == [] and "never gave" in result.error and not result.is_done
+    # Told as a result, never an error: the rest of the step still runs (`test_browser_agent_steps`).
+    assert done == [] and "never gave" in result.extracted_content and result.error is None and not result.is_done
     assert client.gate.refused and client.gate.refused[0]["field"] == field["label"]
 
 
