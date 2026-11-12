@@ -1625,3 +1625,57 @@ def test_the_app_gives_a_page_back_by_its_route(world, monkeypatch, brain_db):  
     monkeypatch.setattr(browser_job, "give_back", lambda job: job == "j-his")
     assert client.post("/api/browser/jobs/j-his/giveback", headers=h).status_code == 200
     assert client.post("/api/browser/jobs/j-other/giveback", headers=h).status_code == 404
+
+
+def _as_the_route(message, thread, model, db):
+    """One turn as `/api/agent` makes it, the chat's and the live view's alike: the thread's held
+    question loaded, the turn, the question kept."""
+    with active_user_profile_context(A):
+        state = loop.run_turn(message, user_id="userA", chat_id="userA", source="web", conversation_id=thread,
+                              pending_state=pending.load(thread, "userA", db), complete=model)
+    pending.save(thread, "userA", db, state.get("pending_state"))
+    return state
+
+
+@pytest.mark.parametrize("language", ["ar", "en"])
+def test_the_live_view_shows_the_question_word_for_word_as_the_chat_asked_it(world, monkeypatch, brain_db, language):  # noqa: F811
+    from app.api.server import create_app
+    from app.api.auth_handlers import make_token
+    monkeypatch.setenv("JWT_SECRET", "x" * 32)
+    _level("submit")
+    world.mode = "slow"
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
+    out = _fill(language, thread=C9)
+    _wait_for(lambda: pending.load(C9, "userA", brain_db))
+    asked = brain_db["conversations"].find_one({"_id": C9})["messages"][-1]["text"]
+    client = create_app(mongo_db=brain_db).test_client()
+    shown = client.get(f"/api/browser/jobs/{out['job']}",
+                       headers={"Authorization": f"Bearer {make_token('user', user_id='userA')}"}).get_json()
+    assert shown["open"] and shown["thread"] == C9
+    assert shown["ask"] == {"kind": "confirm", "text": asked}
+
+
+@pytest.mark.parametrize("language, yes", [("ar", "اه"), ("en", "yes")])
+def test_a_yes_from_the_live_view_then_one_in_the_chat_sends_once(world, monkeypatch, brain_db, language, yes):  # noqa: F811
+    _level("submit")
+    world.mode = "slow"
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
+    out = _fill(language, thread=C9)
+    _wait_for(lambda: pending.load(C9, "userA", brain_db))
+    monkeypatch.setattr(browser_job, "WAIT_S", 20)                                   # his yes waits for the answer
+    with lang.using(language):
+        first = _as_the_route(yes, C9, ScriptedModel(text_reply("ok")), brain_db)    # the live view's «آه»
+        _wait_for(lambda: _job(out["job"])["status"] == browser_job.DONE)
+        _as_the_route(yes, C9, ScriptedModel(text_reply("ok")), brain_db)            # then «آه» in the chat
+    assert "✅" in first["final_response"]
+    assert [kind for kind, _ in world.pressed] == ["mouseMoved", "mousePressed", "mouseReleased"]
+    assert _job(out["job"])["status"] == browser_job.DONE
+
+
+def test_his_open_fills_name_the_conversation_they_were_asked_from(world, monkeypatch, brain_db):  # noqa: F811
+    _level("submit")
+    world.mode = "slow"
+    monkeypatch.setattr(browser_job, "WAIT_S", 0.3)
+    _fill("en", thread=C9)
+    with active_user_profile_context(A):
+        assert [j["thread"] for j in browser_job.open_jobs()] == [C9]

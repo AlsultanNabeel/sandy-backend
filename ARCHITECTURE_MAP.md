@@ -466,7 +466,7 @@ it the fill is `detached`, and while it works it writes a short line in that cha
 (`_progressing`, the field it is on; written only, never spoken nor pushed, and over once the question comes), and once it is held or stops it tells him in the chat he asked from
 (`conversations_api.say_in`: its question, kept as the thread's `pending` so his next message
 answers it, or its result) and on his phone, each state once whoever tells it (`told`); never as a task's result. Each action on the page is
-a tool on the fill's own background trace row (`trace_store.background(…, keep=True)`). *Live view*:
+a tool on the fill's own background trace row (`trace_store.background(…, keep=True)`). *Live view*: `GET /api/browser/jobs/<id>` (`browser_job.view`, since 13 Nov 2026) says whether it is open, the conversation it was asked from, and the question it waits on word for word as the chat asked it (`ask`: `confirm` with its question to send, or `needs` with the fields it needs), and his open fills name their conversation (`thread`);
 `/api/browser/jobs/<id>/live` gives Steel's `debugUrl` with `interactive=false` (watch only) to the
 fill's owner alone, `…/takeover` stops the agent and gives it with `interactive=true`, `…/giveback` («رجّع التحكم لساندي», since 4 Nov 2026,
 `give_back`, in one write, only a page he holds) puts the fill back where it was (`back_to`, kept by `take_over`, since 8 Nov 2026: a question waiting for his yes still waits, the same one, `_hold(again=True)`, never a new run; work she was doing goes on from where the page is within what is left of `RUN_S`), under the gate as before; his yes with the page in his hands answers the open question (`_send`); it is kept

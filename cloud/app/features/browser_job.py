@@ -1324,9 +1324,29 @@ def open_jobs() -> List[Dict[str, Any]]:
     except PyMongoError:
         logger.warning("[browser] could not list fills", exc_info=True)
         return []
-    return [{"id": r["_id"], "site": r.get("site", ""), "status": r.get("status"),
+    return [{"id": r["_id"], "site": r.get("site", ""), "status": r.get("status"), "thread": r.get("thread_id") or "",
              "created_at": r["created_at"].replace(tzinfo=r["created_at"].tzinfo or timezone.utc).isoformat()}
             for r in rows]
+
+
+def view(job_id: str) -> Optional[Dict[str, Any]]:
+    """A fill as the live view shows it: whether it is open, the conversation it was asked from,
+    and the question it waits on, word for word as the chat asked it (``ask``: its question to
+    send, or the fields it needs), in his language; None when it is not his."""
+    from app.brain import confirm, lang
+    row = get(job_id)
+    if not row:
+        return None
+    ask = None
+    with lang.using(row.get("lang") or lang.AR):
+        if row.get("status") == HELD and not row.get("closed_at"):
+            ask = {"kind": "confirm", "text": confirm.question(
+                lang.say("fill_summary", site=row.get("site", ""), fields=row.get("summary") or ""))}
+        elif row.get("reason") == "needs" and row.get("asked"):
+            ask = {"kind": "needs", "text": row["asked"]}
+    return {"id": row["_id"], "site": row.get("site", ""), "status": row.get("status"),
+            "open": row.get("status") in OPEN and not row.get("closed_at"),
+            "thread": row.get("thread_id") or "", "ask": ask}
 
 
 def last_job() -> Optional[Dict[str, Any]]:

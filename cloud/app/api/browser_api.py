@@ -8,7 +8,8 @@
                                                   listed yet is added (his alone: `browser_sites.Hand`)
   POST   /api/browser/sites/<site>/session        {cookies, storage}: his sign-in, sealed: {site}
   DELETE /api/browser/sites/<site>/session        «طلّعها»: the sign-in forgotten: {site}
-  GET    /api/browser/jobs                        {jobs: [{id, site, status, created_at}]}: his open fills
+  GET    /api/browser/jobs                        {jobs: [{id, site, status, thread, created_at}]}: his open fills
+  GET    /api/browser/jobs/<id>                   {id, site, status, open, thread, ask}: the question it waits on
   GET    /api/browser/jobs/<id>/live              {url}: «متصفح ساندي», to watch only
   POST   /api/browser/jobs/<id>/takeover          {url}: «خليني أكمّل أنا»: the agent stops, the view drives
   POST   /api/browser/jobs/<id>/giveback          {ok}: «رجّع التحكم لساندي»: the page he took over is hers again
@@ -114,6 +115,14 @@ def register_browser_api(app) -> None:
     @_switched
     def browser_jobs(claims):
         return jsonify({"jobs": browser_job.open_jobs()})
+
+    @app.route("/api/browser/jobs/<job_id>", methods=["GET"])
+    @_switched
+    def browser_job_view(job_id, claims):
+        shown = browser_job.view(job_id)
+        if not shown:
+            return jsonify({"error": "not_found", "message": lang.say("fill_gone")}), 404
+        return jsonify(shown)
 
     @app.route("/api/browser/jobs/<job_id>/live", methods=["GET"])
     @_switched
