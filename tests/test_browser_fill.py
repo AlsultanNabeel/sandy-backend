@@ -130,6 +130,14 @@ def world(monkeypatch, brain_db):  # noqa: F811
 
     monkeypatch.setattr(browser_cdp, "connect", connect)
     monkeypatch.setattr(browser_job, "AGENT", agent)
+    # No real model here: what a site answered is read as nothing (`_judged`), unless a test says
+    # what the model answers (`test_browser_fill_truth`). It used to call the real one, slow
+    # enough under load that a yes outlasted `WAIT_S`.
+    from app.brain import background
+
+    def no_model(what, *args, **kwargs):
+        raise RuntimeError(f"no model in tests ({what})")
+    monkeypatch.setattr(background, "call", no_model)
     monkeypatch.setattr(steel_client, "create_session", lambda: w.opened.append(1) or {
         "id": f"st{len(w.opened)}", "debug_url": "https://api.steel.dev/v1/sessions/st1/player"})
 
