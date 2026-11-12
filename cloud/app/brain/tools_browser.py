@@ -72,9 +72,10 @@ STOP_SCHEMAS = [
 ]
 STATUS_SCHEMA: Dict[str, Any] = {
     "name": "fill_status",
-    "description": ("اقري حالة تعبئاته المفتوحة الحقيقية قبل ما تحكي عنها («وين صارت التعبئة؟»، «ليش طوّلت؟»، "
-                    "«how is the form going?»). ما تحكي عن حالة تعبئة إلا من هون أو من page_fill "
-                    "(never say how a fill is going without reading it here)."),
+    "description": ("اقري حالة تعبئاته الحقيقية قبل ما تحكي عنها، المفتوحة أو آخر وحدة انسكّرت وسببها («وين "
+                    "صارت التعبئة؟»، «شو صار بالتعبئة؟»، «how is the form going?»). قولي اللي بترجّعه متل ما هو، "
+                    "وما تحكي عن حالة تعبئة إلا من هون أو من page_fill (never say how a fill is going or how "
+                    "it ended without reading it here, and never guess)."),
     "parameters": {"type": "object", "properties": {}, "required": []},
 }
 # Every tool behind the switch, as offered.
@@ -326,10 +327,13 @@ def _his_name(user_id: str) -> str:
 
 
 def fill_lines(user_id: str) -> str:
-    """His open fills' real states, a line each, read from their rows; or that there is none."""
+    """His open fills' real states, a line each, read from their rows; with none open, what came
+    of his last one and why (kept a day), never a guess; or that there is none."""
     from app.features import browser_job
     rows = [browser_job.get(j["id"]) for j in browser_job.open_jobs()]
     lines = [browser_job.state_line(r) for r in rows if r]
+    if not lines and (last := browser_job.last_job()):
+        lines = [browser_job.state_line(last)]
     return "\n".join(lines) if lines else lang.say("fill_state_none")
 
 

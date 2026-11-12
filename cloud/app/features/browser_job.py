@@ -1329,6 +1329,19 @@ def open_jobs() -> List[Dict[str, Any]]:
             for r in rows]
 
 
+def last_job() -> Optional[Dict[str, Any]]:
+    """His newest fill, open or ended (a row is kept `KEEP`), as `get` reads it; None with none."""
+    coll = _coll()
+    if coll is None:
+        return None
+    try:
+        newest = coll.find_one({}, {"_id": 1}, sort=[("created_at", -1)])
+    except PyMongoError:
+        logger.warning("[browser] could not read his last fill", exc_info=True)
+        return None
+    return get(newest["_id"]) if newest else None
+
+
 def take_over(job_id: str) -> bool:
     """«خليني أكمّل أنا»: the agent stops before its next step and the page is his."""
     row = get(job_id)

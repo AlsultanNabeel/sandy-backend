@@ -192,7 +192,7 @@ One model call with native tools, in a loop, on the blocks. Chat enters at
    What she says of a fill's state stands on a tool that read it (`honesty.fill_state`, since 4 Nov 2026, when she said «في مشكلة
    بالتعبئة» of a fill that was working): a sentence with a word of the fill and one of its state (`fill_state_talk`, both
    languages) and no `page_fill` or `fill_status` in the turn is taken out and the real state, read from the rows by the code
-   (`tools_browser.fill_lines`, `browser_job.state_line`: its steps and the field it is on, `progress`), put in its place.
+   (`tools_browser.fill_lines`, `browser_job.state_line`: its steps and the field it is on, `progress`; with none open, how his last one ended and why, `browser_job.last_job`, since 13 Nov 2026, when «شو صار بالتعبئة؟» after one closed got «يبدو إنه ما تمّت»), put in its place; a state word is also an end one («تمّت»، «انبعت»، «يبدو», «went through», «sent»).
 3c. **The reply is in its message's language** (`lang.py`, `language_guard.py`). A message
    is Arabic when it has a real Arabic word outside a quoted name («ضيفي Nescafe Gold Blend»;
    letters only, `lang.LETTERS`: «؟» or «٢٢» names no language),

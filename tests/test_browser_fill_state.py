@@ -81,3 +81,28 @@ def test_words_about_a_form_that_claim_no_state_are_left_alone(text):
 
 def test_the_progress_lines_come_about_every_twenty_seconds_and_wait_only_twenty_before_going_on():
     assert browser_job.PROGRESS_S == 20 and browser_job.WAIT_S == 20
+
+
+@pytest.mark.parametrize("language, words", [("ar", "ما وصلني جوابك خلال"), ("en", "didn't hear back from you")])
+def test_with_none_open_his_last_fill_is_read_with_how_it_ended_and_why(on, language, words):
+    # 12 Nov: «شو صار بالتعبئة؟» after it closed was answered «يبدو إنه ما تمّت», a guess.
+    _job(on, browser_job.STOPPED, reason="expired")
+    out = _status(language)
+    assert words in out["reply"] and "httpbin.org" in out["reply"]
+
+
+@pytest.mark.parametrize("language, words", [("ar", "انقطعت التعبئة"), ("en", "was cut off")])
+def test_his_newest_fill_is_the_one_read(on, language, words):
+    old = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    _job(on, browser_job.DONE, created_at=old)
+    _job(on, browser_job.FAILED, reason="restart")
+    assert words in _status(language)["reply"]
+
+
+@pytest.mark.parametrize("language, guess, real", [
+    ("ar", "يبدو إنه ما تمّت التعبئة.", "ما وصلني جوابك خلال"),
+    ("en", "It seems the form didn't go through.", "didn't hear back from you")])
+def test_a_guess_of_how_a_closed_fill_ended_is_replaced_by_how_it_did(on, language, guess, real):
+    _job(on, browser_job.STOPPED, reason="expired")
+    state = _turn(ScriptedModel(text_reply(guess)), "شو صار بالتعبئة؟" if language == "ar" else "what happened?")
+    assert guess not in state["final_response"] and real in state["final_response"]

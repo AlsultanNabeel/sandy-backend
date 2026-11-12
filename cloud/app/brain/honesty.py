@@ -173,8 +173,9 @@ def correct(text: str, worked: Iterable[str], results: List[Tuple[str, Dict[str,
 # language (`_norm`ed). On 4 Nov she said «في مشكلة بالتعبئة» of a fill that was working.
 _FILL_WORD = re.compile(r"تعبئه|نموذج|فورم|بعبي|عبيت|\bform\b|\bfill(?:ing)?\b", re.I)
 _STATE_WORD = re.compile(r"مشكله|علقت|عالقه|خلصت|ما زالت|مازالت|لسا|لسه|مفتوحه|فشلت|تاخير|طولت|شغاله|بتشتغل|"
-                         r"واقفه|وقفت|\b(problem|issue|stuck|finished|still|failed|open|running|working|delay(?:ed)?|"
-                         r"taking|hung|stopped)\b", re.I)
+                         r"واقفه|وقفت|تمت|اكتملت|انبعت|انسكرت|انلغت|لغيت|يبدو|\b(problem|issue|stuck|finished|still|failed|open|"
+                         r"running|working|delay(?:ed)?|taking|hung|stopped|seems?|went through|sent|done|"
+                         r"complete(?:d)?|cancell?ed|closed)\b", re.I)
 
 
 def _plain(text: str) -> str:
