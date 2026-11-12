@@ -473,7 +473,7 @@ fill's owner alone, `…/takeover` stops the agent and gives it with `interactiv
 sealed and never logged. The fill to watch is never a link in words (since 4 Nov 2026, when the model's «[هون](sandy://browser/live?job=…).»
 was read with «).» into the id): the tool names it in `ctx.artifacts["live"]` (`tools_browser._watched`), the turn hands `live` ({job}) with the
 reply (`/api/agent`, its stream's `done`), a link the model writes anyway is taken out (`loop._unlinked`), the app keeps it on the message
-(`conversations_api.live_of`, and `say_in(…, live=)` for what a fill says on its own) and shows «خليني أشوف» under it (`ChatBubbleRow`); the
+(`conversations_api.live_of`, and `say_in(…, live=)` for what a fill says on its own) and shows «خليني أشوف» under it (`ChatBubbleRow`); while a fill asked from the conversation on screen is open, and once more as it closes, the chat fetches what she wrote there on her own (`ChatStore.followFills`, every five seconds while the app is in front, and on coming back to it; since 13 Nov 2026, when her question came with the chat open and never showed); the
 view plays Steel's stream with no tap (`BrowserWebView(playsAtOnce:)`: `allowsInlineMediaPlayback`, no media needing a tap; Steel has no autoplay
 option of its own; when iOS still refuses it, as Low Power Mode does, Steel's player shows `#playButton` and the app
 re-fires the video's `canplay` from its own content world, which counts as his gesture: pressing the button instead leaves

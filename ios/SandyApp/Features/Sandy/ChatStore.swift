@@ -116,6 +116,30 @@ final class ChatStore: ObservableObject {
         UserDefaults.standard.set(id, forKey: currentKey)
     }
 
+    /// A fill asked from this conversation was open at the last look: once it closes, what it
+    /// said last is fetched once more.
+    private var followingFill = false
+
+    /// While a fill asked from the conversation on screen is open, what Sandy writes there on her
+    /// own (where it is, its question, how it ended) shows without opening it again; once more
+    /// as it closes. On 12 Nov her question came while the chat was open and never showed.
+    func followFills(api: APIClient) async {
+        guard let id = currentID else { followingFill = false; return }
+        let here = ((try? await api.browserJobs()) ?? []).contains { $0.thread == id }
+        if here || followingFill { await refresh(api: api) }
+        followingFill = here
+    }
+
+    /// The conversation on screen as the server has it, when it has more than is shown and no
+    /// reply of ours is coming (a line still being saved is never dropped).
+    func refresh(api: APIClient) async {
+        guard let id = currentID, !replying, !sending,
+              let r = try? await api.getConversation(id: id),
+              id == currentID, !replying, r.messages.count > messages.count else { return }
+        messages = r.messages
+        saveLines(api, id: id)
+    }
+
     /// A reply still coming belongs to the conversation being left: it stops there and what
     /// arrived is kept in it, as with «stop». Cancelled bare, nothing of it was saved and the
     /// question was left with no answer.

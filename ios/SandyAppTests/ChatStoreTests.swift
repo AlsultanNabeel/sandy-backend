@@ -124,4 +124,34 @@ final class ChatStoreTests: XCTestCase {
         store.startNew(api: api)
         XCTAssertFalse(store.editingLast, "the edit went along to a new conversation")
     }
+
+    /// 12 Nov: a fill's question was written while the chat was open and never showed. While a
+    /// fill asked from this conversation is open, and once more as it closes, the store fetches
+    /// what Sandy wrote there on her own; a fill of another conversation fetches nothing.
+    func testWhatAFillWritesOnItsOwnShowsWhileTheChatIsOpen() async {
+        var open = true
+        var said = [#"{"role":"user","text":"عبّيلي"}"#]
+        StubNetwork.install { request in
+            let path = request.url?.path ?? ""
+            if path == "/api/browser/jobs" {
+                let jobs = open ? #"[{"id":"j1","site":"httpbin.org","status":"held","thread":"c2"},"#
+                    + #"{"id":"j2","site":"x.org","status":"running","thread":"c9"}]"# : "[]"
+                return (200, Data(#"{"jobs":\#(jobs)}"#.utf8))
+            }
+            return (200, Data(#"{"id":"c2","title":"","messages":[\#(said.joined(separator: ","))]}"#.utf8))
+        }
+        let api = TestClient.make()
+        let store = ChatStore()
+        await store.open(api: api, id: "c2")
+        said.append(#"{"role":"sandy","text":"متأكد إنك بدك أبعت؟ (اه/لأ)"}"#)
+        await store.followFills(api: api)
+        XCTAssertEqual(store.messages.last?.text, "متأكد إنك بدك أبعت؟ (اه/لأ)")
+        open = false
+        said.append(#"{"role":"sandy","text":"لغيت التعبئة"}"#)
+        await store.followFills(api: api)
+        XCTAssertEqual(store.messages.last?.text, "لغيت التعبئة", "its last word as it closed")
+        said.append(#"{"role":"sandy","text":"بعدها"}"#)
+        await store.followFills(api: api)
+        XCTAssertEqual(store.messages.count, 3, "no fill open here: nothing fetched")
+    }
 }

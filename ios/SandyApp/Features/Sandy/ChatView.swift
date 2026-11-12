@@ -16,6 +16,7 @@ import SwiftUI
 struct ChatView: View {
     @EnvironmentObject var state: AppState
     @EnvironmentObject var lang: LanguageManager
+    @Environment(\.scenePhase) private var scenePhase
 
     /// مصدر الحقيقة للمحادثة: الرسائل + الإرسال + الحفظ + سجل السيشنات، مستقل عن
     /// دورة حياة الشاشة (التنقّل بين التبويبات ما يمسح المحادثة، وتُحفظ تلقائيًا).
@@ -95,6 +96,16 @@ struct ChatView: View {
             }
         }
         .task { await store.bootstrap(api: state.api) }
+        // What a fill asked from here writes on its own shows while the chat is open.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                if scenePhase == .active { await store.followFills(api: state.api) }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { Task { await store.refresh(api: state.api) } }
+        }
         // An edit ended by opening another conversation takes its line out of the field too.
         .onChange(of: store.editingLast) { _, editing in if !editing { input = "" } }
         // نوقف صوت ساندي عند مغادرة الشاشة.

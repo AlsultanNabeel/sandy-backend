@@ -34,6 +34,8 @@ struct BrowserJob: Decodable, Identifiable, Hashable {
     let id: String
     let site: String
     let status: String
+    /// The conversation it was asked from.
+    var thread: String?
 }
 
 /// Steel's view of a fill: to watch, or (`control`) to drive.
