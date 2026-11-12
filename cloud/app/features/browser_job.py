@@ -1109,6 +1109,19 @@ def _label(node) -> str:
     return str(attrs.get("name") or attrs.get("id") or attrs.get("aria-label") or getattr(node, "tag_name", ""))
 
 
+# A value refused as not his: said to the agent as a result, never an error. browser-use drops
+# the rest of a step's actions after an error (`Agent.multi_act`), so on 12 Nov one refused
+# telephone made every step one action, and the model typed it again six steps running.
+NOT_HIS_RESULT = {"extracted_content": ("Not done: the user never gave a value for this field, so it stays "
+                                        "empty and he is asked for it. Do not type in it again; go on with "
+                                        "the other fields."),
+                  "include_in_memory": True}
+# The agent's own limits: several actions a step (browser-use's default, said here), and the
+# failures it may make in a row.
+MAX_ACTIONS = 5
+AGENT_LIMITS = {"max_actions_per_step": MAX_ACTIONS, "max_failures": 3}
+
+
 async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, asked: Dict[str, Any]) -> Dict[str, Any]:
     """browser-use's agent on the session, our model, the site's own domains, no frame of
     another site, stopped before any action that sends (``asked``) and before a step when it must."""
@@ -1148,8 +1161,7 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
                 if why:
                     gate.refused.append(why)
                     _note("browser_refused", {"site": site, "field": why["field"], "why": why["why"]}, ok=False)
-                    return ActionResult(error=("Not done: the user never gave this value. Leave this field as "
-                                               "it is and go on; he is asked for it."))
+                    return ActionResult(**NOT_HIS_RESULT)
                 if name in ("click", "send_keys"):
                     # What he filled, read before the page answers (`_hold`).
                     gate.filled = await _filled_now(client, tab)
@@ -1229,7 +1241,7 @@ async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, aske
                   browser_session=session, tools=_Asking(exclude_actions=list(EXCLUDED)), use_vision="auto",
                   use_judge=False, enable_planning=False, register_should_stop_callback=should_stop,
                   register_new_step_callback=on_step, step_timeout=STEP_S + 5,
-                  max_failures=3, directly_open_url=False)
+                  directly_open_url=False, **AGENT_LIMITS)
     run = asyncio.ensure_future(agent.run(max_steps=MAX_STEPS))
 
     async def stuck() -> None:
