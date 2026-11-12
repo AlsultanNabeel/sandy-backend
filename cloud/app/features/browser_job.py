@@ -74,7 +74,7 @@ LOAD_S = 20
 # The agent's actions a fill never needs: scripts of its own, files, other sites, searches.
 EXCLUDED = ("evaluate", "navigate", "search", "read_file", "replace_file", "write_file", "save_as_pdf",
             "upload_file", "close")
-_SEALED = ("summary", "why", "live", "values", "asked")
+_SEALED = ("summary", "why", "live", "values", "asked", "said")
 # Every field of the page as it is filled, read back from it: its name, its value (the options
 # ticked of a group, the one picked of a list) and whether it is required; never a password or a
 # hidden field.
@@ -291,8 +291,10 @@ def start(args: Dict[str, Any], *, user_id: str, thread_id: str, language: str,
         except PyMongoError:
             logger.warning("[browser] could not drop a fill that never began", exc_info=True)
         raise
+    said = [str(m) for m in said if m]
     _save(job_id, steel_id=session["id"], live=session["debug_url"],
-          values=json.dumps(fill_values.his_values(said, name), ensure_ascii=False))
+          values=json.dumps(fill_values.his_values(said, name), ensure_ascii=False),
+          said=json.dumps([*said, *([f"name: {name}"] if name else [])], ensure_ascii=False))
     _on_pool(job_id, user_id)
     return job_id
 
@@ -684,15 +686,21 @@ async def _drive(row: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             outcome = {"status": FAILED, "reason": "orders"}
             return outcome
         left = float(RUN_S)
-        waiting = False
+        waiting, fast = False, True
         while True:
             if not waiting:
                 watch = asyncio.ensure_future(_watching(row["_id"], user_id, stopped))
                 told = asyncio.ensure_future(_progressing(row["_id"]))
                 began = time.monotonic()
                 try:
-                    # Its own work: `RUN_S` in all, however often he hands the page back.
-                    outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped, left)
+                    # Its own work: `RUN_S` in all, however often he hands the page back. The form
+                    # read and filled at once first; the agent for what that does not take.
+                    outcome = await _first(FAST(row, gate, client, tab, user_id, asked), stopped, left) \
+                        if fast else None
+                    fast = False
+                    if outcome is None and not asked and not stopped.is_set():
+                        outcome = await _first(AGENT(row, gate, client, tab, user_id, asked), stopped,
+                                               left - (time.monotonic() - began))
                 finally:
                     left -= time.monotonic() - began
                     watch.cancel()
@@ -1120,6 +1128,109 @@ NOT_HIS_RESULT = {"extracted_content": ("Not done: the user never gave a value f
 # failures it may make in a row.
 MAX_ACTIONS = 5
 AGENT_LIMITS = {"max_actions_per_step": MAX_ACTIONS, "max_failures": 3}
+# How often a choice may show new fields before the form is left to the agent.
+FAST_ROUNDS = 3
+
+
+async def _fast(row: Dict[str, Any], gate, client, tab: str, user_id: str, asked: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The form read once and filled at once (`brain/form_map`): its fields read by the code, the
+    model's table of his values checked by the code, every field filled in one go under the gate,
+    the fields read again for what a choice showed, then the send button asked of him as the
+    agent's click is (``asked``: `_hold` asks the required empty fields first, then the question).
+    None when the form is not one it takes, or its reading fails: the agent does it."""
+    from app.brain import form_map
+    from app.integrations import browser_cdp
+    from app.integrations.browser_cdp import within
+    site = row["site"]
+    began = time.monotonic()
+    markup = str(await browser_cdp.evaluate(client, tab, form_map.FIELDS_JS) or "")
+    form = form_map.read(markup)
+    if form["form"] is None or form["hard"]:
+        _note("browser_fast_skip", {"site": site, "why": form["hard"]})
+        return None
+    found = await within(client.send.Runtime.evaluate(params={"expression": form_map.form_js(form["form"])},
+                                                      session_id=tab))
+    the_form = (found.get("result") or {}).get("objectId")
+    if not the_form:
+        _note("browser_fast_skip", {"site": site, "why": "gone"})
+        return None
+    values = json.loads(row.get("values") or "[]")
+    words = json.loads(row.get("said") or "[]")
+    fields, pending = form["fields"], form["fields"]
+    for _ in range(FAST_ROUNDS):
+        rows = await asyncio.to_thread(_mapped, pending, str(row.get("goal") or ""), words, user_id)
+        if rows is None:
+            _note("browser_fast_skip", {"site": site, "why": "model"})
+            return None
+        plan = form_map.checked(pending, rows, values)
+        for why in plan["refused"]:
+            gate.refused.append(why)
+            _note("browser_refused", {"site": site, "field": why["field"], "why": why["why"]}, ok=False)
+        labels = {f["key"]: f["label"] or f["key"] for f in pending}
+        for op in plan["ops"]:
+            await _put(client, tab, gate, the_form, op, labels[op["key"]])
+            _save(row["_id"], progress={"steps": 0, "field": labels[op["key"]]})
+        # What a choice showed is read and filled too, before anything is asked.
+        again = form_map.read(str(await browser_cdp.evaluate(client, tab, form_map.FIELDS_JS) or ""))
+        if again["form"] != form["form"] or again["hard"]:
+            _note("browser_fast_skip", {"site": site, "why": again["hard"] or "changed"})
+            return None
+        pending = form_map.new_fields(fields, again["fields"])
+        fields = again["fields"]
+        if not pending:
+            break
+    else:
+        _note("browser_fast_skip", {"site": site, "why": "rounds"})
+        return None
+    sent = await within(client.send.Runtime.callFunctionOn(params={
+        "functionDeclaration": form_map.SEND_OF_JS, "objectId": the_form}, session_id=tab))
+    button = (sent.get("result") or {}).get("objectId")
+    node = await _node_of(client, tab, button)
+    if node is None:
+        _note("browser_fast_skip", {"site": site, "why": "no_send"})
+        return None
+    label = form_map.button_label(markup, form["form"]) or "submit"
+    asked.update(kind="click", target="", node=node, session=tab, label=label, filled=await _filled_now(client, tab))
+    _note("browser_fast", {"site": site, "fields": len(fields), "ms": int((time.monotonic() - began) * 1000)})
+    _note("browser_asked", {"site": site, "element": label})
+    return {"status": DONE}
+
+
+def _mapped(fields: List[Dict[str, Any]], goal: str, words: List[str], user_id: str) -> Optional[List[Dict[str, str]]]:
+    """The model's table of which of his values goes to which field; None when it cannot be read."""
+    from app.brain import background, form_map
+    try:
+        answer = background.call("form_map", form_map.asked_of_model(fields, goal, words), priority=background.DIRECT,
+                                 user_id=user_id, max_tokens=800, temperature=0, response_format=form_map.SCHEMA)
+        return form_map.table(str(answer.choices[0].message.content or ""))
+    except _READING_ERRORS as exc:
+        logger.warning("[browser] a form's table could not be read: %s", type(exc).__name__)
+        return None
+
+
+async def _node_of(client, session: str, object_id: Optional[str]) -> Optional[int]:
+    from app.integrations.browser_cdp import within
+    if not object_id:
+        return None
+    node = (await within(client.send.DOM.describeNode(params={"objectId": object_id}, session_id=session))).get("node")
+    return (node or {}).get("backendNodeId")
+
+
+async def _put(client, session: str, gate, the_form: str, op: Dict[str, Any], label: str) -> None:
+    """One field filled as a person would, the gate told first what is written and where."""
+    from app.brain import form_map
+    from app.integrations.browser_cdp import within
+    found = await within(client.send.Runtime.callFunctionOn(params={
+        "functionDeclaration": form_map.FIELD_OF_JS, "objectId": the_form, "arguments": [{"value": op["key"]}]},
+        session_id=session))
+    node = await _node_of(client, session, (found.get("result") or {}).get("objectId"))
+    kind = form_map.kinds_for_gate(op)
+    gate.at = gate.last_field = label
+    gate.acted(kind, form_map.said(op), target="", node=node)
+    _note("browser_select" if kind == "select" else "browser_type", {"field": label})
+    await within(client.send.Runtime.callFunctionOn(params={
+        "functionDeclaration": form_map.SET_JS, "objectId": the_form, "arguments": [{"value": op}],
+        "returnByValue": True}, session_id=session))
 
 
 async def _agent(row: Dict[str, Any], gate, client, tab: str, user_id: str, asked: Dict[str, Any]) -> Dict[str, Any]:
@@ -1286,6 +1397,7 @@ def _spent(row: Dict[str, Any]) -> float:
 
 # The fill itself, a seam the tests replace.
 AGENT = _agent
+FAST = _fast
 
 
 def submit(job_id: str) -> Optional[Dict[str, Any]]:

@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="en"><head></head><body>
+<form action="/signup" method="post">
+  <section class="step">
+    <label for="n">Name</label> <input id="n" name="name" required>
+    <button type="button" class="next">Next</button>
+  </section>
+  <section class="step" style="display:none">
+    <label for="e">Email</label> <input id="e" name="email" type="email" required data-sandy-hidden="1">
+    <div role="combobox" aria-label="Country" tabindex="0">Pick a country</div>
+    <button type="submit" data-sandy-hidden="1">Finish</button>
+  </section>
+</form>
+</body></html>

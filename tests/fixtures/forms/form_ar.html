@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"></head><body>
+<h1>طلب انتساب</h1>
+<form action="/join" method="post">
+  <label for="fullname">الاسم الكامل</label> <input id="fullname" name="fullname" required>
+  <label for="mobile">رقم الجوال</label> <input id="mobile" name="mobile" type="tel">
+  <label for="city">المدينة</label>
+  <select id="city" name="city">
+    <option value="">اختر</option><option value="cairo">القاهرة</option><option value="giza">الجيزة</option>
+    <option value="alex">الإسكندرية</option>
+  </select>
+  <fieldset><legend>الدوام</legend>
+    <label><input type="radio" name="shift" value="am"> صباحي</label>
+    <label><input type="radio" name="shift" value="pm"> مسائي</label>
+  </fieldset>
+  <label for="notes">ملاحظات</label> <textarea id="notes" name="notes"></textarea>
+  <input type="hidden" name="token" value="x1">
+  <button type="submit">إرسال</button>
+</form>
+</body></html>
