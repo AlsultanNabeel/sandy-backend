@@ -382,11 +382,14 @@ def sweep() -> int:
         logger.warning("[browser] the sweep could not read", exc_info=True)
         return 0
     for r in rows:
-        if r.get("status") in _HOLDING:
-            db[COLLECTION].update_one({"_id": r["_id"], "status": r["status"]},
-                                      {"$set": {"status": FAILED, "reason": "lost", "updated_at": now}})
+        lost = r.get("status") in _HOLDING and db[COLLECTION].update_one(
+            {"_id": r["_id"], "status": r["status"]},
+            {"$set": {"status": FAILED, "reason": "lost", "updated_at": now}}).modified_count
         with trace_store.background(str(r.get("user_id") or ""), "browser_sweep", keep=True):
             _release(r)
+        if lost:
+            # Its holder died with it: no one else tells him.
+            _tell_as(str(r.get("user_id") or ""), r["_id"])
     return len(rows)
 
 
@@ -450,6 +453,9 @@ def close_held() -> int:
                 done += 1
             else:
                 logger.warning("[browser] session %s did not close before the process ended", steel_id)
+        if time.monotonic() < ends:
+            # The fill dies with the process: told where he asked, before it goes.
+            _tell_as(h["user_id"], row["_id"])
     if held:
         logger.info("[browser] %d of %d open session(s) closed before the process ended", done, len(held))
     return done
@@ -1392,6 +1398,21 @@ def _forget_question(row: Optional[Dict[str, Any]]) -> None:
         pending.save(thread, uid, get_db(), confirm.following(held))
 
 
+def _tell_as(user_id: str, job_id: str) -> None:
+    """A fill that ended away from his request (a restart, a holder gone) told in his chat, as
+    he is: from a thread or a signal handler that has no tenant of its own."""
+    from app.utils.user_profiles import active_user_profile_context
+    if not user_id:
+        return
+    with active_user_profile_context({"chat_id": user_id, "permissions": "all", "relation": "user"}):
+        row = get(job_id)
+        if row and row.get("thread_id"):
+            try:
+                _tell(row)
+            except (PyMongoError, RuntimeError, OSError):
+                logger.warning("[browser] a fill's end was not told", exc_info=True)
+
+
 def _tell(row: Dict[str, Any]) -> None:
     """A detached fill tells him what came of it in the chat he asked from (its question there,
     which his next message answers, or its result) and on his phone; never as a task's result."""
@@ -1469,6 +1490,8 @@ def told(row: Dict[str, Any]) -> str:
         if row.get("http"):
             return lang.say("fill_site_refused", site=site, code=lang.number(row["http"]))
         return lang.say("fill_site_refused_plain", site=site)
+    if reason in ("restart", "lost"):
+        return lang.say(f"fill_{reason}", site=site)
     if reason == "slow":
         return lang.say("fill_slow", site=site, minutes=lang.number(RUN_S // 60))
     if reason == "step_slow":

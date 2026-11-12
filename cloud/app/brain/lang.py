@@ -641,6 +641,14 @@ PHRASES = {
     "fill_slow": {"ar": "ما خلصت التعبئة على {site}: أخدت أكتر من {minutes} دقايق، فوقّفتها وسكّرت الصفحة. ما انبعت شي.",
                   "en": "I didn't finish the form on {site}: it took longer than {minutes} minutes, so I stopped "
                         "and closed the page. Nothing was sent."},
+    "fill_restart": {"ar": "انقطعت التعبئة على {site}: السيرفر عم يعيد تشغيله، فسكّرت الصفحة. ما انبعت شي. "
+                           "قلّي وبعبّيها من جديد.",
+                     "en": "The form on {site} was cut off: the server is restarting, so I closed the page. "
+                           "Nothing was sent. Tell me and I'll fill it again."},
+    "fill_lost": {"ar": "انقطعت التعبئة على {site}: الشغل اللي كان ماسكها وقف، فسكّرت الصفحة. ما انبعت شي. "
+                        "قلّي وبعبّيها من جديد.",
+                  "en": "The form on {site} was cut off: the work holding it stopped, so I closed the page. "
+                        "Nothing was sent. Tell me and I'll fill it again."},
     "fill_step_slow": {"ar": "ما خلصت التعبئة على {site}: خطوة علقت أكتر من {seconds} ثانية، فوقّفتها وسكّرت "
                              "الصفحة. ما انبعت شي.",
                        "en": "I didn't finish the form on {site}: a step got stuck for more than {seconds} "
