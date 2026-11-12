@@ -18,6 +18,16 @@ struct BrowserWebView: UIViewRepresentable {
         if playsAtOnce {
             config.allowsInlineMediaPlayback = true
             config.mediaTypesRequiringUserActionForPlayback = []
+            // Low Power Mode refuses even a muted autoplay (seen on iOS 27, 12 Nov 2026): Steel's
+            // player then waits for its own «Play Video», and unpressed it gives up as «Browser
+            // Disconnected». The app starts it for him, from a world of its own: what the app does
+            // counts as his. Not by pressing the button: after that press the player draws its
+            // first frame and then covers it with «Connecting…» for good. The video's «canplay»
+            // once more takes it down its usual way, which takes the cover off.
+            let world = WKContentWorld.defaultClient
+            config.userContentController.add(context.coordinator, contentWorld: world, name: Coordinator.blocked)
+            config.userContentController.addUserScript(WKUserScript(
+                source: Coordinator.watchForPlay, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world))
         }
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
@@ -33,15 +43,30 @@ struct BrowserWebView: UIViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         weak var view: WKWebView?
         var loaded: URL?
         let onLoad: ((WKWebView) -> Void)?
+
+        /// Steel's player shows `#playButton` when its autoplay was refused; told once per button.
+        static let blocked = "autoplayBlocked"
+        static let watchForPlay = """
+        (() => { const told = new WeakSet();
+          const look = () => { const b = document.getElementById("playButton");
+            if (b && !told.has(b)) { told.add(b); window.webkit.messageHandlers.\(blocked).postMessage(1); } };
+          new MutationObserver(look).observe(document.documentElement, { childList: true, subtree: true });
+          look(); })();
+        """
 
         init(onLoad: ((WKWebView) -> Void)?) { self.onLoad = onLoad }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
             onLoad?(webView)
+        }
+
+        func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+            view?.callAsyncJavaScript("document.querySelector('video')?.dispatchEvent(new Event('canplay'))",
+                                      arguments: [:], in: nil, in: .defaultClient)
         }
     }
 }

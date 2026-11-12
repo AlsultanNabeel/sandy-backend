@@ -475,7 +475,9 @@ was read with «).» into the id): the tool names it in `ctx.artifacts["live"]` 
 reply (`/api/agent`, its stream's `done`), a link the model writes anyway is taken out (`loop._unlinked`), the app keeps it on the message
 (`conversations_api.live_of`, and `say_in(…, live=)` for what a fill says on its own) and shows «خليني أشوف» under it (`ChatBubbleRow`); the
 view plays Steel's stream with no tap (`BrowserWebView(playsAtOnce:)`: `allowsInlineMediaPlayback`, no media needing a tap; Steel has no autoplay
-option of its own) and, every five seconds while shown, gives way to a line and «رجوع» once the fill is no longer open (`LiveBrowserView`). *Emergency stop* (`features/stop_all.py`, `sandy_users.stopped_at`, forgotten
+option of its own; when iOS still refuses it, as Low Power Mode does, Steel's player shows `#playButton` and the app
+re-fires the video's `canplay` from its own content world, which counts as his gesture: pressing the button instead leaves
+Steel's «Connecting…» cover on for good) and, every five seconds while shown, gives way to a line and «رجوع» once the fill is no longer open (`LiveBrowserView`). *Emergency stop* (`features/stop_all.py`, `sandy_users.stopped_at`, forgotten
 by a reset): «وقّفي كل شي» by talk, the call or the app (`/api/stop`) stops every task (no run, no
 failure) and every fill (`browser_job.stop_for`; the step a fill's agent is on is cut at once, `_watching`, as by his «no»
 or his taking over), the browser's tools refuse, reminders still ring;
