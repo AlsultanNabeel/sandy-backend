@@ -45,7 +45,11 @@ def with_step(held: Optional[Dict[str, Any]], name: str, args: Dict[str, Any],
 
 
 def question(summary: str) -> str:
-    return lang.say("confirm_question", summary=summary)
+    """«متأكد إنك بدك …؟ (اه/لأ)» of the summary's first line; its other lines (a fill's «I left
+    this empty, tell me what to put») said before it, so the question is one sentence and last."""
+    first, *notes = [line for line in str(summary).split("\n") if line.strip()] or [""]
+    asked = lang.say("confirm_question", summary=first.strip().rstrip(".،,;:!؟? "))
+    return "\n".join([*notes, asked])
 
 
 # ── one question at a time ──────────────────────────────────────────────────

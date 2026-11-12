@@ -139,3 +139,15 @@ def test_a_fill_said_done_while_its_tool_reads_it_running_is_replaced(on, langua
     state = _turn(ScriptedModel(tools_reply(call("fill_status")), text_reply(claim)),
                   "وين صارت؟" if language == "ar" else "where is it?")
     assert claim not in state["final_response"] and real in state["final_response"]
+
+
+@pytest.mark.parametrize("language", ["ar", "en"])
+def test_a_fills_question_is_one_sentence_last_with_its_note_before_it(language):
+    # 12 Nov: «…قلّي شو أحط، أو قلّي اتركه.؟ (اه/لأ)».
+    from app.brain import confirm, fill_values
+    with lang.using(language):
+        note = fill_values.asked([{"field": "Telephone"}])
+        q = confirm.question(lang.say("fill_summary", site="httpbin.org", fields="Customer name: Nabeel") + "\n" + note)
+    first, last = q.split("\n")
+    assert first == note and last.endswith("(اه/لأ)" if language == "ar" else "(yes/no)")
+    assert ".؟" not in q and ".?" not in q and "Nabeel" in last
