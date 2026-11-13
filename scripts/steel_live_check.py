@@ -4,6 +4,7 @@ other sites, the page's own scripts doing what a hostile page would).
 
     ~/sandy_app_venv/bin/python scripts/steel_live_check.py            # gate, real click, live view
     ~/sandy_app_venv/bin/python scripts/steel_live_check.py --fill     # and a whole fill, real model
+    ~/sandy_app_venv/bin/python scripts/steel_live_check.py --timed fast   # one timed fill alone (or agent)
 
 Needs `STEEL_API_KEY` in `.env` (and the chat model's settings for `--fill`). It costs a few cents
 of Steel time and, with `--fill`, a few model calls. It prints what each check found and never
@@ -375,7 +376,7 @@ def leaking_fill() -> list:
     browser_cdp.connect, steel_client.release = watched, releasing
     try:
         with active_user_profile_context(_world()):
-            browser_sites.set_level("httpbin.org", browser_sites.SUBMIT)
+            browser_sites.set_level("httpbin.org", browser_sites.SUBMIT, hand=browser_sites.Hand({"role": "user", "user_id": "live"}))
             out = tools.execute("page_fill", {"url": FORM, "goal": "order", "details": f"email: {EMAIL}"},
                                 TurnCtx(user_id="live", thread_id="t1"))
             row = (browser_job.open_jobs() or [{}])[0]
@@ -444,7 +445,7 @@ def cut_fill() -> list:
     out = {}
     try:
         with active_user_profile_context(_world()):
-            browser_sites.set_level("httpbin.org", browser_sites.SUBMIT)
+            browser_sites.set_level("httpbin.org", browser_sites.SUBMIT, hand=browser_sites.Hand({"role": "user", "user_id": "live"}))
 
             def fill():
                 with active_user_profile_context(_world_profile()):
@@ -500,7 +501,7 @@ def whole_fill() -> bool:
     # check reads its question rather than its going on in the background.
     browser_job.WAIT_S = 240
     with active_user_profile_context(_world()):
-        browser_sites.set_level("httpbin.org", browser_sites.SUBMIT)
+        browser_sites.set_level("httpbin.org", browser_sites.SUBMIT, hand=browser_sites.Hand({"role": "user", "user_id": "live"}))
         began = time.monotonic()
         asked = tools.execute("page_fill", {"url": FORM, "goal": "order a small pizza for pickup",
                                             "details": f"Name: Sandy Test, phone: 000, email: {EMAIL}"},
@@ -519,11 +520,56 @@ def whole_fill() -> bool:
                       (sent.get("reply") or "")[:120])
 
 
+def timed_fill(way: str) -> dict:
+    """One fill of httpbin's form on the real model and Steel, ``way`` «fast» (the form read and
+    filled at once) or «agent» (browser-use alone): the seconds to its question, what it asked,
+    its cost; then let go, its session closed, nothing sent."""
+    from app.brain import tools
+    from app.brain.ctx import TurnCtx
+    from app.db import get_db
+    from app.features import browser_job, browser_sites, trace_store
+    from app.utils.user_profiles import active_user_profile_context
+
+    browser_job.WAIT_S = 240
+    if way == "agent":
+        async def no_fast(*args):
+            return None
+        browser_job.FAST = no_fast
+    said = f"عبّيلي النموذج على {FORM}، الاسم Sandy Test، الإيميل {EMAIL}، الحجم Small"
+    with active_user_profile_context(_world()):
+        browser_sites.set_level("httpbin.org", browser_sites.SUBMIT, hand=browser_sites.Hand({"role": "user", "user_id": "live"}))
+        began = time.monotonic()
+        asked = tools.execute("page_fill", {"url": FORM, "goal": "order a small pizza", "details": ""},
+                              TurnCtx(user_id="live", thread_id="t1", message=said))
+        seconds = time.monotonic() - began
+        job = (asked.get("ids") or [asked.get("job")])[0]
+        row = browser_job.get(job) if job else {}
+        if row and row.get("status") == browser_job.HELD:
+            browser_job.let_go(job)
+        browser_job.wait(job, 30, waiting=browser_job.OPEN) if job else None
+        row = browser_job.get(job) if job else {}
+        steel = _status(row["steel_id"]) if row.get("steel_id") else "none"
+        # Its trace is written once its thread ends, after the session closed.
+        ends = time.monotonic() + 30
+        while time.monotonic() < ends and not get_db()[trace_store.COLLECTION].count_documents({"routed_by": "browser_fill"}):
+            time.sleep(0.5)
+        traces = list(get_db()[trace_store.COLLECTION].find({"routed_by": "browser_fill"}))
+        cost = sum(float(t.get("cost_usd") or 0) for t in traces)
+        get_db()[trace_store.COLLECTION].delete_many({})
+        get_db()[browser_job.COLLECTION].delete_many({})
+    print(f"      {way}: {seconds:.1f}s to the question; asked={bool(asked.get('needs_confirmation'))}; "
+          f"steel={steel}; cost=${cost:.4f}")
+    print(f"      {(asked.get('summary') or asked.get('reply') or '')[:200]}")
+    return {"way": way, "seconds": seconds, "asked": bool(asked.get("needs_confirmation")), "steel": steel,
+            "cost": cost}
+
+
 def main() -> int:
     from dotenv import load_dotenv
     load_dotenv(ROOT / ".env", override=True)
     parser = argparse.ArgumentParser()
     parser.add_argument("--fill", action="store_true")
+    parser.add_argument("--timed", choices=["fast", "agent"], help="one timed fill of httpbin's form, nothing else")
     args = parser.parse_args()
 
     from app.bootstrap import configure_logging
@@ -535,6 +581,9 @@ def main() -> int:
     if not steel_client.configured():
         print("no STEEL_API_KEY")
         return 2
+    if args.timed:
+        out = timed_fill(args.timed)
+        return 0 if out["asked"] and out["steel"] in ("released", "closed", "ended") else 1
     results = []
     session = steel_client.create_session()
     began = time.monotonic()
